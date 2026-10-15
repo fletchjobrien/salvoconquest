@@ -1,5 +1,5 @@
 // Crisp 2D tactical overlay drawn over the pixelated world: symbols, contacts, rings, orders.
-import { BUILDINGS, MODULES, UNITS, UNIT_TYPES, UNLOAD_RANGE, UnitType } from '../../shared/defs';
+import { BUILDINGS, MODULES, UNITS, UNIT_TYPES, UNLOAD_RANGE, UnitType, deriveStats } from '../../shared/defs';
 import { ORDER_CODES, F_RETREAT, F_LANDED } from '../../shared/protocol';
 import type { Renderer, CameraRig } from './renderer';
 import type { World, UView } from '../state';
@@ -24,6 +24,7 @@ export interface OverlayView {
   mode: { k: 'unload'; ship: number; ids: number[] } | null;
   mouse: { x: number; y: number; wx: number; wy: number; valid: boolean };
   showRanges: boolean;
+  showSensors: boolean;
   /** Storm intensity at the camera, 0..1. */
   rain: number;
   pings: { x: number; y: number; t: number; color: string; kind: 'move' | 'attack' | 'unload' }[];
@@ -60,7 +61,7 @@ interface Floater {
 }
 
 export class Overlay {
-  readonly ctx: CanvasRenderingContext2D;
+  ctx: CanvasRenderingContext2D;
   shocks: Shock[] = [];
   floaters: Floater[] = [];
   private selPulse = new Map<number, number>();
@@ -135,6 +136,8 @@ export class Overlay {
     this.drawGrid(v, zoomedOut);
     this.drawWeather(v, zoomedOut);
     this.drawIslandLabels(v, dist);
+
+    if (v.showSensors) this.drawSensors(v);
 
     // ---- range rings & orders for selection ----
     for (const id of v.selected) {
@@ -611,6 +614,62 @@ export class Overlay {
   private homeName(w: World, slot: number): string {
     const p = w.players.find((p) => p.slot === slot);
     return p ? `${p.name}` : 'UNCLAIMED';
+  }
+
+  /** Own radar (cyan) and sonar (violet) coverage as soft filled discs, DEFCON style. */
+  private drawSensors(v: OverlayView) {
+    const w = v.world;
+    const ctx = this.ctx;
+    const fac = w.myFaction;
+    const discs: { x: number; y: number; r: number; sonar: boolean }[] = [];
+    for (const u of w.units.values()) {
+      if (u.owner !== w.me || u.flags & F_LANDED) continue;
+      const st = deriveStats(u.type, fac, matchLoadoutOf(u.type));
+      const radar = Math.max(st.radarAir, st.radarSurf);
+      if (radar > 0) discs.push({ x: u.x, y: u.y, r: radar, sonar: false });
+      if (st.sonar > 0) discs.push({ x: u.x, y: u.y, r: st.sonar, sonar: true });
+    }
+    for (const s of w.map.sites) {
+      if (w.sites[s.id].owner !== w.me) continue;
+      const b = BUILDINGS[s.type];
+      const r = Math.max(b.radarAir, b.radarSurf);
+      if (r > 0) discs.push({ x: s.x, y: s.y, r, sonar: false });
+    }
+    // Union of discs: paint opaque into a scratch layer, then composite once at low alpha.
+    const layer = this.layer();
+    const real = this.ctx;
+    for (const sonar of [false, true]) {
+      layer.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+      layer.ctx.clearRect(0, 0, this.w, this.h);
+      this.ctx = layer.ctx;
+      layer.ctx.fillStyle = sonar ? '#a08cff' : '#6fd0ff';
+      for (const d of discs) if (d.sonar === sonar && this.circle(v, d.x, d.y, d.r, 0, 64)) layer.ctx.fill();
+      this.ctx = real;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalAlpha = sonar ? 0.12 : 0.07;
+      ctx.drawImage(layer.canvas, 0, 0);
+      ctx.globalAlpha = 1;
+      ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    }
+    ctx.lineWidth = 1;
+    for (const d of discs) {
+      ctx.strokeStyle = d.sonar ? 'rgba(160,140,255,0.3)' : 'rgba(111,208,255,0.16)';
+      if (this.circle(v, d.x, d.y, d.r, 0, 64)) ctx.stroke();
+    }
+  }
+
+  private scratch: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } | null = null;
+  private layer() {
+    if (!this.scratch) {
+      const canvas = document.createElement('canvas');
+      this.scratch = { canvas, ctx: canvas.getContext('2d')! };
+    }
+    const sc = this.scratch;
+    if (sc.canvas.width !== this.canvas.width || sc.canvas.height !== this.canvas.height) {
+      sc.canvas.width = this.canvas.width;
+      sc.canvas.height = this.canvas.height;
+    }
+    return sc;
   }
 
   private drawRanges(v: OverlayView, u: UView, alpha: number) {

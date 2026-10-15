@@ -134,10 +134,12 @@ export class GameScene {
       root.position.set(u.x, y3, u.y);
       root.rotation.set(0, -u.h, 0, 'YXZ');
       if (dom === 'sea') {
+        // Ships pitch and roll harder in heavy weather.
         const t = this.time + o.phase;
-        root.rotation.z = Math.sin(t * 0.9) * 0.025;
-        root.rotation.x = Math.sin(t * 0.7) * 0.03;
-        root.position.y = Math.sin(t * 1.1) * 0.004;
+        const heave = 1 + this.weatherAt(u.x, u.y).storm * 4;
+        root.rotation.z = Math.sin(t * 0.9) * 0.025 * heave;
+        root.rotation.x = Math.sin(t * 0.7) * 0.03 * heave;
+        root.position.y = Math.sin(t * 1.1) * 0.004 * heave;
       } else if (dom === 'sub') {
         root.position.y = -0.012;
       } else if (dom === 'air') {

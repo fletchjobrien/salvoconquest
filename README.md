@@ -4,6 +4,8 @@ A minimalist, multiplayer, browser-based RTS about near-future littoral combat i
 It mixes a casual take on *Sea Power* naval warfare with *WARNO*-style ground and air support,
 drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
 
+![Fleet engagement](docs/battle.png)
+
 - **Runs on one Cloudflare Worker.** Static client from Workers Static Assets, one Durable Object per room runs the authoritative simulation.
 - **Play offline vs AI** in the browser (the same simulation runs locally), or **create a room** and send the link to friends.
 
@@ -18,7 +20,8 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
 | U | Unload troops: a ring shows the landing range, click land inside it |
 | M / R / T / S | Drop mines · aircraft return to base · toggle auto-retreat · stop |
 | Ctrl+1–9 / 1–9 | Save / recall group (press twice to jump the camera) |
-| Tab | Show weapon ranges · Space jumps to last alert · F1 field manual · Esc menu |
+| Tab / V | Show weapon ranges / toggle radar and sonar coverage |
+| Space · Enter · F1 · Esc | Jump to last alert · chat (online) · field manual · menu |
 
 **Goal:** capture the enemy **HQ**, or hold 75% of all resource sites for 3 minutes.
 
@@ -35,6 +38,8 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
 
 ### Sensors and fog of war
 
+![Strategic view with radar contacts, storms and fog](docs/strategic.png)
+
 Radar (surface and air), sonar (submarines only) and eyesight. Far-away or poor-quality detections show as a
 **radar contact**: a marker at a *random point* within the error radius of the true position, with a dashed ring
 showing where the real unit could be. Each new radar sweep picks a new point; as you close in, the ring shrinks until
@@ -47,6 +52,8 @@ invisible until a sonar hears them, and they reveal themselves briefly when they
 - **Pacific Union** (PRC-like): hulls cost 35% less and build ~22% faster, but are weaker.
 
 ### Loadouts
+
+![Loadout editor](docs/loadout.png)
 
 Every unit has slots (deck mount, VLS, torpedo room, auxiliary, hardpoints, pods, arms, kit). Open **Loadouts** from the
 menu and drag modules into slots: e.g. give destroyers **Mine Rails**, swap a VLS for land-attack missiles, add a Troop Bay,

@@ -62,6 +62,7 @@ export class Match {
       mode: null,
       mouse: { x: 0, y: 0, wx: 0, wy: 0, valid: false },
       showRanges: false,
+      showSensors: false,
       rain: 0,
       pings: [],
     };
@@ -568,6 +569,10 @@ export class Match {
       if (e.code === 'Tab') {
         e.preventDefault();
         this.view.showRanges = true;
+      }
+      if (e.code === 'KeyV') {
+        this.view.showSensors = !this.view.showSensors;
+        this.hud.log('CIC', `Sensor coverage ${this.view.showSensors ? 'shown' : 'hidden'}.`);
       }
       if (e.code === 'Space' && this.lastAlert) {
         e.preventDefault();
