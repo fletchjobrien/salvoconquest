@@ -264,4 +264,4 @@ const q = new URLSearchParams(location.search).get('room');
 if (q && q.length >= 4) joinRoom(q.toUpperCase());
 
 // Debug hook for automated screenshots.
-(window as any).__salvo = { get match() { return match; }, get conn() { return conn; }, r };
+(window as any).__salvo = { get match() { return match; }, get conn() { return conn; }, r, audio, voices };

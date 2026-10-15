@@ -407,8 +407,6 @@ export class Hud {
         for (let i = 0; i < hold; i++) {
           const cid = d[2][i];
           if (cid !== undefined) {
-            const cd = w.details.get(cid);
-            void cd;
             const sel = this.cargoSel.has(cid);
             html += `<div class="cs full ${sel ? 'sel' : ''}" data-cargo="${cid}"><img src="${symbolDataUrl('own', 'land', glyphFor(this.cargoType(cid)), 9)}"></div>`;
           } else html += `<div class="cs"></div>`;

@@ -78,7 +78,6 @@ function finalize(parts: Part[], scale: number): THREE.BufferGeometry {
 const cache = new Map<string, THREE.BufferGeometry>();
 const MAT = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
 patchMaterial(MAT);
-const MAT_GLOW = new THREE.MeshBasicMaterial({ vertexColors: true });
 
 /** Visual length (km) for each type. Models are exaggerated for readability. */
 export const VIS_LEN: Record<UnitType, number> = {

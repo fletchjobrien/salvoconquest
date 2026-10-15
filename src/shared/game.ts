@@ -1232,7 +1232,6 @@ export class Game {
   }
 
   private thinkAir(u: Unit, dt: number) {
-    const def = UNITS[u.type];
     if (u.landed) {
       // Rearm/refuel on the ground, then resume the mission.
       const bp = this.airBasePos(u);
@@ -1327,7 +1326,6 @@ export class Game {
     }
     // Idle fallback.
     u.order = { k: 'patrol', x: u.x, y: u.y };
-    void def;
   }
 
   private airPickTarget(u: Unit, px: number, py: number): number | 0 {
@@ -1671,7 +1669,7 @@ export class Game {
     if (w.mod.proj === 'bullet') {
       this.emit({ k: 'fire', id: u?.id ?? 0, m: w.mod.id, x: sh.x, y: sh.y, tx: t.x, ty: t.y, a: t.alt }, sh.x, sh.y);
       const acc = (w.mod.accuracy ?? 0.5) * (cls === 'air' ? 0.6 : 1);
-      if (this.rng.next() < acc) this.damage(t, dmg, sh.owner, false);
+      if (this.rng.next() < acc) this.damage(t, dmg, sh.owner);
       return;
     }
     // Lead the target for shells.
@@ -1877,7 +1875,7 @@ export class Game {
     const w = this.weatherAt(t.x, t.y);
     chance *= 1 - 0.25 * w.storm;
     if (this.rng.next() < chance) {
-      this.damage(t, dmg, p.owner, p.kind === 'missile' || p.kind === 'torpedo');
+      this.damage(t, dmg, p.owner);
       this.emit({ k: 'boom', x: t.x, y: t.y, s: Math.min(1.5, dmg / 30), w: false, a: t.alt }, t.x, t.y);
     } else {
       const [ox, oy] = this.rng.inDisc(0.25);
@@ -1887,13 +1885,12 @@ export class Game {
     }
   }
 
-  damage(t: Unit, dmg: number, by: number, big: boolean) {
+  damage(t: Unit, dmg: number, by: number) {
     if (t.dead) return;
     let d = dmg;
     if (UNITS[t.type].domain === 'land' && t.stillFor > 4) d *= t.entrench;
     t.hp -= d;
     if (t.hp <= 0) this.kill(t, by);
-    void big;
   }
 
   kill(t: Unit, by: number) {
@@ -1925,7 +1922,7 @@ export class Game {
         if (Math.hypot(u.x - m.x, u.y - m.y) < 0.45) {
           m.armAt = Infinity;
           const dmg = dom === 'sub' ? 40 : 50;
-          this.damage(u, dmg, m.owner, true);
+          this.damage(u, dmg, m.owner);
           this.emit({ k: 'boom', x: m.x, y: m.y, s: 1.2, w: true }, m.x, m.y);
           break;
         }
