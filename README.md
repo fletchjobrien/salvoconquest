@@ -1,6 +1,6 @@
 # Salvo Conquest
 
-A minimalist, multiplayer, browser-based RTS about near-future littoral combat in an archipelago.
+A minimalist,a multiplayer, browser-based RTS about near-future littoral combat in an archipelago.
 It mixes a casual take on *Sea Power* naval warfare with *WARNO*-style ground and air support,
 drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
 
