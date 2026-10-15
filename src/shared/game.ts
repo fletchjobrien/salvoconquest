@@ -134,6 +134,8 @@ export interface Unit {
   revealUntil: number;
   firingUntil: number;
   stillFor: number;
+  /** Seconds spent close to (but not at) the move point; groups can't all reach the exact spot. */
+  nearGoalFor?: number;
   pendingDmg: number;
   dead: boolean;
   lastThink: number;
@@ -173,6 +175,8 @@ export interface Projectile {
   hostileSeen: boolean;
   /** Closest approach so far (SAMs). */
   best?: number;
+  /** SAMs fired at this missile so far (shoot-look-shoot, at most two). */
+  sams?: number;
   /** Expected damage reserved on a unit (anti-overkill); released when the projectile ends. */
   resv?: { id: number; dmg: number };
 }
@@ -358,15 +362,6 @@ export class Game {
     return best;
   }
 
-  private carrierFactory(p: Player): Unit | null {
-    const f = p.factory.air;
-    if (f && 'unit' in f) {
-      const u = this.units.get(f.unit);
-      if (u && !u.dead && u.owner === p.id) return u;
-    }
-    return null;
-  }
-
   spawn(owner: number, type: UnitType, x: number, y: number): Unit {
     const def = UNITS[type];
     const p = this.players[owner];
@@ -491,7 +486,21 @@ export class Game {
         break;
       case 'board': {
         const ship = this.units.get(Number(cmd.ship));
-        if (!ship || ship.dead || ship.owner !== pid || ship.holdCap <= 0) return;
+        if (!ship || ship.dead || ship.owner !== pid) return;
+        // Aircraft: move to this carrier's deck (if there is room) and land there.
+        if (UNITS[ship.type].deck) {
+          for (const u of own(cmd.ids)) {
+            if (UNITS[u.type].domain !== 'air') continue;
+            const already = u.base && 'unit' in u.base && u.base.unit === ship.id;
+            if (!already && this.deckUsed(ship) >= UNITS[ship.type].deck!) continue;
+            if (u.landed && !already) this.launch(u);
+            u.base = { unit: ship.id };
+            // Land and stay on deck until given a new order.
+            u.resume = { k: 'rtb' };
+            if (!u.landed) this.setOrder(u, { k: 'rtb' }, true);
+          }
+        }
+        if (ship.holdCap <= 0) return;
         for (const u of own(cmd.ids)) {
           if (UNITS[u.type].domain !== 'land' || u.inside >= 0) continue;
           this.setOrder(u, { k: 'board', ship: ship.id });
@@ -543,9 +552,6 @@ export class Game {
         if (typeof cmd.site === 'number') {
           const s = this.sites[cmd.site];
           if (s && s.owner === pid && BUILDINGS[s.type].produces === cmd.cat) p.factory[cmd.cat] = { site: s.id };
-        } else if (typeof cmd.unit === 'number' && cmd.cat === 'air') {
-          const u = this.units.get(cmd.unit);
-          if (u && u.owner === pid && UNITS[u.type].airbase) p.factory.air = { unit: u.id };
         }
         break;
       }
@@ -784,20 +790,21 @@ export class Game {
         const q = p.queues[cat];
         if (!q.length) continue;
         const site = this.factorySite(p, cat);
-        const carrier = cat === 'air' ? this.carrierFactory(p) : null;
-        if (!site && !carrier) continue;
+        // Aircraft are built at airbases only; carriers take them aboard afterwards.
+        if (!site) continue;
         const it = q[0];
         it.t += dt;
         if (it.t < it.total) continue;
         q.shift();
         let u: Unit;
-        if (carrier) {
-          u = this.spawn(p.id, it.type, carrier.x, carrier.y);
-          u.base = { unit: carrier.id };
-          u.order = { k: 'patrol', x: carrier.x, y: carrier.y };
-        } else if (site) {
+        {
           const at = cat === 'naval' && site.dock ? site.dock : { x: site.x, y: site.y };
-          const [ox, oy] = this.rng.inDisc(cat === 'ground' ? 0.6 : 0.3);
+          let [ox, oy] = this.rng.inDisc(cat === 'ground' ? 0.6 : 0.3);
+          // Ships must start in open water, not on the beach next to the dock.
+          if (cat === 'naval') {
+            for (let tries = 0; tries < 12 && this.map.nav[cellOf(this.map, at.x + ox, at.y + oy)] !== 0; tries++) [ox, oy] = this.rng.inDisc(0.3);
+            if (this.map.nav[cellOf(this.map, at.x + ox, at.y + oy)] !== 0) ox = oy = 0;
+          }
           let sx = at.x + ox;
           let sy = at.y + oy;
           if (cat === 'ground' && islandAt(this.map, sx, sy) !== site.island) {
@@ -809,7 +816,7 @@ export class Game {
             u.base = { site: site.id };
             u.order = { k: 'patrol', x: site.x, y: site.y };
           }
-        } else continue;
+        }
         this.emit({ k: 'built', id: u.id, ty: UNIT_TYPES.indexOf(u.type), o: p.id }, u.x, u.y, p.team);
       }
     }
@@ -885,7 +892,14 @@ export class Game {
           return;
         }
         const d = Math.hypot(o.x - u.x, o.y - u.y);
-        if (d < (def.domain === 'land' ? 0.15 : 0.35)) {
+        // Arrived, or reached the end of the route to a point it cannot stand on (a ship
+        // sent to an inland target stops at the shore).
+        const routeDone = !!u.path && u.path.length === 0 && !!u.pathGoal && u.stillFor > 2;
+        const end = u.path && u.path.length ? u.path[u.path.length - 1] : null;
+        const dNear = Math.min(d, end ? Math.hypot(end.x - u.x, end.y - u.y) : d);
+        u.nearGoalFor = dNear < 1.2 ? (u.nearGoalFor ?? 0) + dt : 0;
+        if (d < (def.domain === 'land' ? 0.15 : 0.35) || routeDone || u.nearGoalFor > 8) {
+          u.nearGoalFor = 0;
           u.order = { k: 'idle' };
           u.path = null;
           u.speed *= 0.5;
@@ -1231,6 +1245,39 @@ export class Game {
     }
   }
 
+  /** Flights based on a carrier (landed or in the air). */
+  deckUsed(c: Unit): number {
+    let n = 0;
+    for (const a of this.units.values()) if (!a.dead && a.base && 'unit' in a.base && a.base.unit === c.id) n++;
+    return n;
+  }
+
+  /** Nearest place this aircraft may land: a friendly airbase, or a friendly carrier with deck room. */
+  nearestAirBase(u: Unit): { x: number; y: number; base: { site: number } | { unit: number } } | null {
+    let best: { x: number; y: number; base: { site: number } | { unit: number } } | null = null;
+    let bd = 1e9;
+    for (const s of this.sites) {
+      if (s.type !== 'airbase' || s.owner < 0 || this.team(s.owner) !== u.team) continue;
+      const d = Math.hypot(s.x - u.x, s.y - u.y);
+      if (d < bd) {
+        bd = d;
+        best = { x: s.x, y: s.y, base: { site: s.id } };
+      }
+    }
+    for (const c of this.units.values()) {
+      const cap = UNITS[c.type].deck ?? 0;
+      if (c.dead || c.team !== u.team || !cap) continue;
+      const mine = u.base && 'unit' in u.base && u.base.unit === c.id;
+      if (!mine && this.deckUsed(c) >= cap) continue;
+      const d = Math.hypot(c.x - u.x, c.y - u.y);
+      if (d < bd) {
+        bd = d;
+        best = { x: c.x, y: c.y, base: { unit: c.id } };
+      }
+    }
+    return best;
+  }
+
   private airBasePos(u: Unit): { x: number; y: number } | null {
     const b = u.base;
     if (b && 'site' in b) {
@@ -1240,28 +1287,32 @@ export class Game {
       const c = this.units.get(b.unit);
       if (c && !c.dead) return { x: c.x, y: c.y };
     }
-    // Pick a new base: nearest friendly airbase or carrier.
-    let best: { x: number; y: number } | null = null;
-    let bd = 1e9;
-    for (const s of this.sites) {
-      if (s.type !== 'airbase' || s.owner < 0 || this.team(s.owner) !== u.team) continue;
-      const d = Math.hypot(s.x - u.x, s.y - u.y);
-      if (d < bd) {
-        bd = d;
-        best = { x: s.x, y: s.y };
-        u.base = { site: s.id };
-      }
-    }
-    for (const c of this.units.values()) {
-      if (c.dead || c.team !== u.team || !UNITS[c.type].airbase) continue;
-      const d = Math.hypot(c.x - u.x, c.y - u.y);
-      if (d < bd) {
-        bd = d;
-        best = { x: c.x, y: c.y };
-        u.base = { unit: c.id };
-      }
-    }
-    return best;
+    // Base lost: pick the nearest one with room.
+    const n = this.nearestAirBase(u);
+    u.base = n ? n.base : null;
+    return n;
+  }
+
+  /** Range budget (km) for out-and-back flight, and the base it is measured to. */
+  private airDetail(u: Unit): [number, number, number] {
+    if (UNITS[u.type].domain !== 'air' || u.landed) return [0, -1, -1];
+    const n = this.nearestAirBase(u);
+    if (!n) return [0, -1, -1];
+    const km = Math.max(0, ((u.fuel - 6) * u.maxSpeed) / 1.12);
+    return [Math.round(km * 10) / 10, Math.round(n.x * 100) / 100, Math.round(n.y * 100) / 100];
+  }
+
+  private deckIds(c: Unit): number[] {
+    const ids: number[] = [];
+    for (const a of this.units.values()) if (!a.dead && a.base && 'unit' in a.base && a.base.unit === c.id) ids.push(a.id);
+    return ids;
+  }
+
+  /** Seconds of flight needed to reach the nearest base, with a safety margin. */
+  bingoFuel(u: Unit): { need: number; base: { x: number; y: number; base: { site: number } | { unit: number } } | null } {
+    const n = this.nearestAirBase(u);
+    if (!n) return { need: 0, base: null };
+    return { need: (Math.hypot(n.x - u.x, n.y - u.y) / u.maxSpeed) * 1.12 + 6, base: n };
   }
 
   private launch(u: Unit) {
@@ -1272,7 +1323,14 @@ export class Game {
 
   private thinkAir(u: Unit, dt: number) {
     if (u.landed) {
-      // Rearm/refuel on the ground, then resume the mission.
+      // Rearm/refuel on the ground, then resume the mission. A carrier that sinks takes its deck with it.
+      if (u.base && 'unit' in u.base) {
+        const c = this.units.get(u.base.unit);
+        if (!c || c.dead) {
+          this.kill(u, -1);
+          return;
+        }
+      }
       const bp = this.airBasePos(u);
       if (!bp) {
         u.dead = true;
@@ -1296,8 +1354,17 @@ export class Game {
       return;
     }
     u.fuel -= dt;
+    // Bingo fuel: turn back while the nearest base is still in reach.
+    let bingo = false;
+    if (u.order.k !== 'rtb' && this.tickN % 5 === u.id % 5) {
+      const bf = this.bingoFuel(u);
+      if (bf.base && u.fuel <= bf.need) {
+        bingo = true;
+        u.base = bf.base.base;
+      }
+    }
     const needRtb =
-      u.fuel < u.fuelMax * 0.22 ||
+      bingo ||
       (u.type === 'strike' && u.weapons.every((w) => w.max > 0 && w.ammo < 1) && u.weapons.some((w) => w.max > 0)) ||
       (u.type === 'fighter' && u.weapons.filter((w) => w.max > 0).every((w) => w.ammo < 1) && u.order.k !== 'rtb');
     if (u.fuel <= 0) {
@@ -1435,8 +1502,14 @@ export class Game {
       } else {
         const path = findPath(this.map, u.x, u.y, x, y, pass);
         u.path = path ?? [];
-        // Unreachable: don't hammer the path finder.
-        if (!path) u.repathAt = this.time + 6;
+        if (!path) {
+          // Unreachable (another sea, or inland): give up the move instead of waiting forever.
+          u.repathAt = this.time + 6;
+          if (u.order.k === 'move' || u.order.k === 'retreat') {
+            u.order = { k: 'idle' };
+            u.pathGoal = null;
+          }
+        }
       }
     }
   }
@@ -1458,7 +1531,8 @@ export class Game {
       const wp = path[0];
       const d = Math.hypot(wp.x - u.x, wp.y - u.y);
       if (d < (dom === 'land' ? 0.12 : 0.3) && path.length > 1) path.shift();
-      else if (d < 0.1) path.shift();
+      // Final waypoint: ships turn too wide to hit a 100 m spot, so they accept 300 m.
+      else if (d < (dom === 'land' ? 0.1 : 0.3)) path.shift();
       else {
         target = wp;
         break;
@@ -1491,7 +1565,9 @@ export class Game {
     const ny = u.y + Math.sin(u.heading) * u.speed * dt;
     const pass = this.passFor(u);
     const c = cellOf(this.map, nx, ny);
-    if (pass(c) || u.type === 'lander') {
+    // A unit that ended up on a cell it may not use (spawned at a crowded dock, shoved by a
+    // neighbour) may always move, so it can drive out instead of being stuck forever.
+    if (pass(c) || u.type === 'lander' || !pass(cellOf(this.map, u.x, u.y))) {
       u.x = nx;
       u.y = ny;
     } else {
@@ -1654,7 +1730,7 @@ export class Game {
       // Do not waste interceptors on missiles already engaged by several.
       let engaged = 0;
       for (const q of this.projs) if (!q.dead && q.target === -2 - p.id) engaged++;
-      if (w.mod.proj === 'sam' && (engaged >= 2 || (engaged === 1 && d > range * 0.4))) continue;
+      if (w.mod.proj === 'sam' && ((p.sams ?? 0) >= 2 || engaged >= 1)) continue;
       if (d < bd) {
         bd = d;
         best = p;
@@ -1675,6 +1751,7 @@ export class Game {
       }
       return;
     }
+    m.sams = (m.sams ?? 0) + 1;
     this.launchProj(sh, w, -2 - m.id, m.x, m.y);
   }
 
@@ -1873,17 +1950,18 @@ export class Game {
           continue;
         }
       }
-      // Seeker search when arriving at an aim point without a target.
-      if (p.target === -1 && dist < 0.4) {
+      // Seeker search when arriving at an aim point without a lock (the fuzzy track was off,
+      // or the target slipped away): look around, lock on to whatever is there, or give up.
+      if ((p.target === -1 || (p.kind !== 'sam' && p.seeking)) && dist < 0.4) {
         const found = this.seekerSearch(p);
         if (found) {
           p.target = found.id;
           p.seeking = false;
-        } else {
-          p.dead = true;
-          if (p.kind !== 'sam') this.fizzle(p);
-          continue;
+          continue; // steer at it from the next tick on
         }
+        p.dead = true;
+        if (p.kind !== 'sam') this.fizzle(p);
+        continue;
       }
       if (dist < (p.kind === 'torpedo' ? 0.12 : 0.15) && p.target !== -1) {
         this.resolveImpact(p);
@@ -2277,6 +2355,8 @@ export class Game {
             oy,
             (x.autoRetreat ? 1 : 0) | (x.inside >= 0 ? 2 : 0),
             UNIT_TYPES.indexOf(x.type),
+            ...this.airDetail(x),
+            UNITS[x.type].deck ? this.deckIds(x) : [],
           ]);
         }
         continue;
@@ -2343,8 +2423,6 @@ export class Game {
       air: p.queues.air.map((i) => ({ type: i.type, progress: Math.min(1, i.t / i.total) }) as QueueItem),
     };
     const fac = (cat: Cat) => {
-      const car = cat === 'air' ? this.carrierFactory(p) : null;
-      if (car) return -1 - car.id;
       const s = this.factorySite(p, cat);
       return s ? s.id : -1;
     };

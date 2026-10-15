@@ -10,7 +10,7 @@ import { Renderer, CameraRig } from './renderer';
 import { TerrainView } from './terrain';
 import { Fx } from './fx';
 import { UnitModel, makeSiteModel, makeUnitModel, SiteModel, VIS_LEN } from './models';
-import { groundY, visAlt, AIR_VIS, setAirZoom } from './coords';
+import { groundY, visAlt, setAirZoom, airY } from './coords';
 import type { Overlay } from './overlay';
 import { Wakes } from './wakes';
 import { setWeatherCells } from './weatherfx';
@@ -250,7 +250,7 @@ export class GameScene {
 
     // ---- projectiles ----
     for (const p of w.projs.values()) {
-      const ma = p.kind === 'missile' || p.kind === 'sam' ? Math.max(p.ralt * AIR_VIS, groundY(map, p.rx, p.ry) + 0.03) : 0;
+      const ma = p.kind === 'missile' || p.kind === 'sam' ? airY(map, p.rx, p.ry, p.ralt) : 0;
       if (p.kind === 'missile') this.fx.missileTrail(p.rx, ma, p.ry, !p.mine);
       else if (p.kind === 'sam') this.fx.samTrail(p.rx, ma, p.ry);
       else if (p.kind === 'torpedo') {
@@ -356,7 +356,7 @@ export class GameScene {
       case 'fire': {
         const m = MODULES[e.m];
         if (!m) break;
-        const alt = (e.a ?? 0) * (e.a && e.a > 0.3 ? AIR_VIS : 1) + groundY(map, e.x, e.y) * (e.a && e.a > 0.3 ? 0 : 1);
+        const alt = e.a && e.a > 0.3 ? airY(map, e.x, e.y, e.a) : (e.a ?? 0) + groundY(map, e.x, e.y);
         if (m.proj === 'missile') {
           this.fx.launch(e.x, alt, e.y);
           this.onSound('launch', e.x, e.y);
@@ -368,7 +368,7 @@ export class GameScene {
           this.fx.muzzle(e.x, alt, e.y, big);
           this.onSound(big > 1.5 ? 'bigGun' : 'gun', e.x, e.y);
         } else if (m.proj === 'bullet') {
-          const ta = (e.a ?? 0) * AIR_VIS;
+          const ta = airY(map, e.tx, e.ty, e.a ?? 0);
           this.fx.tracer(e.x, alt + 0.05, e.y, e.tx, ta, e.ty);
           this.onSound('ciws', e.x, e.y, 0.5);
         } else if (m.proj === 'torpedo') {
@@ -381,7 +381,7 @@ export class GameScene {
       }
       case 'boom': {
         const water = heightAt(map, e.x, e.y) < 0;
-        const alt = e.a && e.a > 0.1 ? Math.max(e.a * AIR_VIS, groundY(map, e.x, e.y) + 0.04) : groundY(map, e.x, e.y);
+        const alt = e.a && e.a > 0.1 ? airY(map, e.x, e.y, e.a) : groundY(map, e.x, e.y);
         this.fx.explosion(e.x, alt, e.y, e.s, water && alt < 0.1);
         this.onSound(e.s > 0.8 ? 'boom_l' : 'boom_s', e.x, e.y);
         if (e.s > 0.6) this.overlay?.shock(e.x, e.y, alt, 0.5 + e.s * 0.5, '#ffb070', 0.7);
@@ -392,8 +392,10 @@ export class GameScene {
         this.onSound('splash', e.x, e.y, 0.6);
         break;
       case 'intercept':
-        this.fx.intercept(e.x, e.a * AIR_VIS, e.y);
-        this.overlay?.shock(e.x, e.y, e.a * AIR_VIS, 0.6, '#ffffff', 0.5);
+        const ia = airY(map, e.x, e.y, e.a);
+        this.fx.intercept(e.x, ia, e.y);
+        this.overlay?.shock(e.x, e.y, ia, 0.6, '#ffffff', 0.5);
+        this.overlay?.splash(e.x, e.y, ia);
         this.onSound('intercept', e.x, e.y);
         break;
       case 'kill': {

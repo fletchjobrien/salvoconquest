@@ -7,7 +7,7 @@ import { DOMAINS } from '../state';
 import { Affil, FONT, SITE_GLYPH, SymDomain, glyphFor, sideColor, symbolCanvas } from './symbols';
 import { SIDE, unitName } from '../theme';
 import { matchLoadoutOf } from '../loadouts';
-import { groundY, visAlt, AIR_VIS } from './coords';
+import { groundY, visAlt, airY } from './coords';
 import { weatherOutline } from '../../shared/weather';
 
 export interface Hover {
@@ -87,6 +87,13 @@ export class Overlay {
     this.canvas.style.height = h + 'px';
   }
 
+  /** Short-lived "splash" crosses where missiles were shot down. */
+  splashes: { x: number; y: number; alt: number; t: number }[] = [];
+
+  splash(x: number, y: number, alt: number) {
+    this.splashes.push({ x, y, alt, t: 0 });
+  }
+
   shock(x: number, y: number, alt: number, r: number, color: string, dur = 0.9) {
     this.shocks.push({ x, y, alt, t: 0, r, color, dur });
   }
@@ -147,6 +154,7 @@ export class Overlay {
       if (!u) continue;
       this.drawOrder(v, u);
       if (v.showRanges || v.selected.size <= 3) this.drawRanges(v, u, v.selected.size > 3 ? 0.4 : 1);
+      if (UNITS[u.type].domain === 'air') this.drawFuelRange(v, u, v.selected.size > 3 ? 0.5 : 1);
     }
     if (v.mode?.k === 'unload') this.drawUnloadMode(v);
 
@@ -391,7 +399,7 @@ export class Overlay {
           ? 0
           : p.kind === 'shell' || p.kind === 'bomb'
             ? p.ralt
-            : Math.max(p.ralt * AIR_VIS, groundY(w.map, p.rx, p.ry) + 0.03);
+            : airY(w.map, p.rx, p.ry, p.ralt);
       if (!this.proj(v, p.rx, a3, p.ry)) continue;
       const sx = P.x;
       const sy = P.y;
@@ -457,6 +465,24 @@ export class Overlay {
     }
     ctx.globalAlpha = 1;
     this.shocks = this.shocks.filter((s) => s.t < s.dur);
+    // Shot-down missiles: a small cross that fades, so a missile never just vanishes.
+    for (const s of this.splashes) {
+      s.t += dt;
+      if (s.t > 2.5 || !this.proj(v, s.x, s.alt, s.y)) continue;
+      const k = s.t / 2.5;
+      const L = 3 + (1 - k) * 2;
+      ctx.strokeStyle = '#ffffff';
+      ctx.globalAlpha = 0.85 * (1 - k);
+      ctx.lineWidth = 1.25;
+      ctx.beginPath();
+      ctx.moveTo(P.x - L, P.y - L);
+      ctx.lineTo(P.x + L, P.y + L);
+      ctx.moveTo(P.x + L, P.y - L);
+      ctx.lineTo(P.x - L, P.y + L);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    this.splashes = this.splashes.filter((s) => s.t <= 2.5);
 
     this.prevSel = new Set(v.selected);
 
@@ -724,6 +750,78 @@ export class Overlay {
         ctx.font = `500 8px ${FONT}`;
         ctx.textAlign = 'center';
         ctx.fillText(`${r}km`, P.x, P.y + 10);
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /**
+   * Fuel range of a selected flight: every point it can still reach and then get home from.
+   * That is an ellipse with the aircraft and its nearest base as foci (out-and-back distance
+   * equals the range left). The flight turns home on its own when it reaches the edge.
+   */
+  private drawFuelRange(v: OverlayView, u: UView, alpha: number) {
+    const d = v.world.details.get(u.id);
+    if (!d || d[10] < 0) return;
+    const ctx = this.ctx;
+    const R = d[9];
+    const bx = d[10];
+    const by = d[11];
+    const c = Math.hypot(bx - u.x, by - u.y) / 2;
+    const a = R / 2;
+    const cx = (u.x + bx) / 2;
+    const cy = (u.y + by) / 2;
+    const ang = Math.atan2(by - u.y, bx - u.x);
+    const bingo = a <= c + 0.3;
+    const col = bingo ? '#ff6a5a' : '#c8e6ff';
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 1;
+    if (!bingo) {
+      const b = Math.sqrt(Math.max(0, a * a - c * c));
+      const ca = Math.cos(ang);
+      const sa = Math.sin(ang);
+      ctx.beginPath();
+      let any = false;
+      const seg = 72;
+      for (let i = 0; i <= seg; i++) {
+        const t = (i / seg) * Math.PI * 2;
+        const ex = Math.cos(t) * a;
+        const ey = Math.sin(t) * b;
+        v.r.project(cx + ex * ca - ey * sa, 0, cy + ex * sa + ey * ca, P);
+        if (P.z >= 1) continue;
+        if (P.x > -50 && P.y > -50 && P.x < this.w + 50 && P.y < this.h + 50) any = true;
+        if (i === 0) ctx.moveTo(P.x, P.y);
+        else ctx.lineTo(P.x, P.y);
+      }
+      if (any) {
+        ctx.globalAlpha = 0.04 * alpha;
+        ctx.fillStyle = col;
+        ctx.fill();
+        ctx.globalAlpha = 0.35 * alpha;
+        ctx.setLineDash([2, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+    // Faint line home, with a label at the base.
+    if (this.proj(v, u.x, 0, u.y)) {
+      const sx = P.x;
+      const sy = P.y;
+      if (this.proj(v, bx, 0, by)) {
+        ctx.globalAlpha = (bingo ? 0.6 : 0.25) * alpha;
+        ctx.setLineDash([1, 3]);
+        ctx.beginPath();
+        ctx.moveTo(sx, sy);
+        ctx.lineTo(P.x, P.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        if (alpha >= 1) {
+          ctx.globalAlpha = 0.7;
+          ctx.fillStyle = col;
+          ctx.font = `500 8px ${FONT}`;
+          ctx.textAlign = 'center';
+          ctx.fillText(bingo ? 'BINGO · RTB' : `FUEL · ${Math.round(R / 2)} KM OUT AND BACK`, P.x, P.y + 14);
+        }
       }
     }
     ctx.globalAlpha = 1;

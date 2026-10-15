@@ -723,7 +723,9 @@ export function findPath(map: GameMap, sx: number, sy: number, gx: number, gy: n
   open.push(start, h(start));
   let found = false;
   let iter = 0;
-  while (open.size && iter++ < 30000) {
+  // Enough budget to cross the whole map around islands (each cell is closed once).
+  const maxIter = nn * nn * 2;
+  while (open.size && iter++ < maxIter) {
     const cur = open.pop();
     if (cur === goal) {
       found = true;

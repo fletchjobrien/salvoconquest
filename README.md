@@ -30,7 +30,7 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
   ships that sail cargo home and turn it into cash. Enemy subs love merchants.
 - Other buildings give bonuses: radar stations (huge radar bubble), airbases, barracks and dockyards (forward production, repair, rearm),
   missile batteries (fire for whoever owns them).
-- Ships carry troops (destroyer 2, battleship 3, carrier 4; a Troop Bay module adds 2).
+- Ships carry troops (destroyer 2, battleship 3; a Troop Bay module adds 2). Carriers carry up to 4 air flights instead: right-click a carrier with aircraft selected to base them there. Aircraft are built at airbases only.
   RMB a ship with troops selected and they walk to the shore and ride landing craft out to it.
 - **Automation:** ground units attack-move by default, idle troops engage enemies on their island, damaged units
   retreat to friendly buildings and come back when repaired, aircraft fly their mission, return to rearm and

@@ -1,4 +1,5 @@
 // Procedural sound: every effect is synthesised with WebAudio, so the game ships no SFX files.
+import { Music } from './music';
 
 export type Sfx =
   | 'hover'
@@ -41,7 +42,6 @@ export class Audio {
   private ocean: GainNode | null = null;
   private wind: GainNode | null = null;
   private rain: GainNode | null = null;
-  private musicTimer: ReturnType<typeof setInterval> | null = null;
   private lastPlay = new Map<string, number>();
   volumes = { master: 0.8, sfx: 0.9, amb: 0.7, voice: 1, music: 0.45 };
   listener = { x: 40, y: 40, dist: 40, yaw: 0 };
@@ -417,53 +417,36 @@ export class Audio {
     this.rain!.gain.setTargetAtTime(storm * 0.12 * close, t, 0.8);
   }
 
+  private score: Music | null = null;
+  private musicTheme = 'desert';
+
   private startMusic() {
-    const ctx = this.ctx!;
-    // Sparse minor-key pad: Am - F - C - G (as dark drones), very quiet.
-    const chords = [
-      [110, 164.81, 220, 261.63],
-      [87.31, 130.81, 174.61, 220],
-      [98, 146.83, 196, 246.94],
-      [82.41, 123.47, 164.81, 207.65],
-    ];
-    let i = 0;
-    const play = () => {
-      if (!this.ctx) return;
-      const t = ctx.currentTime + 0.05;
-      const ch = chords[i++ % chords.length];
-      const f = ctx.createBiquadFilter();
-      f.type = 'lowpass';
-      f.frequency.value = 700;
-      const g = ctx.createGain();
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.06, t + 3);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 11);
-      f.connect(g);
-      g.connect(this.music);
-      const r = ctx.createGain();
-      r.gain.value = 0.6;
-      g.connect(r).connect(this.reverb);
-      for (const fr of ch) {
-        for (const det of [-4, 4]) {
-          const o = ctx.createOscillator();
-          o.type = 'triangle';
-          o.frequency.value = fr;
-          o.detune.value = det;
-          o.connect(f);
-          o.start(t);
-          o.stop(t + 11.5);
-        }
-      }
-      // Occasional high sonar-like note.
-      if (Math.random() < 0.5) this.tone('sine', ch[3] * 4, ch[3] * 4, t + 2 + Math.random() * 4, 2.5, 0.02, this.music, 0.4);
-    };
-    play();
-    this.musicTimer = setInterval(play, 9000);
+    if (!this.ctx) return;
+    if (!this.score) this.score = new Music(this.ctx, this.music, this.reverb);
+    this.score.setTheme(this.musicTheme);
+    this.score.start();
+  }
+
+  /** 0 = calm, 1 = full battle. The score follows smoothly. */
+  setMusicIntensity(v: number) {
+    this.score?.setIntensity(v);
+  }
+
+  get musicLevel(): number {
+    return this.score?.level ?? 0;
+  }
+
+  setMusicTheme(theme: string) {
+    this.musicTheme = theme;
+    this.score?.setTheme(theme);
+  }
+
+  stinger(kind: 'victory' | 'defeat' | 'capture') {
+    this.score?.stinger(kind);
   }
 
   stopMusic() {
-    if (this.musicTimer) clearInterval(this.musicTimer);
-    this.musicTimer = null;
+    this.score?.stop();
   }
 }
 

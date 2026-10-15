@@ -35,6 +35,9 @@ export class Match {
   private disposers: (() => void)[] = [];
   private announcedSites = new Set<string>();
   private lastUnderFire = 0;
+  /** Recent combat around our forces (decays); drives the music. */
+  private heat = 0;
+  private heatAt = 0;
   private ended = false;
   onExit: () => void = () => {};
   onEnd: (msg: ServerMsg & { t: 'end' }) => void = () => {};
@@ -105,6 +108,7 @@ export class Match {
     }
     this.rig.setDist(24, true);
     this.bindInput();
+    audio.setMusicTheme(this.world.map.theme);
     audio.startAmbient();
     setTimeout(() => this.hud.banner(this.world.map.islands[0].name + ' AO', 'Capture resource sites · Take the enemy HQ'), 400);
     setTimeout(() => this.hud.toggleHelp(false), 25000);
@@ -114,6 +118,7 @@ export class Match {
     if (m.t === 's') this.world.apply(m);
     else if (m.t === 'end') {
       this.ended = true;
+      audio.stinger(m.winners.includes(this.world.me) ? 'victory' : 'defeat');
       this.onEnd(m);
     } else if (m.t === 'chat') this.hud.log(m.from, m.text);
   }
@@ -162,11 +167,33 @@ export class Match {
     const wx = this.weatherAtCam();
     this.view.rain = wx;
     audio.setWeather(wx, this.rig.dist);
+    if (w.clock - this.heatAt > 0.5) {
+      this.heatAt = w.clock;
+      audio.setMusicIntensity(this.musicIntensity());
+    }
     this.view.pings = this.view.pings.filter((p) => w.clock - p.t < 1);
   }
 
   edgeScroll = true;
   private mouseInside = false;
+
+  /**
+   * How hot the fight is for us, 0..1: enemies close to our forces, missiles inbound, and
+   * recent hits, launches and losses (the "heat", which fades over about half a minute).
+   */
+  private musicIntensity(): number {
+    const w = this.world;
+    this.heat *= Math.exp(-0.5 / 25);
+    const mine = [...w.units.values()].filter((u) => u.owner === w.me);
+    let near = 0;
+    const close = (x: number, y: number, r: number) => mine.some((u) => Math.abs(u.x - x) < r && Math.abs(u.y - y) < r && Math.hypot(u.x - x, u.y - y) < r);
+    for (const u of w.units.values()) if (w.teamOf(u.owner) !== w.myTeam && u.owner >= 0 && close(u.x, u.y, 14)) near++;
+    for (const c of w.contacts.values()) if (close(c.x, c.y, 18)) near += 0.5;
+    let inbound = 0;
+    for (const p of w.projs.values()) if (!p.mine && (p.kind === 'missile' || p.kind === 'torpedo')) inbound++;
+    if (this.ended) return 0;
+    return Math.min(1, Math.min(0.45, near * 0.09) + Math.min(0.4, inbound * 0.15) + this.heat);
+  }
 
   private weatherAtCam(): number {
     let storm = 0;
@@ -286,6 +313,18 @@ export class Match {
           void voices.say(w.myFaction, cat, 'attack', who);
           return;
         }
+        if (t && t.owner === w.me && UNITS[t.type].deck) {
+          const air = ids.filter((id) => UNITS[w.units.get(id)!.type].domain === 'air');
+          if (air.length) {
+            this.send({ c: 'board', ids: air, ship: t.id });
+            this.ping(t.x, t.y, 'unload');
+            audio.play('order');
+            void voices.say(w.myFaction, 'air', 'rtb', unitName(w.myFaction, w.units.get(air[0])!.type, air[0]));
+            const rest = ids.filter((id) => !air.includes(id) && id !== t.id);
+            if (rest.length) this.send({ c: 'move', ids: rest, x, y });
+            return;
+          }
+        }
         if (t && t.owner === w.me && UNITS[t.type].hold > 0 || (t && t.owner === w.me && matchLoadoutOf(t.type).includes('troopbay'))) {
           const ground = ids.filter((id) => UNITS[w.units.get(id)!.type].domain === 'land');
           if (ground.length) {
@@ -328,7 +367,7 @@ export class Match {
     audio.play('deny');
   }
 
-  private ability(a: 'mines' | 'rtb' | 'retreat' | 'stop' | 'carrierFactory' | 'siteFactory') {
+  private ability(a: 'mines' | 'rtb' | 'retreat' | 'stop' | 'siteFactory') {
     const ids = this.ownSelectedIds();
     const w = this.world;
     switch (a) {
@@ -347,9 +386,6 @@ export class Match {
       }
       case 'stop':
         this.send({ c: 'stop', ids });
-        break;
-      case 'carrierFactory':
-        if (ids.length === 1) this.send({ c: 'factory', cat: 'air', unit: ids[0] });
         break;
       case 'siteFactory': {
         const s = this.hud.siteSel;
@@ -398,6 +434,7 @@ export class Match {
         const name = `${isl.home >= 0 ? 'HOME' : isl.name} ${s.type === 'resource' ? 'RESOURCES' : s.type.toUpperCase()}`;
         if (e.o === w.me) {
           audio.play('capture');
+          audio.stinger('capture');
           this.hud.banner('SITE CAPTURED', name);
           this.overlay.floater(s.x, s.y, 0.3, s.type === 'resource' ? 'MERCHANTS DISPATCHED' : 'CAPTURED', '#6fd0ff');
           void voices.say(fac, 'ground', 'capture', 'MARINES', true);
@@ -423,6 +460,7 @@ export class Match {
         }
         break;
       case 'vampire': {
+        this.heat = Math.min(0.6, this.heat + 0.3);
         audio.play('vampire');
         const near = [...w.units.values()].find((u) => u.owner === w.me && UNITS[u.type].category === 'naval' && Math.hypot(u.x - e.x, u.y - e.y) < 30);
         if (near) void voices.say(fac, 'naval', 'vampire', unitName(fac, near.type, near.id), true);
@@ -440,6 +478,7 @@ export class Match {
         // Shake when something blows up close to the camera.
         const d = Math.hypot(e.x - this.rig.tx, e.y - this.rig.ty);
         if (d < this.rig.dist * 0.6 && e.s > 0.5) this.rig.shake = Math.max(this.rig.shake, Math.min(0.6, e.s * 0.4 * (1 - d / (this.rig.dist * 0.6))));
+        if (e.s > 0.3 && [...w.units.values()].some((u) => u.owner === w.me && Math.hypot(u.x - e.x, u.y - e.y) < 12)) this.heat = Math.min(0.6, this.heat + 0.06 * Math.min(2, e.s));
         // Under fire callout.
         if (w.clock - this.lastUnderFire > 20) {
           const hit = [...w.units.values()].find((u) => u.owner === w.me && Math.hypot(u.x - e.x, u.y - e.y) < 0.4);
@@ -700,6 +739,7 @@ export class Match {
   }
 
   dispose() {
+    audio.setMusicIntensity(0);
     for (const d of this.disposers) d();
     this.hud.root.remove();
     this.scene.dispose();

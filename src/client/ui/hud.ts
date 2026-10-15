@@ -15,7 +15,7 @@ export interface HudActions {
   selectOnly(ids: number[]): void;
   unloadMode(ship: number, ids: number[]): void;
   toggleCargo(id: number): void;
-  ability(name: 'mines' | 'rtb' | 'retreat' | 'stop' | 'carrierFactory' | 'siteFactory'): void;
+  ability(name: 'mines' | 'rtb' | 'retreat' | 'stop' | 'siteFactory'): void;
 }
 
 const h = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', html = ''): HTMLElementTagNameMap[K] => {
@@ -147,6 +147,8 @@ export class Hud {
       <span>HULL</span><span>${Math.round(d.hp * FACTION_MOD[fac].hp)}</span>
       <span>FIT</span><span>${weapons}</span>
       ${hold ? `<span>HOLD</span><span>${hold} units</span>` : ''}
+      ${d.deck ? `<span>DECK</span><span>${d.deck} air flights</span>` : ''}
+      ${d.fuel ? `<span>FUEL</span><span>${d.fuel}s · ${Math.round((d.fuel * d.speed) / 2)} km radius</span>` : ''}
       ${d.radarAir || d.radarSurf ? `<span>RADAR</span><span>${Math.round(Math.max(d.radarAir, d.radarSurf) * FACTION_MOD[fac].sensor)} km</span>` : ''}
       ${d.sonar ? `<span>SONAR</span><span>${Math.round(d.sonar * FACTION_MOD[fac].sensor)} km</span>` : ''}</div>
       <div class="tt-r" style="margin:6px 0 0">LMB build · RMB cancel</div>`;
@@ -413,6 +415,17 @@ export class Hud {
         }
         html += `</div>`;
       }
+      const deck = def.deck ?? 0;
+      if (deck > 0) {
+        html += `<div class="status" style="margin-top:8px">AIR WING ${d[12].length}/${deck} · RMB SHIP WITH AIRCRAFT TO BASE THEM</div><div class="cargo">`;
+        for (let i = 0; i < deck; i++) {
+          const a = d[12][i] !== undefined ? w.units.get(d[12][i]) : undefined;
+          const t = a?.type ?? this.world.cargoTypes.get(d[12][i] ?? -1);
+          if (d[12][i] !== undefined && t) html += `<div class="cs full" title="${a && a.alt < 0.05 ? 'On deck' : 'Airborne'}"><img src="${symbolDataUrl('own', 'air', glyphFor(t), 9)}"></div>`;
+          else html += `<div class="cs"></div>`;
+        }
+        html += `</div>`;
+      }
     }
     html += `<div class="acts">${this.actButtons([u])}</div>`;
     return html;
@@ -433,10 +446,6 @@ export class Hud {
     if (any((u) => UNITS[u.type].category === 'naval' || UNITS[u.type].category === 'ground')) {
       const on = sel.every((u) => ((w.details.get(u.id)?.[7] ?? 1) & 1) === 1);
       b.push(`<button class="btn small ${on ? 'on' : ''}" data-act="retreat">AUTO-RETREAT<span class="kbd">T</span></button>`);
-    }
-    if (sel.length === 1 && UNITS[sel[0].type].airbase) {
-      const isF = w.factories.air === -1 - sel[0].id;
-      b.push(`<button class="btn small ${isF ? 'on' : ''}" data-act="carrierFactory">${isF ? '✓ AIR WING HOME' : 'BUILD AIRCRAFT HERE'}</button>`);
     }
     b.push(`<button class="btn small" data-act="stop">STOP<span class="kbd">S</span></button>`);
     return b.join('');

@@ -59,7 +59,12 @@ export type ProjRow = [number, number, number, number, number, number];
 /** Site row: id, owner, capture progress 0-100, capturing player. */
 export type SiteRow = [number, number, number, number];
 /** Own unit detail: id, ammo[], cargo ids[], fuel 0-100, order code, order x, order y, flags (1 auto-retreat, 2 embarked), type index. */
-export type DetailRow = [number, number[], number[], number, number, number, number, number, number];
+/**
+ * Own-unit details: id, ammo, cargo ids, fuel %, order code, order x, order y, flags, type index,
+ * then (aircraft) range left before bingo in km, nearest base x, y, and (carriers) the deck: ids of
+ * flights based on it.
+ */
+export type DetailRow = [number, number[], number[], number, number, number, number, number, number, number, number, number, number[]];
 /** Weather cell: kind (0 storm, 1 fog), x, y, radius, intensity 0-100. */
 export type WeatherRow = [number, number, number, number, number];
 /** On the wire: kind, x, y, radius, intensity, vx, vy (km/s), id. */
