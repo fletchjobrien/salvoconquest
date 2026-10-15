@@ -46,6 +46,8 @@ showing where the real unit could be. Each new radar sweep picks a new point; as
 the contact becomes an identified track. Storms cut radar range and eyesight; fog banks cut eyesight. Submarines are
 invisible until a sonar hears them, and they reveal themselves briefly when they fire.
 
+![Storm cell and fog bank](docs/weather.png)
+
 ### Factions
 
 - **Atlantic Coalition** (NATO-like): expensive, tougher hulls, better sensors and damage.
