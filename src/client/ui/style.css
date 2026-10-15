@@ -129,6 +129,10 @@ select.field {
 input.field:focus {
   border-color: var(--accent);
 }
+input[type='range'] {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
 .label {
   font-size: 9px;
   letter-spacing: 0.28em;

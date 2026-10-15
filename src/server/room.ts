@@ -11,10 +11,17 @@ interface Slot extends LobbySlot {
   loadouts: Loadouts;
   pid: number; // player index once started
   needFull: boolean;
+  /** Token bucket for commands and chat. */
+  tokens: number;
+  refill: number;
 }
+
+const BUCKET = 40; // burst
+const RATE = 20; // per second
 
 const BOT_NAMES = ['ADM. HALSEY', 'CDR. ZHENG', 'CAPT. NIMITZ', 'ADM. YI', 'CDR. RICKOVER', 'CAPT. LIU'];
 const MAX_SLOTS = 4;
+const SNAP_EVERY = 2;
 
 export class GameRoom extends DurableObject {
   private code = '';
@@ -111,7 +118,7 @@ export class GameRoom extends DurableObject {
     let uniqueName = name;
     let k = 2;
     while (this.slots.some((s) => s.name === uniqueName)) uniqueName = `${name}${k++}`;
-    const s: Slot = { slot: slotNo, name: uniqueName, faction, team: slotNo, bot: false, ready: false, ws, loadouts: lo, pid: -1, needFull: true };
+    const s: Slot = { slot: slotNo, name: uniqueName, faction, team: slotNo, bot: false, ready: false, ws, loadouts: lo, pid: -1, needFull: true, tokens: BUCKET, refill: Date.now() };
     this.slots.push(s);
     this.ensureHost();
     this.send(ws, { t: 'welcome', slot: slotNo, code: this.code });
@@ -125,7 +132,17 @@ export class GameRoom extends DurableObject {
     if (!humans.some((s) => s.host)) humans[0].host = true;
   }
 
+  private allow(slot: Slot, cost: number): boolean {
+    const now = Date.now();
+    slot.tokens = Math.min(BUCKET, slot.tokens + ((now - slot.refill) / 1000) * RATE);
+    slot.refill = now;
+    if (slot.tokens < cost) return false;
+    slot.tokens -= cost;
+    return true;
+  }
+
   private handle(slot: Slot, msg: ClientMsg) {
+    if ((msg.t === 'cmd' || msg.t === 'chat' || msg.t === 'lobby') && !this.allow(slot, msg.t === 'chat' ? 8 : 1)) return;
     if (msg.t === 'cmd') {
       if (this.game && slot.pid >= 0) this.game.command(slot.pid, msg.cmd);
       return;
@@ -146,7 +163,7 @@ export class GameRoom extends DurableObject {
           const used = new Set(this.slots.map((s) => s.slot));
           const slotNo = [0, 2, 1, 3].find((n) => !used.has(n))!;
           const bf: Faction = slot.faction === 'coalition' ? 'union' : 'coalition';
-          this.slots.push({ slot: slotNo, name: BOT_NAMES[slotNo % BOT_NAMES.length], faction: bf, team: slotNo, bot: true, ready: true, ws: null, loadouts: {}, pid: -1, needFull: false });
+          this.slots.push({ slot: slotNo, name: BOT_NAMES[slotNo % BOT_NAMES.length], faction: bf, team: slotNo, bot: true, ready: true, ws: null, loadouts: {}, pid: -1, needFull: false, tokens: 0, refill: 0 });
         }
         if (typeof msg.removeSlot === 'number') this.slots = this.slots.filter((s) => !(s.bot && s.slot === msg.removeSlot));
         if (msg.botFaction) {
@@ -228,13 +245,12 @@ export class GameRoom extends DurableObject {
         if (Date.now() - this.idleSince > 5 * 60_000) this.stopGame();
         return; // pause while nobody is connected
       }
-      let stepped = false;
       while (acc >= TICK) {
         acc -= TICK;
         for (const b of this.bots) b.tick();
         g.step();
-        stepped = true;
-        // Fan out after every tick so no events are lost.
+        // Snapshots go out at 5 Hz; events accumulate between them so none are lost.
+        if (g.tickN % SNAP_EVERY !== 0 && !g.over) continue;
         for (const s of this.slots) {
           if (!s.ws || s.pid < 0) continue;
           const snap = g.snapshotFor(s.pid, s.needFull);
@@ -249,7 +265,6 @@ export class GameRoom extends DurableObject {
           return;
         }
       }
-      void stepped;
     }, TICK * 1000);
   }
 

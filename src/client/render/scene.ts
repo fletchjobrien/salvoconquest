@@ -81,7 +81,7 @@ export class GameScene {
     this.sun.shadow.bias = -0.0006;
     this.sun.shadow.normalBias = 0.02;
     scene.add(this.sun, this.sun.target);
-    this.flashLight = new THREE.PointLight(0xdde6ff, 0, 60, 1.2);
+    this.flashLight = new THREE.PointLight(0xdde6ff, 0, 22, 1.5);
     scene.add(this.flashLight);
     this.terrain = new TerrainView(world.map, pal);
     scene.add(this.terrain.group);
@@ -165,6 +165,17 @@ export class GameScene {
           this.fx.subWake(u.x - Math.cos(u.h) * len * 0.2, u.y - Math.sin(u.h) * len * 0.2);
         } else if (dom === 'land' && o.speed > 0.02 && w.map.theme !== 'jungle') {
           this.fx.dust(u.x, y3, u.y);
+        } else if (dom === 'air' && !(u.flags & F_LANDED) && y3 > 0.3) {
+          // Faint contrails from each jet in the flight.
+          const c = Math.cos(u.h);
+          const s = Math.sin(u.h);
+          const len = VIS_LEN[u.type];
+          if (u.type === 'recon') this.fx.contrail(u.x - c * len * 0.5, y3, u.y - s * len * 0.5);
+          else {
+            // Lead jet at +0.2 len, wingman at (-0.45 len, +0.75 len) in model space.
+            this.fx.contrail(u.x - c * len * 0.3, y3, u.y - s * len * 0.3);
+            this.fx.contrail(u.x - c * len * 0.95 - s * len * 0.75, y3, u.y - s * len * 0.95 + c * len * 0.75);
+          }
         }
         if (u.hp < 50) {
           const s = dom === 'air' ? 0.5 : dom === 'land' ? 0.7 : 1.2;
@@ -309,7 +320,7 @@ export class GameScene {
         for (let k = 0; k < n; k++) this.fx.rainDrop(rig.tx + (Math.random() - 0.5) * R * 2, rig.ty + (Math.random() - 0.5) * R * 2, 3 + Math.random() * 2);
       }
     }
-    this.flashLight.intensity = Math.max(0, this.flashLight.intensity - dt * 400);
+    this.flashLight.intensity = Math.max(0, this.flashLight.intensity - dt * 220);
     this.r.flash = Math.max(0, this.r.flash - dt * 1.5);
 
     this.fx.setScale(this.r.height / this.r.pixelSize, this.r.camera.fov);
@@ -416,8 +427,8 @@ export class GameScene {
       }
       case 'lightning': {
         this.flashLight.position.set(e.x, 3, e.y);
-        this.flashLight.intensity = 260;
-        this.fx.glow.add({ x: e.x, y: 3.4, z: e.y, max: 0.25, s0: 6, s1: 4, r: 0.85, g: 0.9, b: 1, a0: 0.8 });
+        this.flashLight.intensity = 45;
+        this.fx.glow.add({ x: e.x, y: 3.4, z: e.y, max: 0.18, s0: 2.5, s1: 1.5, r: 0.7, g: 0.75, b: 0.9, a0: 0.35 });
         const dc = Math.hypot(e.x - this.r.camera.position.x, e.y - this.r.camera.position.z);
         if (dc < 40) this.r.flash = Math.max(this.r.flash, 0.12 * (1 - dc / 40));
         this.onSound('thunder', e.x, e.y);

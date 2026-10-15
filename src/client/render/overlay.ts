@@ -233,8 +233,8 @@ export class Overlay {
       ctx.strokeStyle = col;
       ctx.lineWidth = 1;
       if (c.r > 0.05) {
-        ctx.globalAlpha = 0.45 * fadeIn;
-        ctx.setLineDash([4, 5]);
+        ctx.globalAlpha = 0.3 * fadeIn;
+        ctx.setLineDash([3, 6]);
         if (this.circle(v, c.x, c.y, c.r, 0, 48)) ctx.stroke();
         ctx.setLineDash([]);
         if (age < 0.7) {

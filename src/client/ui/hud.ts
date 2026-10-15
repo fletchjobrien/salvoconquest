@@ -45,6 +45,7 @@ export class Hud {
   private factoryLabels = new Map<Cat, HTMLSpanElement>();
   private selKey = '';
   private lastHud = 0;
+  private lastCash = '';
   cargoSel = new Set<number>();
   siteSel: number | null = null;
 
@@ -199,8 +200,11 @@ export class Hud {
   /** Called every frame; heavy DOM work is throttled. */
   update(selected: UView[], clock: number) {
     const w = this.world;
-    const inc = w.income;
-    this.cashEl.innerHTML = `${fmtMoney(w.displayCash)}<small>+${inc.toFixed(1)}/s</small>`;
+    const cashHtml = `${fmtMoney(w.displayCash)}<small>+${w.income.toFixed(1)}/s</small>`;
+    if (cashHtml !== this.lastCash) {
+      this.cashEl.innerHTML = cashHtml;
+      this.lastCash = cashHtml;
+    }
     if (clock - this.lastHud < 0.12) return;
     this.lastHud = clock;
     const t = Math.floor(w.serverTime);

@@ -291,6 +291,10 @@ export class Fx {
     }
   }
 
+  contrail(x: number, alt: number, y: number) {
+    this.smoke.add({ x, y: alt, z: y, max: rnd(2.5, 3.5), s0: 0.015, s1: 0.07, r: 0.95, g: 0.96, b: 0.98, a0: 0.3, drag: 0 });
+  }
+
   dust(x: number, alt: number, y: number) {
     this.smoke.add({ x: x + rnd(-0.08, 0.08), y: alt + 0.01, z: y + rnd(-0.08, 0.08), vy: 0.02, max: 1.6, s0: 0.05, s1: 0.18, r: 0.65, g: 0.6, b: 0.5, a0: 0.25 });
   }
@@ -304,7 +308,7 @@ export class Fx {
   }
 
   cloud(x: number, alt: number, y: number, r: number, dark: number) {
-    const c = 0.55 - dark * 0.35;
-    this.smoke.add({ x, y: alt, z: y, vx: rnd(-0.02, 0.02), vz: rnd(-0.02, 0.02), max: rnd(5, 9), s0: r * 0.7, s1: r, r: c, g: c + 0.02, b: c + 0.05, a0: 0.35, drag: 0 });
+    const c = 0.2 - dark * 0.1;
+    this.smoke.add({ x, y: alt, z: y, vx: rnd(-0.02, 0.02), vz: rnd(-0.02, 0.02), max: rnd(5, 9), s0: r * 0.7, s1: r, r: c, g: c + 0.01, b: c + 0.03, a0: 0.28 + dark * 0.12, drag: 0 });
   }
 }

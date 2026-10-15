@@ -114,8 +114,12 @@ export class World {
     return this.players[pid]?.team ?? -1;
   }
 
+  /** Measured interval between snapshots (0.1 s offline, 0.2 s online). */
+  snapDt = 0.1;
+
   apply(s: Snapshot) {
     const T = s.time;
+    if (this.started && T > this.serverTime) this.snapDt += (Math.min(0.5, T - this.serverTime) - this.snapDt) * 0.2;
     this.serverTime = T;
     if (!this.started) {
       this.renderTime = T - 0.1;
@@ -220,8 +224,8 @@ export class World {
 
   update(dt: number) {
     this.clock += dt;
-    // Keep the render clock ~100 ms behind the newest snapshot.
-    const target = this.serverTime - 0.1;
+    // Keep the render clock about one snapshot interval behind the newest snapshot.
+    const target = this.serverTime - this.snapDt * 1.05;
     this.renderTime += dt;
     const drift = target - this.renderTime;
     if (Math.abs(drift) > 0.6) this.renderTime = target;

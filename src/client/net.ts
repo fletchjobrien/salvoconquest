@@ -146,6 +146,11 @@ export class LocalConn implements Conn {
     if (msg.t === 'cmd') this.game.command(0, msg.cmd);
   }
 
+  /** Let the AI play for you (handy for demos and spectating). */
+  autopilot() {
+    if (!this.bots.some((b) => b.pid === 0)) this.bots.push(new Bot(this.game, 0));
+  }
+
   close() {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
