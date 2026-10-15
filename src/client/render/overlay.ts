@@ -616,6 +616,7 @@ export class Overlay {
     ctx.textAlign = 'center';
     ctx.globalAlpha = a;
     for (const isl of v.world.map.islands) {
+      if (isl.minor) continue;
       if (!this.proj(v, isl.x, 0.6, isl.y + isl.r * 1.1)) continue;
       const name = isl.home >= 0 ? this.homeName(v.world, isl.home) : isl.name;
       ctx.fillText(name.split('').join(' '), P.x, P.y + 14);

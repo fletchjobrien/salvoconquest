@@ -1,5 +1,6 @@
-// Weather cell shape, shared by the simulation, the overlay and the shaders (see weatherfx.ts).
-// Storms are squall lines stretched across the wind; fog banks are long tongues along it.
+// Weather cell area, shared by the simulation, the overlay and the shaders (see weatherfx.ts).
+// The gameplay area is a plain circle (shown as a dashed outline); the cloud and fog art inside
+// it is drawn with irregular, natural shapes by the shaders.
 
 /** Prevailing wind direction (radians). The shaders use the same direction (wWind uniform). */
 export const WIND_ANGLE = Math.atan2(0.025, 0.06);
@@ -8,8 +9,8 @@ const WS = Math.sin(WIND_ANGLE);
 
 /** Semi-axes as multiples of the cell radius: [along the wind, across the wind]. */
 export const WEATHER_AXES: Record<0 | 1, [number, number]> = {
-  0: [0.72, 1.4],
-  1: [1.65, 0.62],
+  0: [1, 1],
+  1: [1, 1],
 };
 
 /** Normalised distance from a cell centre: 0 at the centre, 1 on the edge. */

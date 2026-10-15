@@ -56,6 +56,10 @@ export interface Island {
   y: number;
   r: number;
   home: number; // player slot or -1
+  /** Buildings on a neutral island. */
+  roles?: BuildingType[];
+  /** Small uninhabited islet (no buildings, no label); shapes straits and chokepoints. */
+  minor?: boolean;
 }
 
 export interface Site {
@@ -200,67 +204,78 @@ export function generateMap(seed: number, theme: Theme): GameMap {
   }
   const peakScale = theme === 'arctic' ? 1.6 : theme === 'jungle' ? 1.1 : 0.8;
 
-  // Central island.
-  // Centre: one big organic island. Its sites are placed at random anyway, so exact symmetry
-  // would only make it look like a square; the islands around it stay 4-fold symmetric.
+  // Centre: one big organic island.
   specs.push({ x: C, y: C, r: 10.5, rot: 0, seed: seed + 11, peak: 0.55 * peakScale, lobes: makeLobes(rng, 10.5, 4, 0.85, 1.1), warp: 0.45 });
   islands.push({ id: 0, name: info.centerName, x: C, y: C, r: 10.5, home: -1 });
 
-  // Canonical quadrant: home island + neutrals, then rotate 4 times.
-  const canon: { x: number; y: number; r: number; home: boolean; seed: number; peak: number; lobes: Lobe[]; warp: number }[] = [];
+  // Home islands: one shape, rotated into the four corners, so every start is identical.
   const homeOff = 26.5;
-  // Home islands stay compact enough for an airbase and a port, but not round.
-  canon.push({ x: C + homeOff, y: C + homeOff, r: 5.6, home: true, seed: seed + 21, peak: 0.45 * peakScale, lobes: makeLobes(rng, 5.6, 2, 0.9, 1.0), warp: 0.5 });
-  const tooClose = (x: number, y: number, r: number) => {
-    if (x < r + 2.5 || y < r + 2.5 || x > MAP_SIZE - r - 2.5 || y > MAP_SIZE - r - 2.5) return true;
-    // Arms reach well past r, so keep generous gaps (merged islands would break ownership).
-    if (Math.hypot(x - C, y - C) < 10.5 * 1.4 + r * 1.4 + 2.5) return true;
-    for (const c of canon) {
-      for (let k = 0; k < 4; k++) {
-        const [cx, cy] = rotQ(c.x, c.y, k);
-        if (Math.hypot(cx - x, cy - y) < (c.r + r) * 1.45 + 3.5) return true;
-      }
-    }
-    // Also against rotated copies of itself.
-    for (let k = 1; k < 4; k++) {
-      const [cx, cy] = rotQ(x, y, k);
-      if (Math.hypot(cx - x, cy - y) < r * 2.9 + 3.5) return true;
-    }
-    return false;
-  };
-  let tries = 0;
-  while (canon.length < 5 && tries < 4000) {
-    tries++;
-    const a = rng.range(-0.15, Math.PI / 2 + 0.15);
-    const dist = rng.range(15, 37);
-    const r = rng.range(2.2, 4.2);
-    const x = C + Math.cos(a) * dist;
-    const y = C + Math.sin(a) * dist;
-    if (tooClose(x, y, r)) continue;
-    canon.push({
-      x,
-      y,
-      r,
-      home: false,
-      seed: seed + 100 + canon.length * 13,
-      peak: rng.range(0.25, 0.5) * peakScale,
-      lobes: makeLobes(rng, r, rng.int(1, 3), 1.1, rng.range(0.6, 1.5)),
-      warp: rng.range(0.5, 0.9),
-    });
+  const homeLobes = makeLobes(rng, 5.6, 2, 0.9, 1.0);
+  const placed: { x: number; y: number; r: number }[] = [{ x: C, y: C, r: 10.5 * 1.4 }];
+  for (let k = 0; k < 4; k++) {
+    const [x, y] = rotQ(C + homeOff, C + homeOff, k);
+    specs.push({ x, y, r: 5.6, rot: k, seed: seed + 21, peak: 0.45 * peakScale, lobes: homeLobes, warp: 0.5 });
+    islands.push({ id: islands.length, name: `HOME ${k + 1}`, x, y, r: 5.6, home: k });
+    placed.push({ x, y, r: 5.6 * 1.3 });
   }
+  const free = (x: number, y: number, r: number, gap: number) => {
+    if (x < r + 2 || y < r + 2 || x > MAP_SIZE - r - 2 || y > MAP_SIZE - r - 2) return false;
+    for (const q of placed) if (Math.hypot(q.x - x, q.y - y) < q.r + r * 1.3 + gap) return false;
+    return true;
+  };
+
+  // Neutral islands: drawn separately for each quarter, so the map is uneven (different routes,
+  // straits and chokepoints) while every quarter still holds the same mix of buildings.
+  const roleSets: BuildingType[][] = [
+    ['resource', 'battery'],
+    ['resource', 'radar'],
+    ['resource', 'dockyard'],
+    ['airbase', 'barracks'],
+  ];
   let nameIdx = 0;
   for (let k = 0; k < 4; k++) {
-    for (const c of canon) {
-      const [x, y] = rotQ(c.x, c.y, k);
-      specs.push({ x, y, r: c.r, rot: k, seed: c.seed, peak: c.peak, lobes: c.lobes, warp: c.warp });
-      islands.push({
-        id: islands.length,
-        name: c.home ? `HOME ${k + 1}` : names[nameIdx++ % names.length],
-        x,
-        y,
-        r: c.r,
-        home: c.home ? k : -1,
-      });
+    const base = (k * Math.PI) / 2;
+    for (const roles of roleSets) {
+      for (let t = 0; t < 600; t++) {
+        const a = base + rng.range(-0.25, Math.PI / 2 + 0.25);
+        const dist = rng.range(15, 37);
+        const r = rng.range(2.2, 4.4);
+        const x = C + Math.cos(a) * dist;
+        const y = C + Math.sin(a) * dist;
+        if (!free(x, y, r, 3.2)) continue;
+        specs.push({ x, y, r, rot: 0, seed: seed + 100 + islands.length * 13, peak: rng.range(0.25, 0.5) * peakScale, lobes: makeLobes(rng, r, rng.int(1, 3), 1.1, rng.range(0.6, 1.6)), warp: rng.range(0.5, 0.9) });
+        islands.push({ id: islands.length, name: names[nameIdx++ % names.length], x, y, r, home: -1, roles });
+        placed.push({ x, y, r: r * 1.4 });
+        break;
+      }
+    }
+  }
+
+  // Islet chains: rocky strings of small islands that funnel ships through straits.
+  const chains = rng.int(4, 6);
+  for (let c = 0; c < chains; c++) {
+    // Start each chain in open water.
+    let x = 0;
+    let y = 0;
+    for (let t = 0; t < 60; t++) {
+      x = rng.range(8, MAP_SIZE - 8);
+      y = rng.range(8, MAP_SIZE - 8);
+      if (free(x, y, 1.5, 2.2)) break;
+    }
+    let dir = rng.range(0, Math.PI * 2);
+    const n = rng.int(4, 6);
+    for (let i = 0; i < n; i++) {
+      const r = rng.range(0.9, 1.9);
+      if (free(x, y, r, 2.2)) {
+        specs.push({ x, y, r, rot: 0, seed: seed + 500 + islands.length * 7, peak: rng.range(0.2, 0.45) * peakScale, lobes: makeLobes(rng, r, rng.int(0, 2), 1.2, rng.range(0.8, 1.8)), warp: 0.7 });
+        islands.push({ id: islands.length, name: '', x, y, r, home: -1, minor: true });
+        placed.push({ x, y, r: r * 1.3 });
+      }
+      // Gaps of a few km between links make navigable but narrow channels.
+      dir += rng.range(-0.5, 0.5);
+      const step = rng.range(3.6, 5.2);
+      x += Math.cos(dir) * step;
+      y += Math.sin(dir) * step;
     }
   }
 
@@ -380,6 +395,7 @@ export function generateMap(seed: number, theme: Theme): GameMap {
   for (let c = 0; c < nn * nn; c++) if (comp[c] >= 0) map.islandOf[c] = owner[comp[c]];
 
   placeSites(map, rng);
+  fixDocks(map);
   return map;
 }
 
@@ -445,6 +461,59 @@ export function nearestCell(map: GameMap, x: number, y: number, pred: (c: number
     if (best >= 0 && r * r > bd) break;
   }
   return best;
+}
+
+/** Label each deep-water cell with its connected region; returns labels and the largest region id. */
+export function seaRegions(map: GameMap): { label: Int32Array; main: number } {
+  const nn = map.nn;
+  const label = new Int32Array(nn * nn).fill(-1);
+  const sizes: number[] = [];
+  const stack: number[] = [];
+  for (let c0 = 0; c0 < nn * nn; c0++) {
+    if (map.nav[c0] !== 0 || label[c0] >= 0) continue;
+    const id = sizes.length;
+    sizes.push(0);
+    label[c0] = id;
+    stack.push(c0);
+    while (stack.length) {
+      const c = stack.pop()!;
+      sizes[id]++;
+      const ci = c % nn;
+      const cj = (c - ci) / nn;
+      for (let dj = -1; dj <= 1; dj++)
+        for (let di = -1; di <= 1; di++) {
+          const ni = ci + di;
+          const nj = cj + dj;
+          if ((!di && !dj) || ni < 0 || nj < 0 || ni >= nn || nj >= nn) continue;
+          const k = nj * nn + ni;
+          // Diagonal moves need both side cells open, as in findPath.
+          if (di && dj && (map.nav[cj * nn + ni] !== 0 || map.nav[nj * nn + ci] !== 0)) continue;
+          if (map.nav[k] === 0 && label[k] < 0) {
+            label[k] = id;
+            stack.push(k);
+          }
+        }
+    }
+  }
+  let main = 0;
+  sizes.forEach((sz, i) => {
+    if (sz > sizes[main]) main = i;
+  });
+  return { label, main };
+}
+
+/** Ports and resource docks must sit on the open sea, not in a lagoon cut off by islets. */
+function fixDocks(map: GameMap) {
+  const { label, main } = seaRegions(map);
+  for (const st of map.sites) {
+    if (!st.dock) continue;
+    if (label[cellOf(map, st.dock.x, st.dock.y)] === main) continue;
+    const c = nearestCell(map, st.x, st.y, (k) => label[k] === main, 40);
+    if (c >= 0) {
+      const [x, y] = cellCenter(map, c);
+      st.dock = { x, y };
+    }
+  }
 }
 
 function distToWater(map: GameMap, x: number, y: number): number {
@@ -528,20 +597,10 @@ function placeSites(map: GameMap, rng: Rng) {
       put('dockyard', true, (x, y) => -Math.hypot(x - C, y - (C - 8)));
     }
   }
-  // Neutral islands: assign roles per canonical index so all quadrants match.
-  const roles: BuildingType[][] = [
-    ['resource', 'battery'],
-    ['resource', 'radar'],
-    ['resource', 'dockyard'],
-    ['airbase', 'barracks'],
-  ];
-  const perQuad = (map.islands.length - 1) / 4; // home + neutrals
   for (const isl of map.islands) {
-    if (isl.id === 0 || isl.home >= 0) continue;
-    const local = (isl.id - 1) % perQuad; // 1..perQuad-1 (0 is home)
-    const role = roles[(local - 1) % roles.length];
+    if (!isl.roles) continue;
     const placed: { x: number; y: number }[] = [];
-    for (const type of role) {
+    for (const type of isl.roles) {
       const coastal = type === 'resource' || type === 'dockyard' || type === 'battery';
       const [x, y] = findSpot(isl, (px, py) => -Math.hypot(px - isl.x, py - isl.y) * 0.2, placed, coastal, 1.4);
       placed.push({ x, y });

@@ -87,7 +87,8 @@ void main() {
   col = mix(col, foam, caps * 0.45);
   // Storm: grey-green overcast sea, darkest under the thick cloud.
   vec3 gloomy = mix(col, vec3(dot(col, vec3(0.3, 0.5, 0.2))) * vec3(0.8, 0.95, 0.95), 0.6);
-  col = mix(col, gloomy * 0.55, storm * 0.8);
+  // Darkening follows the clouds (not the gameplay circle); only a faint overall overcast.
+  col = mix(col, gloomy * 0.55, max(storm * 0.25, shade) * 0.8);
   col *= 1.0 - shade * 0.3;
   // Wind streaks along the storm.
   float streak = wxNoise(vec2(dot(p, vec2(0.93, 0.37)) * 1.6, dot(p, vec2(-0.37, 0.93)) * 30.0) + t * vec2(0.4, 0.0));

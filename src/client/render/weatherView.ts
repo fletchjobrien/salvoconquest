@@ -34,12 +34,12 @@ void main() {
   vec2 p = vW.xz;
   float d = stormCover(uCell, p, uLayer);
   // Capped opacity: the cloud tops read clearly but ships and islands always show through.
-  float a = smoothstep(0.06, 0.5, d) * (uLayer < 0.5 ? 0.5 : 0.28);
+  float a = smoothstep(0.06, 0.5, d) * (uLayer < 0.5 ? 0.55 : 0.16);
   // Opaque from high up; thins out as you zoom in so the battle below stays readable.
   a *= smoothstep(vW.y + 6.0, vW.y + 60.0, cameraPosition.y);
   if (a < 0.02) discard;
   // Fake sunlight: sides facing the sun are bright, lee sides and cores fall into shadow.
-  float d2 = stormCover(uCell, p + uSun * 0.7, uLayer);
+  float d2 = stormCover(uCell, p + uSun * 0.35, uLayer);
   float light = clamp(0.55 + (d - d2) * 3.0, 0.0, 1.0);
   vec3 shadowCol = uLayer < 0.5 ? vec3(0.2, 0.22, 0.26) : vec3(0.36, 0.39, 0.44);
   vec3 topCol = uLayer < 0.5 ? vec3(0.62, 0.64, 0.68) : vec3(0.86, 0.87, 0.9);
@@ -60,6 +60,7 @@ ${WEATHER_FUNCS}
 uniform float uSeed;
 uniform float uStrength;
 uniform float uWidth;
+uniform vec4 uCell;
 varying vec3 vW;
 varying vec2 vUv;
 void main() {
@@ -70,7 +71,9 @@ void main() {
   float vert = mix(0.55, 1.0, vUv.y) * smoothstep(0.0, 0.08, vUv.y);
   // Hide shafts right next to the camera; the screen-space rain covers that case.
   float camD = length(cameraPosition.xz - vW.xz);
-  float a = uStrength * 0.2 * veil * side * vert * smoothstep(2.0, 6.0, camD);
+  // Rain only falls where there is cloud overhead.
+  float under = smoothstep(0.15, 0.6, stormCover(uCell, vW.xz, 0.0) / max(uCell.w, 0.01));
+  float a = uStrength * 0.2 * veil * side * vert * under * smoothstep(2.0, 6.0, camD);
   if (a < 0.01) discard;
   gl_FragColor = vec4(vec3(0.36, 0.4, 0.45), a);
   #include <colorspace_fragment>
@@ -158,7 +161,7 @@ export class WeatherView {
         const mat = new THREE.ShaderMaterial({
           vertexShader: WORLD_VERT,
           fragmentShader: SHAFT_FRAG,
-          uniforms: { ...common, uSeed: { value: i * 13.7 + k * 5.3 }, uStrength: { value: 0 }, uWidth: { value: 3 } },
+          uniforms: { ...common, uSeed: { value: i * 13.7 + k * 5.3 }, uStrength: { value: 0 }, uWidth: { value: 3 }, uCell: { value: new THREE.Vector4() } },
           transparent: true,
           depthWrite: false,
           side: THREE.DoubleSide,
@@ -219,6 +222,7 @@ export class WeatherView {
           m.rotation.y = Math.atan2(camera.position.x - m.position.x, camera.position.z - m.position.z);
           m.material.uniforms.uStrength.value = inten * (0.6 + 0.4 * Math.sin(k * 3.1 + si));
           m.material.uniforms.uWidth.value = width;
+          m.material.uniforms.uCell.value.set(x, y, r, inten);
         });
       } else if (kind === 1 && fi < MAX) {
         const f = this.fogs[fi++];
