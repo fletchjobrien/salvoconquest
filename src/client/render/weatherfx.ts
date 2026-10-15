@@ -92,11 +92,11 @@ vec3 applyWeather(vec3 col, vec3 wp) {
   // Overcast gloom under the whole storm, plus darker shadows under the thick cloud.
   float g = stormGloom(wp.xz);
   float sh = cloudShadow(wp.xz);
-  col *= 1.0 - g * 0.3 - sh * 0.4;
+  col *= 1.0 - g * 0.22 - sh * 0.28;
   col = mix(col, wStormColor, g * 0.12);
   // Fog only hugs the surface; hills poke out of it.
   float f = fogAt(wp.xz) * (1.0 - smoothstep(0.05, 0.9, wp.y));
-  col = mix(col, wFogColor, f * 0.4);
+  col = mix(col, wFogColor, f * 0.22);
   return col;
 }
 `;

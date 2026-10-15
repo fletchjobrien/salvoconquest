@@ -32,9 +32,10 @@ varying vec3 vW;
 void main() {
   vec2 p = vW.xz;
   float d = stormCover(uCell, p, uLayer);
-  float a = smoothstep(0.06, 0.5, d) * (uLayer < 0.5 ? 0.9 : 0.55);
+  // Capped opacity: the cloud tops read clearly but ships and islands always show through.
+  float a = smoothstep(0.06, 0.5, d) * (uLayer < 0.5 ? 0.5 : 0.28);
   // Opaque from high up; thins out as you zoom in so the battle below stays readable.
-  a *= smoothstep(vW.y + 2.0, vW.y + 40.0, cameraPosition.y);
+  a *= smoothstep(vW.y + 6.0, vW.y + 60.0, cameraPosition.y);
   if (a < 0.02) discard;
   // Fake sunlight: sides facing the sun are bright, lee sides and cores fall into shadow.
   float d2 = stormCover(uCell, p + uSun * 0.7, uLayer);
@@ -68,7 +69,7 @@ void main() {
   float vert = mix(0.55, 1.0, vUv.y) * smoothstep(0.0, 0.08, vUv.y);
   // Hide shafts right next to the camera; the screen-space rain covers that case.
   float camD = length(cameraPosition.xz - vW.xz);
-  float a = uStrength * 0.34 * veil * side * vert * smoothstep(2.0, 6.0, camD);
+  float a = uStrength * 0.2 * veil * side * vert * smoothstep(2.0, 6.0, camD);
   if (a < 0.01) discard;
   gl_FragColor = vec4(vec3(0.36, 0.4, 0.45), a);
   #include <colorspace_fragment>
@@ -85,7 +86,8 @@ void main() {
   vec2 p = vW.xz;
   float d = fogCover(uCell, p, uLayer);
   // Upper layers are thinner and only exist over the dense core.
-  float a = smoothstep(0.1 + uLayer * 0.08, 0.8, d) * (0.34 - uLayer * 0.05);
+  // Five thin layers add up to about half opacity at the densest point.
+  float a = smoothstep(0.1 + uLayer * 0.08, 0.8, d) * (0.17 - uLayer * 0.025);
   if (a < 0.01) discard;
   float lum = 0.97 + (wxFbm(p * 0.6 + uLayer * 3.0 - wWind * wTime) - 0.5) * 0.12 + uLayer * 0.02;
   gl_FragColor = vec4(wFogColor * lum, a);

@@ -88,12 +88,12 @@ void main() {
   // Storm: grey-green overcast sea, darkest under the thick cloud.
   vec3 gloomy = mix(col, vec3(dot(col, vec3(0.3, 0.5, 0.2))) * vec3(0.8, 0.95, 0.95), 0.6);
   col = mix(col, gloomy * 0.55, storm * 0.8);
-  col *= 1.0 - shade * 0.45;
+  col *= 1.0 - shade * 0.3;
   // Wind streaks along the storm.
   float streak = wxNoise(vec2(dot(p, vec2(0.93, 0.37)) * 1.6, dot(p, vec2(-0.37, 0.93)) * 30.0) + t * vec2(0.4, 0.0));
   col = mix(col, foam * 0.8, smoothstep(0.86, 0.98, streak) * storm * 0.12);
   // Fog banks sit on the water.
-  col = mix(col, wFogColor, fogb * 0.4);
+  col = mix(col, wFogColor, fogb * 0.22);
   // Distance fog.
   float fd = length(cameraPosition - vWorld);
   float f = smoothstep(fogNear, fogFar, fd);
