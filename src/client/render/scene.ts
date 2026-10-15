@@ -451,7 +451,20 @@ export class GameScene {
   }
 
   dispose() {
+    // Release GPU buffers. Shared geometries/materials re-upload automatically if used again.
+    this.r.scene.traverse((o) => {
+      if ((o as THREE.Light).isLight) (o as THREE.Light).dispose();
+      const m = o as THREE.Mesh;
+      if (m.geometry) m.geometry.dispose();
+      const mats = m.material ? (Array.isArray(m.material) ? m.material : [m.material]) : [];
+      for (const mat of mats) {
+        for (const v of Object.values(mat as unknown as Record<string, unknown>)) if (v instanceof THREE.Texture) v.dispose();
+        if (mat instanceof THREE.ShaderMaterial) for (const u of Object.values(mat.uniforms)) if (u.value instanceof THREE.Texture) u.value.dispose();
+        mat.dispose();
+      }
+    });
     this.r.scene.clear();
     this.units.clear();
+    this.wrecks = [];
   }
 }

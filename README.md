@@ -99,8 +99,11 @@ In the Cloudflare dashboard, go to *Workers & Pages → Create → Import a repo
 Every push to the production branch then builds and deploys.
 See [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/).
 
-**Option B: GitHub Actions.** `.github/workflows/deploy.yml` deploys on every push to `main`.
-Add two repository secrets: `CLOUDFLARE_API_TOKEN` (template "Edit Cloudflare Workers") and `CLOUDFLARE_ACCOUNT_ID`.
+**Option B: GitHub Actions.** `.github/workflows/deploy.yml` typechecks, runs the simulation test, builds and deploys on
+every push to `main`. It is off by default so it does not clash with Option A. To use it:
+
+1. Add repository secrets `CLOUDFLARE_API_TOKEN` (template "Edit Cloudflare Workers") and `CLOUDFLARE_ACCOUNT_ID`.
+2. Add the repository variable `DEPLOY_WITH_ACTIONS` = `true`.
 
 Durable Objects with the SQLite storage backend are available on the Workers Free plan
 ([docs](https://developers.cloudflare.com/durable-objects/platform/pricing/)). The room loop uses about 1–3 ms of CPU per
