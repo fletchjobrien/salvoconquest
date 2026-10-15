@@ -83,7 +83,7 @@ Lines without recordings appear as subtitles in the radio log.
 ```bash
 npm install
 npm run dev        # client only at http://localhost:5173 (skirmish vs AI works)
-npm run preview    # build + wrangler dev: full game incl. online rooms at http://localhost:8787
+npm run local      # wrangler dev (builds first): full game incl. online rooms at http://localhost:8787
 npm test           # headless bot-vs-bot simulation on all three maps
 npm run typecheck
 ```
@@ -91,10 +91,12 @@ npm run typecheck
 ## Deploy to Cloudflare from GitHub
 
 **Option A: Workers Builds (no secrets in GitHub).**
-In the Cloudflare dashboard, go to *Workers & Pages → Create → Import a repository*, pick this repo and set:
+In the Cloudflare dashboard, go to *Workers & Pages → Create → Import a repository* and pick this repo.
+Keep the default settings:
 
-- Build command: `npm run build`
-- Deploy command: `npx wrangler deploy`
+- Build command: *(empty)*. Do **not** use `npm run dev` or `npm run local`: they start a server that never exits, so the build never finishes.
+- Deploy command: `npx wrangler deploy`. It runs `npm run build` itself (see `build` in `wrangler.jsonc`).
+- Production branch: the branch you push to.
 
 Every push to the production branch then builds and deploys.
 See [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/).

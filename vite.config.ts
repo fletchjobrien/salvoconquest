@@ -10,7 +10,7 @@ export default defineConfig({
   },
   server: {
     // `npm run dev` serves the client only (play vs AI works offline).
-    // For online rooms run `npm run preview` (wrangler dev) instead.
+    // For online rooms run `npm run local` (wrangler dev) instead.
     proxy: {
       '/api': 'http://127.0.0.1:8787',
       '/ws': { target: 'ws://127.0.0.1:8787', ws: true },

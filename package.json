@@ -7,8 +7,8 @@
   "scripts": {
     "dev": "vite",
     "build": "node scripts/voice-manifest.mjs && vite build",
-    "preview": "npm run build && wrangler dev",
-    "deploy": "npm run build && wrangler deploy",
+    "local": "wrangler dev",
+    "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.worker.json",
     "test": "esbuild scripts/sim-test.ts --bundle --platform=node --format=esm --outfile=.wrangler/sim-test.mjs --log-level=warning && node .wrangler/sim-test.mjs"
   },

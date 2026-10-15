@@ -3,6 +3,9 @@
   "name": "salvoconquest",
   "main": "src/server/worker.ts",
   "compatibility_date": "2025-09-01",
+  // `wrangler deploy` (and `wrangler dev`) build the client first, so Cloudflare
+  // Workers Builds works with its default settings and no separate build command.
+  "build": { "command": "npm run build" },
   // Static client (built by `npm run build`) is served from ./dist.
   // Only /api/* and /ws/* run the Worker code first.
   "assets": {

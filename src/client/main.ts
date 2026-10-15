@@ -121,7 +121,7 @@ async function createRoom() {
     joinRoom(code);
   } catch {
     const err = document.getElementById('err');
-    if (err) err.textContent = 'Could not reach the server. Online play needs the Cloudflare Worker (npm run preview).';
+    if (err) err.textContent = 'Could not reach the server. Online play needs the Cloudflare Worker (npm run local).';
     audio.play('deny');
   }
 }
