@@ -1,9 +1,14 @@
-// Radar-scope minimap with a rotating sweep.
+// Minimap with fog of war: what your side's sensors cover is clear, the rest is dark.
 import * as THREE from 'three';
 import { WEATHER_AXES, WIND_ANGLE } from '../../shared/weather';
 import type { World } from '../state';
 import { SIDE } from '../theme';
-import { UNITS } from '../../shared/defs';
+import { BUILDINGS, UNITS, deriveStats } from '../../shared/defs';
+import { F_LANDED } from '../../shared/protocol';
+import { matchLoadoutOf } from '../loadouts';
+
+/** Fog layer resolution (pixels across the whole map). */
+const FOG_RES = 160;
 import type { Renderer, CameraRig } from '../render/renderer';
 
 export class Minimap {
@@ -12,7 +17,10 @@ export class Minimap {
   private ctx: CanvasRenderingContext2D;
   private land: HTMLCanvasElement;
   private size = 200;
-  private sweep = 0;
+  private fog: HTMLCanvasElement;
+  private surfMask: HTMLCanvasElement;
+  private airMask: HTMLCanvasElement;
+  private fogAt = -1;
   onJump: (x: number, y: number) => void = () => {};
   onCommand: (x: number, y: number) => void = () => {};
 
@@ -28,6 +36,14 @@ export class Minimap {
     this.ctx.scale(dpr, dpr);
     this.el.appendChild(this.c);
     this.land = this.renderLand();
+    const mk = () => {
+      const c = document.createElement('canvas');
+      c.width = c.height = FOG_RES;
+      return c;
+    };
+    this.fog = mk();
+    this.surfMask = mk();
+    this.airMask = mk();
     let dragging = false;
     const at = (e: MouseEvent) => {
       const r = this.c.getBoundingClientRect();
@@ -88,7 +104,62 @@ export class Minimap {
     return c;
   }
 
-  draw(dt: number, r: Renderer, rig: CameraRig) {
+  /**
+   * Fog of war from our side's sensors (own and allied units and sites): fully clear where
+   * surface radar or eyes reach, half clear where only air-search radar reaches, dark beyond.
+   * Each layer is a union of soft-edged discs, so overlaps never stack up.
+   */
+  private updateFog() {
+    const w = this.world;
+    const k = FOG_RES / w.map.size;
+    const surf: [number, number, number][] = [];
+    const air: [number, number, number][] = [];
+    for (const u of w.units.values()) {
+      if (w.teamOf(u.owner) !== w.myTeam || u.flags & F_LANDED) continue;
+      const lo = u.owner === w.me ? matchLoadoutOf(u.type) : UNITS[u.type].defaults;
+      const st = deriveStats(u.type, w.players[u.owner]?.faction ?? w.myFaction, lo);
+      const near = Math.max(st.radarSurf, UNITS[u.type].visual, st.sonar);
+      if (near > 0) surf.push([u.x, u.y, near]);
+      if (st.radarAir > near) air.push([u.x, u.y, st.radarAir]);
+    }
+    for (const s of w.map.sites) {
+      const o = w.sites[s.id].owner;
+      if (o < 0 || w.teamOf(o) !== w.myTeam) continue;
+      const b = BUILDINGS[s.type];
+      const near = Math.max(b.radarSurf, b.visual);
+      surf.push([s.x, s.y, near]);
+      if (b.radarAir > near) air.push([s.x, s.y, b.radarAir]);
+    }
+    const paint = (c: HTMLCanvasElement, discs: [number, number, number][]) => {
+      const g = c.getContext('2d')!;
+      g.clearRect(0, 0, FOG_RES, FOG_RES);
+      for (const [x, y, rad] of discs) {
+        const R = rad * k;
+        const grd = g.createRadialGradient(x * k, y * k, R * 0.8, x * k, y * k, R);
+        grd.addColorStop(0, 'rgba(0,0,0,1)');
+        grd.addColorStop(1, 'rgba(0,0,0,0)');
+        g.fillStyle = grd;
+        g.beginPath();
+        g.arc(x * k, y * k, R, 0, Math.PI * 2);
+        g.fill();
+      }
+    };
+    paint(this.surfMask, surf);
+    paint(this.airMask, air);
+    const f = this.fog.getContext('2d')!;
+    f.globalCompositeOperation = 'source-over';
+    f.clearRect(0, 0, FOG_RES, FOG_RES);
+    f.fillStyle = 'rgba(2,6,10,0.8)';
+    f.fillRect(0, 0, FOG_RES, FOG_RES);
+    f.globalCompositeOperation = 'destination-out';
+    f.globalAlpha = 0.45;
+    f.drawImage(this.airMask, 0, 0);
+    f.globalAlpha = 1;
+    f.drawImage(this.surfMask, 0, 0);
+    f.globalCompositeOperation = 'source-over';
+  }
+
+  draw(_dt: number, r: Renderer, _rig: CameraRig) {
     const w = this.world;
     const ctx = this.ctx;
     const S = this.size;
@@ -114,6 +185,14 @@ export class Minimap {
       ctx.ellipse(x * k, y * k, rad * a * k, rad * b * k, WIND_ANGLE, 0, Math.PI * 2);
       ctx.fill();
     }
+    // fog of war (refreshed a few times a second)
+    if (w.clock - this.fogAt > 0.3 || w.clock < this.fogAt) {
+      this.fogAt = w.clock;
+      this.updateFog();
+    }
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(this.fog, 0, 0, S, S);
+    ctx.imageSmoothingEnabled = false;
     // sites
     for (const s of w.map.sites) {
       const sv = w.sites[s.id];
@@ -126,12 +205,19 @@ export class Minimap {
         ctx.fill();
       } else ctx.fillRect(s.x * k - z / 2, s.y * k - z / 2, z, z);
     }
-    // contacts
-    ctx.strokeStyle = SIDE.unknown;
-    ctx.globalAlpha = 0.7;
+    // contacts: a small hollow diamond (hostile if classified, else unknown)
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.85;
     for (const c of w.contacts.values()) {
+      ctx.strokeStyle = c.kind >= 10 ? SIDE.hostile : SIDE.unknown;
+      const x = c.x * k;
+      const y = c.y * k;
       ctx.beginPath();
-      ctx.arc(c.x * k, c.y * k, Math.max(1.5, c.r * k), 0, Math.PI * 2);
+      ctx.moveTo(x, y - 2.2);
+      ctx.lineTo(x + 2.2, y);
+      ctx.lineTo(x, y + 2.2);
+      ctx.lineTo(x - 2.2, y);
+      ctx.closePath();
       ctx.stroke();
     }
     ctx.globalAlpha = 1;
@@ -171,18 +257,6 @@ export class Minimap {
     if (ok === 4) {
       ctx.closePath();
       ctx.stroke();
-    }
-    // sweep
-    this.sweep += dt * 1.4;
-    const cx = rig.tx * k;
-    const cy = rig.ty * k;
-    const grad = ctx.createConicGradient ? ctx.createConicGradient(this.sweep - 0.9, cx, cy) : null;
-    if (grad) {
-      grad.addColorStop(0, 'rgba(111,208,255,0)');
-      grad.addColorStop(0.14, 'rgba(111,208,255,0.12)');
-      grad.addColorStop(0.145, 'rgba(111,208,255,0)');
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, S, S);
     }
     ctx.strokeStyle = 'rgba(170,215,240,0.25)';
     ctx.strokeRect(0.5, 0.5, S - 1, S - 1);
