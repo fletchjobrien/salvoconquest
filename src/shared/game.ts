@@ -1778,8 +1778,11 @@ export class Game {
       if (!threat) continue;
       // Never more than two SAMs at one missile (in flight or in total).
       if (w.mod.proj === 'sam' && ((p.sams ?? 0) >= 2 || this.samsAt(-2 - p.id) >= 2)) continue;
-      if (d < bd) {
-        bd = d;
+      // Most urgent first: the missile closest to hitting its target (not merely closest to
+      // this launcher, which may be passing by on its way to another ship).
+      const urgency = tgt ? Math.hypot(tgt.x - p.x, tgt.y - p.y) : Math.hypot(p.tx - p.x, p.ty - p.y);
+      if (urgency < bd) {
+        bd = urgency;
         best = p;
       }
     }
