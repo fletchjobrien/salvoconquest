@@ -104,6 +104,7 @@ export class GameScene {
 
   private flagColor(owner: number): number {
     const w = this.world;
+    if (owner === -2) return 0xe8d27a;
     if (owner < 0) return 0xd9dde0;
     if (owner === w.me) return 0x4fb8ff;
     return w.teamOf(owner) === w.myTeam ? 0x5fe08a : 0xff4a3d;
@@ -249,8 +250,9 @@ export class GameScene {
 
     // ---- projectiles ----
     for (const p of w.projs.values()) {
-      if (p.kind === 'missile') this.fx.missileTrail(p.rx, p.ralt * AIR_VIS, p.ry, !p.mine);
-      else if (p.kind === 'sam') this.fx.samTrail(p.rx, p.ralt * AIR_VIS, p.ry);
+      const ma = p.kind === 'missile' || p.kind === 'sam' ? Math.max(p.ralt * AIR_VIS, groundY(map, p.rx, p.ry) + 0.03) : 0;
+      if (p.kind === 'missile') this.fx.missileTrail(p.rx, ma, p.ry, !p.mine);
+      else if (p.kind === 'sam') this.fx.samTrail(p.rx, ma, p.ry);
       else if (p.kind === 'torpedo') {
         if (Math.random() < 0.5) this.fx.torpedoTrail(p.rx, p.ry);
       } else if (p.kind === 'shell' || p.kind === 'bomb') this.fx.shellDot(p.rx, p.ralt, p.ry);
@@ -379,7 +381,7 @@ export class GameScene {
       }
       case 'boom': {
         const water = heightAt(map, e.x, e.y) < 0;
-        const alt = e.a && e.a > 0.1 ? e.a * AIR_VIS : groundY(map, e.x, e.y);
+        const alt = e.a && e.a > 0.1 ? Math.max(e.a * AIR_VIS, groundY(map, e.x, e.y) + 0.04) : groundY(map, e.x, e.y);
         this.fx.explosion(e.x, alt, e.y, e.s, water && alt < 0.1);
         this.onSound(e.s > 0.8 ? 'boom_l' : 'boom_s', e.x, e.y);
         if (e.s > 0.6) this.overlay?.shock(e.x, e.y, alt, 0.5 + e.s * 0.5, '#ffb070', 0.7);

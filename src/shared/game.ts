@@ -57,7 +57,7 @@ import {
   SiteRow,
   Snapshot,
   UnitRow,
-  WeatherRow,
+  WeatherWire,
   ORDER_CODES,
 } from './protocol';
 import { Rng } from './rng';
@@ -85,12 +85,14 @@ export interface Weapon {
 export type Order =
   | { k: 'idle' }
   | { k: 'move'; x: number; y: number; attack: boolean }
-  | { k: 'attack'; target: number }
+  | { k: 'attack'; target: number; lx?: number; ly?: number }
   | { k: 'board'; ship: number }
   | { k: 'patrol'; x: number; y: number }
   | { k: 'rtb' }
   | { k: 'retreat'; x: number; y: number }
   | { k: 'unload'; x: number; y: number; ids: number[] };
+
+const OVERKILL_CHECK = new Set<string>(['missile', 'torpedo', 'bomb']);
 
 export interface Unit {
   id: number;
@@ -169,6 +171,10 @@ export interface Projectile {
   dead: boolean;
   seeking: boolean;
   hostileSeen: boolean;
+  /** Closest approach so far (SAMs). */
+  best?: number;
+  /** Expected damage reserved on a unit (anti-overkill); released when the projectile ends. */
+  resv?: { id: number; dmg: number };
 }
 
 interface Mine {
@@ -186,7 +192,11 @@ export interface Contact {
   r: number;
   q: number;
   ident: 0 | 1 | 2; // 0 domain only, 1 classified, 2 exact track
-  next: number;
+  /** Fixed random offset (unit disc), scaled by r: one stable marker per track, no re-rolls. */
+  ox: number;
+  oy: number;
+  /** Not detected on the last sweep: shown at the last estimate, never fired upon. */
+  lost: boolean;
   seen: number;
 }
 
@@ -248,6 +258,8 @@ export class Game {
   sites: SiteState[] = [];
   weather: Weather[] = [];
   knowledge = new Map<number, Map<number, Contact>>();
+  /** Per team: last owner seen at each site (-2 = never observed), and whether it is watched now. */
+  siteIntel = new Map<number, { owner: Int32Array; watched: Uint8Array }>();
   events: { e: GameEvent; x: number; y: number; team: number }[] = [];
   nextId = 1;
   over = false;
@@ -311,7 +323,13 @@ export class Game {
         f.order = { k: 'patrol', x: ab.x, y: ab.y };
       }
     }
-    // Neutral islands with a missile battery start neutral (inactive) — nothing to do.
+    // Everyone knows the neutral map and their own bases; other homes start unknown.
+    for (const p of this.players) {
+      if (this.siteIntel.has(p.team)) continue;
+      const owner = new Int32Array(this.sites.length);
+      this.sites.forEach((st, i) => (owner[i] = st.owner < 0 || this.team(st.owner) === p.team ? st.owner : -2));
+      this.siteIntel.set(p.team, { owner, watched: new Uint8Array(this.sites.length) });
+    }
     this.updateDetection(true);
   }
 
@@ -634,7 +652,17 @@ export class Game {
     this.updateCapture(dt);
     if (this.tickN % 5 === 0) this.updateDetection(false);
     for (const [id, u] of this.units) if (u.dead) this.units.delete(id);
-    this.projs = this.projs.filter((p) => !p.dead);
+    this.projs = this.projs.filter((p) => {
+      if (!p.dead) return true;
+      // Release the anti-overkill reservation however the projectile ended (hit, miss,
+      // shot down, self-destruct, out of fuel). A leak here makes ships stop firing.
+      if (p.resv) {
+        const t = this.units.get(p.resv.id);
+        if (t) t.pendingDmg = Math.max(0, t.pendingDmg - p.resv.dmg);
+        p.resv = undefined;
+      }
+      return false;
+    });
     if (this.tickN % 10 === 0) this.checkVictory();
   }
 
@@ -670,9 +698,10 @@ export class Game {
         life: (S + r * 2) / sp,
       });
     };
-    if (this.time > 45) {
-      if (this.rng.next() < (info.stormRate / 60) * dt && this.weather.filter((w) => w.kind === 0).length < 3) spawnCell(0);
-      if (this.rng.next() < (info.fogRate / 60) * dt && this.weather.filter((w) => w.kind === 1).length < 3) spawnCell(1);
+    // Weather is occasional: a calm opening, at most two of each kind, and half the old rate.
+    if (this.time > 150) {
+      if (this.rng.next() < (info.stormRate / 120) * dt && this.weather.filter((w) => w.kind === 0).length < 2) spawnCell(0);
+      if (this.rng.next() < (info.fogRate / 120) * dt && this.weather.filter((w) => w.kind === 1).length < 2) spawnCell(1);
     }
     for (const w of this.weather) {
       w.x += w.vx * dt;
@@ -824,16 +853,26 @@ export class Game {
         this.thinkUnload(u);
         break;
       case 'attack': {
-        const t = this.units.get(u.order.target);
-        const k = this.knowledge.get(u.team)?.get(u.order.target);
+        const o = u.order;
+        const t = this.units.get(o.target);
+        const k = this.knowledge.get(u.team)?.get(o.target);
         if (!t || t.dead || !k || t.inside >= 0) {
-          u.order = { k: 'idle' };
-          u.path = null;
+          // Track lost: search where it was last seen (attack-move), instead of stopping dead.
+          if (t && !t.dead && t.inside < 0 && o.lx !== undefined && o.ly !== undefined) {
+            u.order = { k: 'move', x: o.lx, y: o.ly, attack: true };
+          } else {
+            u.order = { k: 'idle' };
+            u.path = null;
+          }
           break;
         }
-        const range = this.maxRangeVs(u, this.dmgClass(t));
+        o.lx = k.x;
+        o.ly = k.y;
+        // Close in until some weapon can really engage (guns need a firm track, missiles a
+        // seeker that can find the contact); then hold at a comfortable range.
         const d = Math.hypot(k.x - u.x, k.y - u.y);
-        if (d > Math.max(0.5, range * 0.85)) this.navTo(u, k.x, k.y);
+        const reach = this.engageRange(u, t, k);
+        if (reach <= 0 || d > Math.max(0.5, reach * 0.85)) this.navTo(u, k.x, k.y);
         else u.path = null;
         break;
       }
@@ -1535,13 +1574,34 @@ export class Game {
     return r;
   }
 
+  /** Longest range at which one of u's weapons can engage this contact right now (0 = none). */
+  private engageRange(u: Unit, t: Unit, k: Contact): number {
+    const cls = this.dmgClass(t);
+    let r = 0;
+    if (k.lost) return 0;
+    for (const w of u.weapons) {
+      if (w.mod.ability || (w.max >= 0 && w.ammo < 1) || (w.mod.dmg?.[cls] ?? 0) <= 1) continue;
+      // Same rule as pickTarget: a firm track, or a seeker that can find the fuzzy one.
+      const ok = k.ident === 2 || (!!w.mod.seeker && k.r <= w.mod.seeker);
+      if (!ok) continue;
+      // Torpedoes need open water to the target.
+      if (w.mod.proj === 'torpedo' && !lineClear(this.map, u.x, u.y, k.x, k.y, (c) => this.map.nav[c] !== 1)) continue;
+      r = Math.max(r, w.mod.range ?? 0);
+    }
+    return r;
+  }
+
+  /** Ground attack-move stops only for a close fight on the same island (not for long-range launchers). */
   private hasTargetInRange(u: Unit): boolean {
     const know = this.knowledge.get(u.team)!;
+    const isl = islandAt(this.map, u.x, u.y);
     for (const [id, k] of know) {
       if (k.ident < 2) continue;
       const t = this.units.get(id);
       if (!t || !this.inWorld(t)) continue;
-      const r = this.maxRangeVs(u, this.dmgClass(t));
+      const near = t.type === 'lander' || (UNITS[t.type].domain === 'land' && islandAt(this.map, t.x, t.y) === isl);
+      if (!near) continue;
+      const r = Math.min(6, this.maxRangeVs(u, this.dmgClass(t)));
       if (r > 0 && Math.hypot(t.x - u.x, t.y - u.y) <= r) return true;
     }
     return false;
@@ -1594,7 +1654,7 @@ export class Game {
       // Do not waste interceptors on missiles already engaged by several.
       let engaged = 0;
       for (const q of this.projs) if (!q.dead && q.target === -2 - p.id) engaged++;
-      if (engaged >= 2 && w.mod.proj === 'sam') continue;
+      if (w.mod.proj === 'sam' && (engaged >= 2 || (engaged === 1 && d > range * 0.4))) continue;
       if (d < bd) {
         bd = d;
         best = p;
@@ -1633,14 +1693,20 @@ export class Game {
       const dv = dmg[cls] ?? 0;
       if (dv <= 1) continue;
       if (t.landed) continue;
+      if (k.lost) continue;
       const exact = k.ident === 2;
-      if (!exact && !(w.mod.seeker && k.r <= w.mod.seeker)) continue;
+      // Never fire blind: fuzzy contacts need a seeker that can find them, and must be
+      // classified (identified as a hostile type) unless the player ordered the attack.
+      if (!exact && !(w.mod.seeker && k.r <= w.mod.seeker && (k.ident >= 1 || id === forced))) continue;
       const tx = exact ? t.x : k.x;
       const ty = exact ? t.y : k.y;
       const d = Math.hypot(tx - sh.x, ty - sh.y);
       if (d > range) continue;
-      // Don't overkill with slow projectiles.
-      if (w.mod.proj !== 'bullet' && t.pendingDmg >= t.hp * 1.2) continue;
+      // Torpedoes need open water all the way.
+      if (w.mod.proj === 'torpedo' && !lineClear(this.map, sh.x, sh.y, tx, ty, (c) => this.map.nav[c] !== 1)) continue;
+      // Don't waste limited, slow munitions on a target that is already as good as dead.
+      // Guns are not held back: their rounds are free and arrive in seconds.
+      if (OVERKILL_CHECK.has(w.mod.proj!) && t.pendingDmg >= t.hp * 1.2) continue;
       // Ground small arms only fight on the same island.
       if (sh.unit && UNITS[sh.unit.type].domain === 'land' && cls === 'land' && islandAt(this.map, t.x, t.y) !== islandAt(this.map, sh.x, sh.y)) continue;
       let score = d / range;
@@ -1685,7 +1751,11 @@ export class Game {
     if (exact || w.mod.proj === 'missile') p.target = t.id;
     p.seeking = !exact;
     p.dmgMul = sh.dmgMul;
-    t.pendingDmg += dmg * (w.mod.accuracy ?? 0.7);
+    if (OVERKILL_CHECK.has(w.mod.proj!)) {
+      const resv = dmg * (w.mod.accuracy ?? 0.7);
+      t.pendingDmg += resv;
+      p.resv = { id: t.id, dmg: resv };
+    }
   }
 
   private launchProj(sh: { x: number; y: number; alt: number; team: number; owner: number; unit: Unit | null }, w: Weapon, target: number, tx: number, ty: number): Projectile {
@@ -1707,7 +1777,7 @@ export class Game {
       tx,
       ty,
       t: 0,
-      life: kind === 'shell' || kind === 'bomb' ? d / speed : ((w.mod.range ?? 10) * 1.6) / speed + 4,
+      life: kind === 'shell' || kind === 'bomb' ? d / speed : ((w.mod.range ?? 10) * (kind === 'sam' ? 1.25 : 1.6)) / speed + (kind === 'sam' ? 2 : 4),
       dmgMul: 1,
       hitChance: w.mod.accuracy ?? 0.7,
       sx: sh.x,
@@ -1747,8 +1817,9 @@ export class Game {
         if (!m || m.dead) {
           p.target = -1;
         } else {
-          gx = m.x;
-          gy = m.y;
+          const tt = Math.hypot(m.x - p.x, m.y - p.y) / p.speed;
+          gx = m.x + Math.cos(m.heading) * m.speed * tt;
+          gy = m.y + Math.sin(m.heading) * m.speed * tt;
           galt = m.alt;
         }
       } else if (p.target >= 0) {
@@ -1760,28 +1831,40 @@ export class Game {
           const seekR = p.mod.seeker ?? 99;
           if (!p.seeking || close < seekR) {
             p.seeking = false;
-            gx = t.x;
-            gy = t.y;
-            galt = t.alt;
-            // Lead slightly.
+            // Aim at the predicted intercept point.
             const tt = close / p.speed;
-            gx += Math.cos(t.heading) * t.speed * tt * 0.7;
-            gy += Math.sin(t.heading) * t.speed * tt * 0.7;
+            gx = t.x + Math.cos(t.heading) * t.speed * tt;
+            gy = t.y + Math.sin(t.heading) * t.speed * tt;
+            galt = t.alt;
           }
         }
       }
       const want = Math.atan2(gy - p.y, gx - p.x);
-      const turn = p.kind === 'torpedo' ? 0.8 : 2.5;
+      const turn = p.kind === 'torpedo' ? 0.8 : p.kind === 'sam' ? 6 : 2.5;
       p.heading = turnToward(p.heading, want, turn * dt);
       p.x += Math.cos(p.heading) * p.speed * dt;
       p.y += Math.sin(p.heading) * p.speed * dt;
       const dist = Math.hypot(gx - p.x, gy - p.y);
       if (p.kind === 'missile') {
-        const cruise = p.mod.dmg?.land ? 0.12 : 0.025;
-        p.alt += ((dist < 1 ? galt : cruise) - p.alt) * Math.min(1, dt * 2.5);
+        // Sea-skim over water, hug the terrain (look ahead) over land.
+        const ground = Math.max(0, heightAt(this.map, p.x, p.y), heightAt(this.map, p.x + Math.cos(p.heading) * 0.6, p.y + Math.sin(p.heading) * 0.6));
+        const cruise = (p.mod.dmg?.land ? 0.12 : 0.025) + ground * 1.15;
+        p.alt += ((dist < 1 ? Math.max(galt, ground) : cruise) - p.alt) * Math.min(1, dt * 3);
         if (p.t < 1.2) p.alt += dt * 0.25;
+        p.alt = Math.max(p.alt, ground + 0.015);
       } else if (p.kind === 'sam') {
-        p.alt += (galt - p.alt) * Math.min(1, dt * 3);
+        // Boost straight up out of the launcher, then climb to the target.
+        if (p.t < 0.6) p.alt += dt * 0.8;
+        else p.alt += (galt - p.alt) * Math.min(1, dt * 3);
+        // Missed and flying away: self-destruct instead of circling.
+        if (p.target !== -1) {
+          if (dist < (p.best ?? 1e9)) p.best = dist;
+          else if ((p.best ?? 1e9) < 0.8 && dist > (p.best ?? 0) + 0.3) {
+            p.dead = true;
+            this.emit({ k: 'boom', x: p.x, y: p.y, s: 0.15, w: false, a: p.alt }, p.x, p.y);
+            continue;
+          }
+        }
       } else if (p.kind === 'torpedo') {
         p.alt = -0.03;
         if (heightAt(this.map, p.x, p.y) > -0.01) {
@@ -1789,12 +1872,6 @@ export class Game {
           this.emit({ k: 'boom', x: p.x, y: p.y, s: 0.4, w: false }, p.x, p.y);
           continue;
         }
-      }
-      if (p.kind === 'missile' && p.mod.dmg?.land === undefined && heightAt(this.map, p.x, p.y) > 0.05 && p.t > 2) {
-        // Sea-skimmers fly into hills.
-        p.dead = true;
-        this.emit({ k: 'boom', x: p.x, y: p.y, s: 0.6, w: false }, p.x, p.y);
-        continue;
       }
       // Seeker search when arriving at an aim point without a target.
       if (p.target === -1 && dist < 0.4) {
@@ -1804,7 +1881,7 @@ export class Game {
           p.seeking = false;
         } else {
           p.dead = true;
-          if (p.kind !== 'sam') this.emit({ k: 'splash', x: p.x, y: p.y }, p.x, p.y);
+          if (p.kind !== 'sam') this.fizzle(p);
           continue;
         }
       }
@@ -1814,9 +1891,15 @@ export class Game {
       }
       if (p.t > p.life) {
         p.dead = true;
-        if (p.kind === 'missile' || p.kind === 'torpedo') this.emit({ k: 'splash', x: p.x, y: p.y }, p.x, p.y);
+        if (p.kind === 'missile' || p.kind === 'torpedo') this.fizzle(p);
       }
     }
+  }
+
+  /** A weapon that found nothing: missiles self-destruct in the air over land, others drop in the sea. */
+  private fizzle(p: Projectile) {
+    if (p.kind === 'missile' && heightAt(this.map, p.x, p.y) > -0.005) this.emit({ k: 'boom', x: p.x, y: p.y, s: 0.15, w: false, a: Math.max(p.alt, 0.12) }, p.x, p.y);
+    else this.emit({ k: 'splash', x: p.x, y: p.y }, p.x, p.y);
   }
 
   private seekerSearch(p: Projectile): Unit | null {
@@ -1868,7 +1951,6 @@ export class Game {
     }
     const cls = this.dmgClass(t);
     const dmg = (p.mod.dmg?.[cls] ?? 0) * p.dmgMul;
-    t.pendingDmg = Math.max(0, t.pendingDmg - dmg * (p.mod.accuracy ?? 0.7));
     let chance = p.kind === 'shell' ? p.hitChance * (0.75 + 0.25 * (1 - Math.min(1, t.speed / 0.35))) + 0.2 : p.hitChance;
     if (p.kind === 'missile') chance *= 1 - t.ecm;
     if (p.kind === 'sam' && cls === 'air') chance *= 1 - t.ecm * 0.5;
@@ -2042,6 +2124,20 @@ export class Game {
         const b = BUILDINGS[s.type];
         sensors.push({ x: s.x, y: s.y, air: b.radarAir, surf: b.radarSurf, sonar: 0, vis: b.visual, isUnit: false });
       }
+      // Which sites can this team see right now?
+      const intel = this.siteIntel.get(team);
+      if (intel) {
+        this.sites.forEach((st, i) => {
+          let watched = st.owner >= 0 && this.team(st.owner) === team;
+          for (const sn of sensors) {
+            if (watched) break;
+            const d = Math.hypot(sn.x - st.x, sn.y - st.y);
+            if (d < Math.max(sn.vis * 1.5, sn.surf * 0.8)) watched = true;
+          }
+          intel.watched[i] = watched ? 1 : 0;
+          if (watched) intel.owner[i] = st.owner;
+        });
+      }
       const seen = new Set<number>();
       for (const e of this.units.values()) {
         if (!this.inWorld(e) || e.team === team) continue;
@@ -2081,7 +2177,7 @@ export class Game {
         if (!exact && e.revealUntil > this.time) {
           // Launch transients: everybody nearby hears it.
           for (const s of sensors) {
-            if (s.isUnit && Math.hypot(s.x - e.x, s.y - e.y) < 45) {
+            if (s.isUnit && Math.hypot(s.x - e.x, s.y - e.y) < 25) {
               q = Math.max(q, 0.45);
               break;
             }
@@ -2090,50 +2186,50 @@ export class Game {
         if (!exact && q <= 0) continue;
         seen.add(e.id);
         let rec = know.get(e.id);
+        if (!rec) {
+          const [ox, oy] = this.rng.inDisc(1);
+          rec = { x: e.x, y: e.y, r: 99, q: 0, ident: 0, ox, oy, lost: false, seen: this.time };
+          know.set(e.id, rec);
+        }
+        rec.lost = false;
+        rec.seen = this.time;
         if (exact) {
-          if (!rec) {
-            rec = { x: e.x, y: e.y, r: 0, q: 1, ident: 2, next: 0, seen: this.time };
-            know.set(e.id, rec);
-          }
           rec.x = e.x;
           rec.y = e.y;
           rec.r = 0;
           rec.q = 1;
           rec.ident = 2;
-          rec.seen = this.time;
           continue;
         }
-        const maxErr = viaSonar ? 4.5 : dom === 'air' ? 6 : 8;
-        let err = maxErr * Math.pow(1 - q, 1.4) * (1 + w.storm * 1.2);
-        if (err < 0.45) err = 0;
-        const ident: 0 | 1 | 2 = err === 0 ? 2 : q > 0.4 ? 1 : 0;
-        if (!rec || this.time >= rec.next || err < rec.r * 0.55 || force) {
-          // Pick a random point within the error radius around the true position.
-          const [ox, oy] = this.rng.inDisc(err);
-          const nr: Contact = rec ?? { x: 0, y: 0, r: 0, q: 0, ident: 0, next: 0, seen: 0 };
-          nr.x = e.x + ox;
-          nr.y = e.y + oy;
-          nr.r = err;
-          nr.q = q;
-          nr.ident = ident;
-          nr.next = this.time + 3 + this.rng.next() * 2;
-          nr.seen = this.time;
-          know.set(e.id, nr);
-        } else {
-          rec.seen = this.time;
-          if (rec.ident === 2) {
-            rec.x = e.x;
-            rec.y = e.y;
-          }
+        const maxErr = viaSonar ? 3 : dom === 'air' ? 4 : 5;
+        const err = maxErr * Math.pow(1 - q, 1.4) * (1 + w.storm * 1.2);
+        // The error radius eases toward the new value; the marker keeps its offset, so it glides.
+        rec.r = rec.r > 50 || force ? err : rec.r + (err - rec.r) * 0.35;
+        if (rec.r < 0.45) rec.r = 0;
+        rec.q = q;
+        rec.ident = rec.r === 0 ? 2 : q > 0.4 ? 1 : Math.min(rec.ident, 1) as 0 | 1;
+        rec.x = e.x + rec.ox * rec.r;
+        rec.y = e.y + rec.oy * rec.r;
+      }
+      // Brief dropouts keep the track (frozen, not targetable); after 4 s it is lost.
+      for (const [id, k] of know) {
+        if (seen.has(id)) continue;
+        if (this.time - k.seen > 4 || !this.units.get(id) || this.units.get(id)!.dead) {
+          know.delete(id);
+          continue;
+        }
+        k.lost = true;
+        if (k.ident === 2) {
+          k.ident = 1;
+          k.r = Math.max(k.r, 1);
         }
       }
-      for (const id of [...know.keys()]) if (!seen.has(id)) know.delete(id);
     }
     // First-time detection of incoming missiles -> vampire warning.
     for (const p of this.projs) {
       if (p.kind !== 'missile' || p.hostileSeen || p.dead) continue;
       const t = this.units.get(p.target);
-      if (t && Math.hypot(t.x - p.x, t.y - p.y) < 25) {
+      if (t && Math.hypot(t.x - p.x, t.y - p.y) < 18) {
         p.hostileSeen = true;
         this.emit({ k: 'vampire', x: p.x, y: p.y }, p.x, p.y, t.team);
       }
@@ -2219,14 +2315,19 @@ export class Game {
     const e: GameEvent[] = [];
     for (const ev of this.events) {
       if (ev.team >= 0 && ev.team !== team) continue;
-      if (ev.e.k === 'defeat' || ev.e.k === 'capture' || ev.e.k === 'lightning' || ev.e.k === 'msg' || nearAsset(ev.x, ev.y, 32)) e.push(ev.e);
+      const involved = ev.e.k === 'capture' && (this.team(ev.e.o) === team || this.team(ev.e.prev) === team);
+      if (ev.e.k === 'defeat' || ev.e.k === 'lightning' || ev.e.k === 'msg' || involved || nearAsset(ev.x, ev.y, 20)) e.push(ev.e);
     }
     const snap: Snapshot = { t: 's', time: r2(this.time), cash: Math.floor(p.cash), income: r2(p.income), u, c, p: pr, d, e };
     if (full || this.sitesDirty || this.tickN % 10 === 0) {
-      snap.s = this.sites.map((s) => [s.id, s.owner, Math.round(s.cap * 100), s.capBy] as SiteRow);
+      const intel = this.siteIntel.get(team);
+      snap.s = this.sites.map((s, i) => {
+        if (!intel || intel.watched[i]) return [s.id, s.owner, Math.round(s.cap * 100), s.capBy] as SiteRow;
+        return [s.id, intel.owner[i], 0, -1] as SiteRow;
+      });
     }
     if (full || this.tickN % 10 === 0) {
-      snap.w = this.weather.map((w) => [w.kind, r2(w.x), r2(w.y), r2(w.r), Math.round(w.i * 100)] as WeatherRow);
+      snap.w = this.weather.map((w) => [w.kind, r2(w.x), r2(w.y), r2(w.r), Math.round(w.i * 100), Math.round(w.vx * 1e4) / 1e4, Math.round(w.vy * 1e4) / 1e4, w.id] as WeatherWire);
       const res = this.sites.filter((s) => s.type === 'resource');
       snap.pl = this.players.map((pp) => ({
         id: pp.id,

@@ -408,6 +408,8 @@ export class Audio {
 
   setWeather(storm: number, zoom: number) {
     if (!this.ctx || !this.ocean) return;
+    if (!Number.isFinite(storm)) storm = 0;
+    if (!Number.isFinite(zoom)) zoom = 30;
     const t = this.ctx.currentTime;
     const close = Math.max(0.2, Math.min(1, 30 / (zoom + 8)));
     this.ocean.gain.setTargetAtTime(0.25 * close + 0.08, t, 0.5);

@@ -117,7 +117,7 @@ export class Minimap {
     // sites
     for (const s of w.map.sites) {
       const sv = w.sites[s.id];
-      const col = sv.owner < 0 ? 'rgba(220,225,230,0.55)' : sv.owner === w.me ? SIDE.own : w.teamOf(sv.owner) === w.myTeam ? SIDE.ally : SIDE.hostile;
+      const col = sv.owner === -2 ? 'rgba(232,210,122,0.5)' : sv.owner < 0 ? 'rgba(220,225,230,0.55)' : sv.owner === w.me ? SIDE.own : w.teamOf(sv.owner) === w.myTeam ? SIDE.ally : SIDE.hostile;
       ctx.fillStyle = col;
       const z = s.type === 'resource' ? 2 : 3;
       if (s.type === 'resource') {

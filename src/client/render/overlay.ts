@@ -116,6 +116,7 @@ export class Overlay {
   }
 
   affilOf(w: World, owner: number): Affil {
+    if (owner === -2) return 'unknown';
     if (owner < 0) return 'neutral';
     if (owner === w.me) return 'own';
     return w.teamOf(owner) === w.myTeam ? 'ally' : 'hostile';
@@ -218,46 +219,39 @@ export class Overlay {
       this.items.push({ kind: 'ghost', id: g.id, sx: P.x, sy: P.y, own: false, type: g.type });
     }
 
-    // ---- radar contacts ----
+    // ---- radar contacts: one calm marker per track ----
+    // A soft uncertainty disc with a hairline edge, a small symbol, and a one-word class.
+    // The marker glides as the estimate improves; it never re-rolls or pings.
     for (const c of w.contacts.values()) {
       const type = c.kind >= 10 ? (UNIT_TYPES[c.kind - 10] as UnitType) : null;
       const domain = (type ? UNITS[type].domain : DOMAINS[c.kind]) as SymDomain;
       const affil: Affil = type ? 'hostile' : 'unknown';
       const col = sideColor(affil);
-      const age = w.clock - c.born;
-      const fadeIn = Math.min(1, age / 0.5);
-      if (c.old && w.clock - c.old.t < 0.6) {
-        const k = 1 - (w.clock - c.old.t) / 0.6;
-        if (this.proj(v, c.old.x, 0, c.old.y)) {
-          ctx.globalAlpha = k * 0.6;
-          this.blit(symbolCanvas(affil, domain, glyphFor(type), symSize - 1), P.x, P.y);
-          ctx.globalAlpha = 1;
-        }
-      }
-      ctx.strokeStyle = col;
-      ctx.lineWidth = 1;
+      const fadeIn = Math.min(1, (w.clock - c.born) / 0.8);
+      const hov = v.hover?.kind === 'contact' && v.hover.id === c.id;
       if (c.r > 0.05) {
-        ctx.globalAlpha = 0.3 * fadeIn;
-        ctx.setLineDash([3, 6]);
-        if (this.circle(v, c.x, c.y, c.r, 0, 48)) ctx.stroke();
-        ctx.setLineDash([]);
-        if (age < 0.7) {
-          const k = age / 0.7;
-          ctx.globalAlpha = (1 - k) * 0.7;
-          if (this.circle(v, c.x, c.y, c.r * (1.6 - 0.6 * k), 0, 48)) ctx.stroke();
+        // First detection: the disc settles in from slightly larger, once.
+        const settle = 1 + (1 - fadeIn) * 0.25;
+        if (this.circle(v, c.x, c.y, c.r * settle, 0, 48)) {
+          ctx.fillStyle = col;
+          ctx.globalAlpha = 0.05 * fadeIn;
+          ctx.fill();
+          ctx.strokeStyle = col;
+          ctx.lineWidth = 1;
+          ctx.globalAlpha = (hov ? 0.55 : 0.28) * fadeIn;
+          ctx.stroke();
         }
         ctx.globalAlpha = 1;
       }
       if (!this.proj(v, c.x, 0, c.y)) continue;
-      const hov = v.hover?.kind === 'contact' && v.hover.id === c.id;
-      ctx.globalAlpha = fadeIn;
-      this.blit(symbolCanvas(affil, domain, glyphFor(type), symSize - 1, hov), P.x, P.y);
-      ctx.globalAlpha = fadeIn * 0.85;
+      ctx.globalAlpha = fadeIn * 0.9;
+      this.blit(symbolCanvas(affil, domain, glyphFor(type), symSize - 2, hov), P.x, P.y);
+      ctx.globalAlpha = fadeIn * (hov ? 0.9 : 0.6);
       ctx.fillStyle = col;
       ctx.textAlign = 'left';
       ctx.font = `500 8px ${FONT}`;
-      ctx.fillText(type ? UNITS[type].short + '?' : domain === 'sub' ? 'SONAR' : domain === 'air' ? 'AIR' : 'SFC', P.x + symSize + 3, P.y - 2);
-      ctx.fillText('±' + c.r.toFixed(1) + 'km', P.x + symSize + 3, P.y + 7);
+      ctx.fillText(type ? UNITS[type].short : domain === 'sub' ? 'SONAR' : domain === 'air' ? 'AIR' : 'SURFACE', P.x + symSize + 2, P.y + 3);
+      if (hov) ctx.fillText('±' + c.r.toFixed(1) + ' km', P.x + symSize + 2, P.y + 12);
       ctx.globalAlpha = 1;
       this.items.push({ kind: 'contact', id: c.id, sx: P.x, sy: P.y, own: false, type });
     }
@@ -391,14 +385,21 @@ export class Overlay {
         continue;
       }
       if (p.kind === 'shell' && dist > 30) continue;
-      const a3 = p.kind === 'torpedo' ? 0 : p.ralt * (p.kind === 'shell' || p.kind === 'bomb' ? 1 : AIR_VIS);
+      const guided = p.kind === 'missile' || p.kind === 'sam';
+      const a3 =
+        p.kind === 'torpedo'
+          ? 0
+          : p.kind === 'shell' || p.kind === 'bomb'
+            ? p.ralt
+            : Math.max(p.ralt * AIR_VIS, groundY(w.map, p.rx, p.ry) + 0.03);
       if (!this.proj(v, p.rx, a3, p.ry)) continue;
       const sx = P.x;
       const sy = P.y;
-      const col = p.mine ? '#e8f8ff' : '#ff7a4a';
-      ctx.fillStyle = col;
-      if (p.kind === 'missile' || p.kind === 'sam') {
-        // Short fixed-length streak opposite the direction of travel.
+      // Colour code: hostile anti-ship missiles are red dots with a faint halo; our missiles are
+      // white; interceptors (SAMs, either side) are small grey-blue ticks without a dot.
+      const incoming = p.kind === 'missile' && !p.mine;
+      const col = p.kind === 'sam' ? (p.mine ? '#9fd4ff' : '#c9b8c8') : p.mine ? '#f2f8ff' : '#ff4a3d';
+      if (guided) {
         const dx = p.x - p.px;
         const dy = p.y - p.py;
         const dl = Math.hypot(dx, dy);
@@ -406,31 +407,40 @@ export class Overlay {
           const ex = P.x - sx;
           const ey = P.y - sy;
           const el = Math.hypot(ex, ey) || 1;
-          const L = p.kind === 'missile' ? 14 : 9;
+          const L = p.kind === 'missile' ? 10 : 6;
           ctx.strokeStyle = col;
-          ctx.globalAlpha = 0.75;
-          ctx.lineWidth = 1.5;
+          ctx.globalAlpha = p.kind === 'missile' ? 0.55 : 0.45;
+          ctx.lineWidth = 1;
           ctx.beginPath();
           ctx.moveTo(sx, sy);
           ctx.lineTo(sx + (ex / el) * L, sy + (ey / el) * L);
           ctx.stroke();
           ctx.globalAlpha = 1;
         }
-        const s = p.kind === 'missile' ? 3 : 2;
-        ctx.fillRect(sx - s / 2, sy - s / 2, s, s);
-        if (!p.mine && p.kind === 'missile') {
-          ctx.strokeStyle = col;
-          ctx.globalAlpha = 0.5 + 0.5 * Math.sin(w.clock * 12);
+        if (incoming) {
+          ctx.fillStyle = col;
+          ctx.globalAlpha = 0.18;
           ctx.beginPath();
-          ctx.arc(sx, sy, 6, 0, Math.PI * 2);
-          ctx.stroke();
+          ctx.arc(sx, sy, 5, 0, Math.PI * 2);
+          ctx.fill();
           ctx.globalAlpha = 1;
+          ctx.beginPath();
+          ctx.arc(sx, sy, 2.2, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (p.kind === 'missile') {
+          ctx.fillStyle = col;
+          ctx.fillRect(sx - 1.25, sy - 1.25, 2.5, 2.5);
+        } else {
+          ctx.fillStyle = col;
+          ctx.fillRect(sx - 0.75, sy - 0.75, 1.5, 1.5);
         }
       } else if (p.kind === 'torpedo') {
+        ctx.fillStyle = p.mine ? '#f2f8ff' : '#ff4a3d';
         ctx.globalAlpha = 0.6 + 0.4 * Math.sin(w.clock * 8);
         ctx.fillRect(sx - 1.5, sy - 1.5, 3, 3);
         ctx.globalAlpha = 1;
       } else {
+        ctx.fillStyle = '#ffd9a0';
         ctx.fillRect(sx - 1, sy - 1, 2, 2);
       }
     }

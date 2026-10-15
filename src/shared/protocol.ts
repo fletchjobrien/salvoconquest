@@ -62,6 +62,8 @@ export type SiteRow = [number, number, number, number];
 export type DetailRow = [number, number[], number[], number, number, number, number, number, number];
 /** Weather cell: kind (0 storm, 1 fog), x, y, radius, intensity 0-100. */
 export type WeatherRow = [number, number, number, number, number];
+/** On the wire: kind, x, y, radius, intensity, vx, vy (km/s), id. */
+export type WeatherWire = [number, number, number, number, number, number, number, number];
 
 export interface QueueItem {
   type: UnitType;
@@ -79,7 +81,7 @@ export interface Snapshot {
   d: DetailRow[];
   e: GameEvent[];
   s?: SiteRow[];
-  w?: WeatherRow[];
+  w?: WeatherWire[];
   q?: Record<'naval' | 'ground' | 'air', QueueItem[]>;
   f?: Record<'naval' | 'ground' | 'air', number>; // factory site (>=0) or carrier unit (encoded -1-id)
   pl?: { id: number; res: number; units: number; defeated: boolean; dom: number }[];

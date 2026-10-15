@@ -346,8 +346,8 @@ export class Hud {
     const s = w.map.sites[id];
     const sv = w.sites[id];
     const b = BUILDINGS[s.type];
-    const affil = sv.owner < 0 ? 'neutral' : sv.owner === w.me ? 'own' : w.teamOf(sv.owner) === w.myTeam ? 'ally' : 'hostile';
-    const owner = sv.owner < 0 ? 'NEUTRAL' : w.players[sv.owner].name;
+    const affil = sv.owner === -2 ? 'unknown' : sv.owner < 0 ? 'neutral' : sv.owner === w.me ? 'own' : w.teamOf(sv.owner) === w.myTeam ? 'ally' : 'hostile';
+    const owner = sv.owner === -2 ? 'UNKNOWN · NOT SCOUTED' : sv.owner < 0 ? 'NEUTRAL' : w.players[sv.owner].name;
     const isl = w.map.islands[s.island];
     const canProduce = sv.owner === w.me && b.produces;
     const isFactory = canProduce && w.factories[b.produces!] === id;

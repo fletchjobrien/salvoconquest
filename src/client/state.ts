@@ -26,12 +26,14 @@ export interface UView {
 export interface CView {
   id: number;
   kind: number;
+  /** Displayed estimate; eases toward the latest server estimate (tx, ty, tr). */
   x: number;
   y: number;
   r: number;
+  tx: number;
+  ty: number;
+  tr: number;
   born: number;
-  /** Previous sample, kept briefly for the cross-fade. */
-  old: { x: number; y: number; r: number; t: number } | null;
   seen: number;
 }
 
@@ -80,7 +82,9 @@ export class World {
   ghosts = new Map<number, Ghost>();
   projs = new Map<number, PView>();
   sites: SiteView[];
+  /** Smoothed weather cells for rendering: [kind, x, y, r, intensity]. */
   weather: WeatherRow[] = [];
+  private wx = new Map<number, { row: WeatherRow; tx: number; ty: number; ti: number; vx: number; vy: number }>();
   details = new Map<number, DetailRow>();
   /** Type of each own unit, including ones embarked on ships. */
   cargoTypes = new Map<number, UnitType>();
@@ -130,7 +134,18 @@ export class World {
     if (s.q) this.queues = s.q;
     if (s.f) this.factories = s.f;
     if (s.s) for (const [id, owner, cap, capBy] of s.s) this.sites[id] = { id, owner, cap: cap / 100, capBy };
-    if (s.w) this.weather = s.w;
+    if (s.w) {
+      // Server sends cells once a second; keep them gliding in between.
+      const live = new Set<number>();
+      for (const [kind, x, y, r, i, vx, vy, id] of s.w) {
+        live.add(id);
+        const c = this.wx.get(id);
+        if (!c) this.wx.set(id, { row: [kind, x, y, r, i], tx: x, ty: y, ti: i, vx, vy });
+        else Object.assign(c, { tx: x, ty: y, ti: i, vx, vy }), (c.row[3] = r);
+      }
+      for (const id of this.wx.keys()) if (!live.has(id)) this.wx.delete(id);
+      this.weather = [...this.wx.values()].map((c) => c.row);
+    }
     if (s.pl) for (const p of s.pl) Object.assign(this.players[p.id], p);
     this.details.clear();
     for (const d of s.d) {
@@ -174,16 +189,12 @@ export class World {
       seenC.add(id);
       const c = this.contacts.get(id);
       if (!c) {
-        this.contacts.set(id, { id, kind, x, y, r, born: now, old: null, seen: now });
+        this.contacts.set(id, { id, kind, x, y, r, tx: x, ty: y, tr: r, born: now, seen: now });
         this.ghosts.delete(id);
       } else {
-        if (c.x !== x || c.y !== y || c.r !== r) {
-          c.old = { x: c.x, y: c.y, r: c.r, t: now };
-          c.x = x;
-          c.y = y;
-          c.r = r;
-          c.born = now;
-        }
+        c.tx = x;
+        c.ty = y;
+        c.tr = r;
         c.kind = kind;
         c.seen = now;
       }
@@ -246,6 +257,20 @@ export class World {
       p.ralt = p.palt + (p.alt - p.palt) * f;
     }
     for (const [id, g] of this.ghosts) if (this.clock - g.t > 30) this.ghosts.delete(id);
+    const ck = Math.min(1, dt * 2);
+    for (const c of this.contacts.values()) {
+      c.x += (c.tx - c.x) * ck;
+      c.y += (c.ty - c.y) * ck;
+      c.r += (c.tr - c.r) * ck;
+    }
+    for (const c of this.wx.values()) {
+      c.tx += c.vx * dt;
+      c.ty += c.vy * dt;
+      const k = Math.min(1, dt * 1.5);
+      c.row[1] += (c.tx - c.row[1]) * k;
+      c.row[2] += (c.ty - c.row[2]) * k;
+      c.row[4] += (c.ti - c.row[4]) * Math.min(1, dt * 0.8);
+    }
     // Cash ticker.
     const d = this.cash - this.displayCash;
     this.displayCash += Math.abs(d) < 1 ? d : d * Math.min(1, dt * 6);
