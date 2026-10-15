@@ -1715,6 +1715,13 @@ export class Game {
     }
   }
 
+  /** Live SAMs homing on a target (unit id, or -2-projId for a missile). */
+  private samsAt(target: number): number {
+    let n = 0;
+    for (const q of this.projs) if (!q.dead && q.kind === 'sam' && q.target === target) n++;
+    return n;
+  }
+
   private pickMissileTarget(sh: { x: number; y: number; team: number }, w: Weapon): Projectile | null {
     const range = w.mod.range ?? 0;
     let best: Projectile | null = null;
@@ -1727,10 +1734,8 @@ export class Game {
       const tgt = this.units.get(p.target);
       const threat = tgt ? tgt.team === sh.team : Math.hypot(p.tx - sh.x, p.ty - sh.y) < 12;
       if (!threat) continue;
-      // Do not waste interceptors on missiles already engaged by several.
-      let engaged = 0;
-      for (const q of this.projs) if (!q.dead && q.target === -2 - p.id) engaged++;
-      if (w.mod.proj === 'sam' && ((p.sams ?? 0) >= 2 || engaged >= 1)) continue;
+      // Never more than two SAMs at one missile (in flight or in total).
+      if (w.mod.proj === 'sam' && ((p.sams ?? 0) >= 2 || this.samsAt(-2 - p.id) >= 2)) continue;
       if (d < bd) {
         bd = d;
         best = p;
@@ -1781,6 +1786,8 @@ export class Game {
       if (d > range) continue;
       // Torpedoes need open water all the way.
       if (w.mod.proj === 'torpedo' && !lineClear(this.map, sh.x, sh.y, tx, ty, (c) => this.map.nav[c] !== 1)) continue;
+      // Never more than two SAMs (or air-to-air missiles) in flight at one aircraft.
+      if (w.mod.proj === 'sam' && this.samsAt(id) >= 2) continue;
       // Don't waste limited, slow munitions on a target that is already as good as dead.
       // Guns are not held back: their rounds are free and arrive in seconds.
       if (OVERKILL_CHECK.has(w.mod.proj!) && t.pendingDmg >= t.hp * 1.2) continue;
@@ -1825,7 +1832,7 @@ export class Game {
       ay += Math.sin(t.heading) * t.speed * tt;
     }
     const p = this.launchProj(sh, w, exact ? t.id : -1, ax, ay);
-    if (exact || w.mod.proj === 'missile') p.target = t.id;
+    if (exact || w.mod.proj === 'missile' || w.mod.proj === 'sam') p.target = t.id;
     p.seeking = !exact;
     p.dmgMul = sh.dmgMul;
     if (OVERKILL_CHECK.has(w.mod.proj!)) {
@@ -1949,6 +1956,13 @@ export class Game {
           this.emit({ k: 'boom', x: p.x, y: p.y, s: 0.4, w: false }, p.x, p.y);
           continue;
         }
+      }
+      // A SAM whose target is gone self-destructs; it never picks a new one (that is how
+      // three, four or more SAMs ended up chasing the same aircraft).
+      if (p.kind === 'sam' && p.target === -1) {
+        p.dead = true;
+        this.emit({ k: 'boom', x: p.x, y: p.y, s: 0.12, w: false, a: p.alt }, p.x, p.y);
+        continue;
       }
       // Seeker search when arriving at an aim point without a lock (the fuzzy track was off,
       // or the target slipped away): look around, lock on to whatever is there, or give up.

@@ -149,13 +149,15 @@ export class Overlay {
     if (v.showSensors) this.drawSensors(v);
 
     // ---- range rings & orders for selection ----
+    const selUnits: UView[] = [];
     for (const id of v.selected) {
       const u = w.units.get(id);
       if (!u) continue;
+      selUnits.push(u);
       this.drawOrder(v, u);
-      if (v.showRanges || v.selected.size <= 3) this.drawRanges(v, u, v.selected.size > 3 ? 0.4 : 1);
       if (UNITS[u.type].domain === 'air') this.drawFuelRange(v, u, v.selected.size > 3 ? 0.5 : 1);
     }
+    if (selUnits.length && (v.showRanges || selUnits.length <= 12)) this.drawRanges(v, selUnits, selUnits.length > 6 ? 0.6 : 1);
     if (v.mode?.k === 'unload') this.drawUnloadMode(v);
 
     // ---- sites ----
@@ -228,8 +230,8 @@ export class Overlay {
     }
 
     // ---- radar contacts: one calm marker per track ----
-    // A soft uncertainty disc with a hairline edge, a small symbol, and a one-word class.
-    // The marker glides as the estimate improves; it never re-rolls or pings.
+    // Just a small symbol and a one-word class; the marker glides as the estimate improves.
+    // The position error shows only as text, and only on hover (no overlapping circles).
     for (const c of w.contacts.values()) {
       const type = c.kind >= 10 ? (UNIT_TYPES[c.kind - 10] as UnitType) : null;
       const domain = (type ? UNITS[type].domain : DOMAINS[c.kind]) as SymDomain;
@@ -237,20 +239,6 @@ export class Overlay {
       const col = sideColor(affil);
       const fadeIn = Math.min(1, (w.clock - c.born) / 0.8);
       const hov = v.hover?.kind === 'contact' && v.hover.id === c.id;
-      if (c.r > 0.05) {
-        // First detection: the disc settles in from slightly larger, once.
-        const settle = 1 + (1 - fadeIn) * 0.25;
-        if (this.circle(v, c.x, c.y, c.r * settle, 0, 48)) {
-          ctx.fillStyle = col;
-          ctx.globalAlpha = 0.05 * fadeIn;
-          ctx.fill();
-          ctx.strokeStyle = col;
-          ctx.lineWidth = 1;
-          ctx.globalAlpha = (hov ? 0.55 : 0.28) * fadeIn;
-          ctx.stroke();
-        }
-        ctx.globalAlpha = 1;
-      }
       if (!this.proj(v, c.x, 0, c.y)) continue;
       ctx.globalAlpha = fadeIn * 0.9;
       this.blit(symbolCanvas(affil, domain, glyphFor(type), symSize - 2, hov), P.x, P.y);
@@ -721,35 +709,81 @@ export class Overlay {
     return sc;
   }
 
-  private drawRanges(v: OverlayView, u: UView, alpha: number) {
+  /**
+   * Weapon range rings of the selection. Rings of the same weapon range (and kind: anti-air,
+   * anti-sub, anti-surface) from several units merge into a single outline: only arcs outside
+   * every other ring of the group are drawn, so a group shows the edge of its combined reach.
+   */
+  private drawRanges(v: OverlayView, units: UView[], alpha: number) {
     const w = v.world;
-    const det = w.details.get(u.id);
-    if (!det) return;
     const ctx = this.ctx;
-    const ranges = new Map<number, string>();
-    const mods = weaponModsFor(w, u);
-    mods.forEach((m) => {
-      const r = m.range ?? 0;
-      if (r < 1.5) return;
-      const cls = m.dmg?.air && !m.dmg.sea && !m.dmg.land ? 'air' : m.dmg?.sub && !m.dmg.sea ? 'sub' : 'surf';
-      const color = cls === 'air' ? '#7fd8ff' : cls === 'sub' ? '#9a8cff' : '#ffb36b';
-      if (!ranges.has(r)) ranges.set(r, color);
-    });
-    const y3 = UNITS[u.type].domain === 'land' ? groundY(w.map, u.x, u.y) : 0;
-    for (const [r, color] of ranges) {
+    const groups = new Map<string, { x: number; y: number; r: number; y3: number }[]>();
+    for (const u of units) {
+      if (!w.details.get(u.id)) continue;
+      const y3 = UNITS[u.type].domain === 'land' ? groundY(w.map, u.x, u.y) * 0.2 : 0;
+      const seen = new Set<string>();
+      for (const m of weaponModsFor(w, u)) {
+        const r = m.range ?? 0;
+        if (r < 1.5) continue;
+        const cls = m.dmg?.air && !m.dmg.sea && !m.dmg.land ? 'air' : m.dmg?.sub && !m.dmg.sea ? 'sub' : 'surf';
+        const color = cls === 'air' ? '#7fd8ff' : cls === 'sub' ? '#9a8cff' : '#ffb36b';
+        const key = color + ':' + r;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        let g = groups.get(key);
+        if (!g) groups.set(key, (g = []));
+        g.push({ x: u.x, y: u.y, r, y3 });
+      }
+    }
+    for (const [key, circles] of groups) {
+      const color = key.split(':')[0];
       ctx.strokeStyle = color;
-      ctx.globalAlpha = 0.28 * alpha;
+      ctx.globalAlpha = 0.3 * alpha;
       ctx.lineWidth = 1;
       ctx.setLineDash([6, 6]);
-      if (this.circle(v, u.x, u.y, r, y3 * 0.2, 72)) ctx.stroke();
+      // Label once per kind, at the southmost point of the outline.
+      let lab: { x: number; y: number; r: number; y3: number } | null = null;
+      for (const c of circles) {
+        const seg = Math.max(48, Math.min(160, Math.round(c.r * 6)));
+        let open = false;
+        ctx.beginPath();
+        for (let i = 0; i <= seg; i++) {
+          const a = (i / seg) * Math.PI * 2;
+          const px = c.x + Math.cos(a) * c.r;
+          const py = c.y + Math.sin(a) * c.r;
+          let inside = false;
+          for (const o of circles) {
+            if (o === c) continue;
+            const dd = Math.hypot(px - o.x, py - o.y);
+            // Inside another ring (ties broken by order, so identical rings draw once).
+            if (dd < o.r - 1e-3 || (Math.abs(dd - o.r) < 1e-3 && circles.indexOf(o) < circles.indexOf(c))) {
+              inside = true;
+              break;
+            }
+          }
+          if (inside) {
+            open = false;
+            continue;
+          }
+          v.r.project(px, c.y3, py, P);
+          if (P.z >= 1) {
+            open = false;
+            continue;
+          }
+          if (!open) ctx.moveTo(P.x, P.y);
+          else ctx.lineTo(P.x, P.y);
+          open = true;
+          if (Math.abs(a - Math.PI / 2) < Math.PI / seg && (!lab || py > lab.y + lab.r)) lab = c;
+        }
+        ctx.stroke();
+      }
       ctx.setLineDash([]);
-      // Range label at the ring's "south" point.
-      if (alpha >= 1 && this.proj(v, u.x, 0, u.y + r)) {
+      if (lab && alpha >= 1 && this.proj(v, lab.x, 0, lab.y + lab.r)) {
         ctx.fillStyle = color;
         ctx.globalAlpha = 0.5;
         ctx.font = `500 8px ${FONT}`;
         ctx.textAlign = 'center';
-        ctx.fillText(`${r}km`, P.x, P.y + 10);
+        ctx.fillText(`${lab.r}km`, P.x, P.y + 10);
       }
     }
     ctx.globalAlpha = 1;
