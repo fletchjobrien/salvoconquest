@@ -1,6 +1,7 @@
 // A running match: wires world state, rendering, overlay, HUD, input, audio and the connection.
 import { UNITS, UNIT_TYPES, UnitType, MODULES, UNLOAD_RANGE } from '../shared/defs';
 import { islandAt } from '../shared/map';
+import { weatherStrength } from '../shared/weather';
 import type { Command, GameEvent, ServerMsg, StartInfo } from '../shared/protocol';
 import { Conn } from './net';
 import { World, UView } from './state';
@@ -171,8 +172,7 @@ export class Match {
     let storm = 0;
     for (const [kind, x, y, r, i] of this.world.weather) {
       if (kind !== 0) continue;
-      const d = Math.hypot(x - this.rig.tx, y - this.rig.ty);
-      if (d < r) storm = Math.max(storm, (i / 100) * Math.min(1, (1 - d / r) * 2.2));
+      storm = Math.max(storm, weatherStrength(0, this.rig.tx - x, this.rig.ty - y, r, i / 100));
     }
     return storm;
   }

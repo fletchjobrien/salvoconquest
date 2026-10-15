@@ -89,6 +89,15 @@ export interface GameMap {
   spawns: { x: number; y: number; island: number }[];
 }
 
+/** A capsule (segment with radius) in an island's canonical frame; unions of these make peninsulas and bays. */
+interface Lobe {
+  ax: number;
+  ay: number;
+  bx: number;
+  by: number;
+  r: number;
+}
+
 interface IslandSpec {
   x: number;
   y: number;
@@ -96,7 +105,8 @@ interface IslandSpec {
   rot: number; // quarter turns
   seed: number;
   peak: number;
-  center?: boolean;
+  lobes: Lobe[];
+  warp: number;
 }
 
 const C = MAP_SIZE / 2;
@@ -113,42 +123,69 @@ function rotQ(x: number, y: number, k: number): [number, number] {
   return [C + dx, C + dy];
 }
 
+function segDist(px: number, py: number, l: Lobe): number {
+  const vx = l.bx - l.ax;
+  const vy = l.by - l.ay;
+  const len2 = vx * vx + vy * vy;
+  const t = len2 > 0 ? Math.max(0, Math.min(1, ((px - l.ax) * vx + (py - l.ay) * vy) / len2)) : 0;
+  return Math.hypot(px - (l.ax + vx * t), py - (l.ay + vy * t));
+}
+
+/** Smooth maximum: blends lobes together without creases. */
+function smax(a: number, b: number, k: number): number {
+  const h = Math.max(k - Math.abs(a - b), 0) / k;
+  return Math.max(a, b) + h * h * k * 0.25;
+}
+
+/** Shape field in the island's own frame: > 0 on land, < 0 at sea. */
+function shapeField(s: IslandSpec, dx: number, dy: number): number {
+  // Domain warp bends straight edges into coves and headlands.
+  const w = s.warp * s.r;
+  const wx = dx + (fbm(dx * 0.16 + 3.1, dy * 0.16, s.seed + 41, 3) - 0.5) * w;
+  const wy = dy + (fbm(dx * 0.16, dy * 0.16 + 7.7, s.seed + 59, 3) - 0.5) * w;
+  let f = -10;
+  for (const l of s.lobes) f = smax(f, 1 - segDist(wx, wy, l) / l.r, 0.35);
+  // Rugged coastline detail at two scales.
+  f += (fbm(dx * 0.55 + 20, dy * 0.55 + 20, s.seed + 3, 4) - 0.5) * 0.3;
+  f += (fbm(dx * 1.6 + 5, dy * 1.6 + 5, s.seed + 9, 2) - 0.5) * 0.1;
+  return f;
+}
+
+function rot90(x: number, y: number, k: number): [number, number] {
+  for (let i = 0; i < k; i++) {
+    const t = x;
+    x = -y;
+    y = t;
+  }
+  return [x, y];
+}
+
 function islandHeight(s: IslandSpec, x: number, y: number): number {
-  let dx = x - s.x;
-  let dy = y - s.y;
   // Undo this copy's rotation so all four copies share one canonical shape.
-  for (let i = 0; i < (4 - s.rot) % 4; i++) {
-    const t = dx;
-    dx = -dy;
-    dy = t;
+  const [dx, dy] = rot90(x - s.x, y - s.y, (4 - s.rot) % 4);
+  if (Math.hypot(dx, dy) > s.r * 3.2) return -1;
+  const t = shapeField(s, dx, dy);
+  if (t > 0) {
+    // Ridged noise raises mountain spines; valleys stay low.
+    const ridge = 1 - Math.abs(fbm(dx * 0.22 + 70, dy * 0.22 + 70, s.seed + 13, 3) * 2 - 1);
+    return Math.pow(t, 0.8) * s.peak * (0.55 + 0.75 * ridge) + 0.004;
   }
-  const d = Math.hypot(dx, dy);
-  if (d > s.r * 2.6) return -1;
-  const th = Math.atan2(dy, dx);
-  let edge: number;
-  let detail: number;
-  if (s.center) {
-    const k = 4 * th;
-    edge = s.r * (0.72 + 0.55 * fbm(Math.cos(k) * 1.3 + 5, Math.sin(k) * 1.3 + 5, s.seed, 3));
-    detail = 0;
-    for (let q = 0; q < 4; q++) {
-      let ex = dx;
-      let ey = dy;
-      for (let i = 0; i < q; i++) {
-        const t = ex;
-        ex = -ey;
-        ey = t;
-      }
-      detail += fbm(ex * 0.35 + 50, ey * 0.35 + 50, s.seed + 7, 4);
-    }
-    detail = detail / 4 - 0.5;
-  } else {
-    edge = s.r * (0.7 + 0.6 * fbm(Math.cos(th) * 1.6 + 9, Math.sin(th) * 1.6 + 9, s.seed, 3));
-    detail = fbm(dx * 0.45 + 20, dy * 0.45 + 20, s.seed + 3, 4) - 0.5;
-  }
-  const t = 1 - d / edge + detail * 0.35;
-  if (t > 0) return Math.pow(t, 0.8) * s.peak + 0.004;
   return t * 0.6; // continental shelf slope into deep water
+}
+
+/** Random capsules: a core plus arms that become peninsulas, with bays between them. */
+function makeLobes(rng: Rng, r: number, arms: number, armLen: number, stretch: number): Lobe[] {
+  const a = rng.range(0, Math.PI * 2);
+  const half = r * 0.45 * stretch;
+  const lobes: Lobe[] = [{ ax: -Math.cos(a) * half, ay: -Math.sin(a) * half, bx: Math.cos(a) * half, by: Math.sin(a) * half, r: r * 0.62 }];
+  for (let i = 0; i < arms; i++) {
+    const b = a + rng.range(-Math.PI, Math.PI);
+    const sx = Math.cos(a) * rng.range(-half, half);
+    const sy = Math.sin(a) * rng.range(-half, half);
+    const len = r * rng.range(0.5, armLen);
+    lobes.push({ ax: sx, ay: sy, bx: sx + Math.cos(b) * len, by: sy + Math.sin(b) * len, r: r * rng.range(0.22, 0.4) });
+  }
+  return lobes;
 }
 
 export function generateMap(seed: number, theme: Theme): GameMap {
@@ -164,26 +201,30 @@ export function generateMap(seed: number, theme: Theme): GameMap {
   const peakScale = theme === 'arctic' ? 1.6 : theme === 'jungle' ? 1.1 : 0.8;
 
   // Central island.
-  specs.push({ x: C, y: C, r: 10.5, rot: 0, seed: seed + 11, peak: 0.55 * peakScale, center: true });
+  // Centre: one big organic island. Its sites are placed at random anyway, so exact symmetry
+  // would only make it look like a square; the islands around it stay 4-fold symmetric.
+  specs.push({ x: C, y: C, r: 10.5, rot: 0, seed: seed + 11, peak: 0.55 * peakScale, lobes: makeLobes(rng, 10.5, 4, 0.85, 1.1), warp: 0.45 });
   islands.push({ id: 0, name: info.centerName, x: C, y: C, r: 10.5, home: -1 });
 
   // Canonical quadrant: home island + neutrals, then rotate 4 times.
-  const canon: { x: number; y: number; r: number; home: boolean; seed: number; peak: number }[] = [];
+  const canon: { x: number; y: number; r: number; home: boolean; seed: number; peak: number; lobes: Lobe[]; warp: number }[] = [];
   const homeOff = 26.5;
-  canon.push({ x: C + homeOff, y: C + homeOff, r: 5.6, home: true, seed: seed + 21, peak: 0.45 * peakScale });
+  // Home islands stay compact enough for an airbase and a port, but not round.
+  canon.push({ x: C + homeOff, y: C + homeOff, r: 5.6, home: true, seed: seed + 21, peak: 0.45 * peakScale, lobes: makeLobes(rng, 5.6, 2, 0.9, 1.0), warp: 0.5 });
   const tooClose = (x: number, y: number, r: number) => {
     if (x < r + 2.5 || y < r + 2.5 || x > MAP_SIZE - r - 2.5 || y > MAP_SIZE - r - 2.5) return true;
-    if (Math.hypot(x - C, y - C) < 10.5 * 1.25 + r + 4) return true;
+    // Arms reach well past r, so keep generous gaps (merged islands would break ownership).
+    if (Math.hypot(x - C, y - C) < 10.5 * 1.4 + r * 1.4 + 2.5) return true;
     for (const c of canon) {
       for (let k = 0; k < 4; k++) {
         const [cx, cy] = rotQ(c.x, c.y, k);
-        if (Math.hypot(cx - x, cy - y) < (c.r + r) * 1.25 + 4.5) return true;
+        if (Math.hypot(cx - x, cy - y) < (c.r + r) * 1.45 + 3.5) return true;
       }
     }
     // Also against rotated copies of itself.
     for (let k = 1; k < 4; k++) {
       const [cx, cy] = rotQ(x, y, k);
-      if (Math.hypot(cx - x, cy - y) < r * 2.5 + 4.5) return true;
+      if (Math.hypot(cx - x, cy - y) < r * 2.9 + 3.5) return true;
     }
     return false;
   };
@@ -196,13 +237,22 @@ export function generateMap(seed: number, theme: Theme): GameMap {
     const x = C + Math.cos(a) * dist;
     const y = C + Math.sin(a) * dist;
     if (tooClose(x, y, r)) continue;
-    canon.push({ x, y, r, home: false, seed: seed + 100 + canon.length * 13, peak: rng.range(0.25, 0.5) * peakScale });
+    canon.push({
+      x,
+      y,
+      r,
+      home: false,
+      seed: seed + 100 + canon.length * 13,
+      peak: rng.range(0.25, 0.5) * peakScale,
+      lobes: makeLobes(rng, r, rng.int(1, 3), 1.1, rng.range(0.6, 1.5)),
+      warp: rng.range(0.5, 0.9),
+    });
   }
   let nameIdx = 0;
   for (let k = 0; k < 4; k++) {
     for (const c of canon) {
       const [x, y] = rotQ(c.x, c.y, k);
-      specs.push({ x, y, r: c.r, rot: k, seed: c.seed, peak: c.peak });
+      specs.push({ x, y, r: c.r, rot: k, seed: c.seed, peak: c.peak, lobes: c.lobes, warp: c.warp });
       islands.push({
         id: islands.length,
         name: c.home ? `HOME ${k + 1}` : names[nameIdx++ % names.length],
@@ -219,7 +269,7 @@ export function generateMap(seed: number, theme: Theme): GameMap {
   const hn = MAP_SIZE * hres + 1;
   const height = new Float32Array(hn * hn).fill(-1);
   for (const s of specs) {
-    const reach = s.r * 2.6;
+    const reach = s.r * 3.2;
     const x0 = Math.max(0, Math.floor((s.x - reach) * hres));
     const x1 = Math.min(hn - 1, Math.ceil((s.x + reach) * hres));
     const y0 = Math.max(0, Math.floor((s.y - reach) * hres));
@@ -279,24 +329,55 @@ export function generateMap(seed: number, theme: Theme): GameMap {
       map.nav[j * nn + i] = hc > 0 ? 1 : maxH < -0.015 ? 0 : 2;
     }
   }
-  // Islands per land cell: nearest island centre among connected land.
-  for (let j = 0; j < nn; j++) {
-    for (let i = 0; i < nn; i++) {
-      if (map.nav[j * nn + i] !== 1) continue;
-      const cx = (i + 0.5) * map.cell;
-      const cy = (j + 0.5) * map.cell;
-      let best = -1;
-      let bd = 1e9;
-      for (const isl of islands) {
-        const d = Math.hypot(isl.x - cx, isl.y - cy) / isl.r;
-        if (d < bd) {
-          bd = d;
-          best = isl.id;
+  // Islands = connected land regions (4-neighbour). Each island keeps its largest region near its
+  // centre; stray islets get no id, so nothing is ever placed where troops cannot walk.
+  const comp = new Int32Array(nn * nn).fill(-1);
+  const comps: { size: number; sx: number; sy: number }[] = [];
+  const stack: number[] = [];
+  for (let c0 = 0; c0 < nn * nn; c0++) {
+    if (map.nav[c0] !== 1 || comp[c0] >= 0) continue;
+    const id = comps.length;
+    const info = { size: 0, sx: 0, sy: 0 };
+    comps.push(info);
+    comp[c0] = id;
+    stack.push(c0);
+    while (stack.length) {
+      const c = stack.pop()!;
+      const ci = c % nn;
+      const cj = (c - ci) / nn;
+      info.size++;
+      info.sx += ci;
+      info.sy += cj;
+      for (const [ni, nj] of [
+        [ci + 1, cj],
+        [ci - 1, cj],
+        [ci, cj + 1],
+        [ci, cj - 1],
+      ]) {
+        if (ni < 0 || nj < 0 || ni >= nn || nj >= nn) continue;
+        const k = nj * nn + ni;
+        if (map.nav[k] === 1 && comp[k] < 0) {
+          comp[k] = id;
+          stack.push(k);
         }
       }
-      map.islandOf[j * nn + i] = best;
     }
   }
+  const owner = new Int32Array(comps.length).fill(-1);
+  for (const isl of islands) {
+    let best = -1;
+    let bestSize = 0;
+    comps.forEach((cp, id) => {
+      const cx = (cp.sx / cp.size + 0.5) * map.cell;
+      const cy = (cp.sy / cp.size + 0.5) * map.cell;
+      if (Math.hypot(cx - isl.x, cy - isl.y) > isl.r * 1.8 + 2) return;
+      if (owner[id] >= 0 || cp.size <= bestSize) return;
+      best = id;
+      bestSize = cp.size;
+    });
+    if (best >= 0) owner[best] = isl.id;
+  }
+  for (let c = 0; c < nn * nn; c++) if (comp[c] >= 0) map.islandOf[c] = owner[comp[c]];
 
   placeSites(map, rng);
   return map;
@@ -398,7 +479,7 @@ function placeSites(map: GameMap, rng: Rng) {
     let best: [number, number] = [isl.x, isl.y];
     let bestScore = -1e9;
     for (let t = 0; t < 260; t++) {
-      const [ox, oy] = rng.inDisc(isl.r * 1.3);
+      const [ox, oy] = rng.inDisc(isl.r * 1.9);
       const x = isl.x + ox;
       const y = isl.y + oy;
       if (islandAt(map, x, y) !== isl.id || heightAt(map, x, y) < 0.01) continue;

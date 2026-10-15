@@ -61,6 +61,7 @@ import {
   ORDER_CODES,
 } from './protocol';
 import { Rng } from './rng';
+import { weatherStrength } from './weather';
 
 type Cat = 'naval' | 'ground' | 'air';
 const CATS: Cat[] = ['naval', 'ground', 'air'];
@@ -420,9 +421,8 @@ export class Game {
     let storm = 0;
     let fog = THEME_INFO[this.theme].baseFog;
     for (const w of this.weather) {
-      const d = Math.hypot(w.x - x, w.y - y);
-      if (d > w.r) continue;
-      const f = w.i * Math.min(1, (1 - d / w.r) * 2.2);
+      const f = weatherStrength(w.kind, x - w.x, y - w.y, w.r, w.i);
+      if (f <= 0) continue;
       if (w.kind === 0) storm = Math.max(storm, f);
       else fog = Math.max(fog, f);
     }

@@ -15,6 +15,7 @@ import type { Overlay } from './overlay';
 import { Wakes } from './wakes';
 import { setWeatherCells } from './weatherfx';
 import { WeatherView } from './weatherView';
+import { weatherStrength } from '../../shared/weather';
 
 interface UnitObj {
   m: UnitModel;
@@ -316,9 +317,8 @@ export class GameScene {
     let storm = 0;
     let fog = 0;
     for (const [kind, cx, cy, r, i] of this.world.weather) {
-      const d = Math.hypot(cx - x, cy - y);
-      if (d > r) continue;
-      const f = (i / 100) * Math.min(1, (1 - d / r) * 2.2);
+      const f = weatherStrength(kind as 0 | 1, x - cx, y - cy, r, i / 100);
+      if (f <= 0) continue;
       if (kind === 0) storm = Math.max(storm, f);
       else fog = Math.max(fog, f);
     }

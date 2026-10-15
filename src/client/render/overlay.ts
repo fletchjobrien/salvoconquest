@@ -8,6 +8,7 @@ import { Affil, FONT, SITE_GLYPH, SymDomain, glyphFor, sideColor, symbolCanvas }
 import { SIDE, unitName } from '../theme';
 import { matchLoadoutOf } from '../loadouts';
 import { groundY, visAlt, AIR_VIS } from './coords';
+import { weatherOutline } from '../../shared/weather';
 
 export interface Hover {
   kind: 'unit' | 'contact' | 'site' | 'ghost';
@@ -582,7 +583,18 @@ export class Overlay {
       ctx.globalAlpha = a;
       ctx.lineWidth = 1;
       ctx.setLineDash(kind === 0 ? [10, 6] : [2, 6]);
-      if (this.circle(v, x, y, r * 0.85, 0.2)) ctx.stroke();
+      // Same shape the simulation uses: squall line across the wind, fog tongue along it.
+      ctx.beginPath();
+      let any = false;
+      for (let k = 0; k <= 64; k++) {
+        const [ox, oy] = weatherOutline(kind as 0 | 1, x, y, r * 0.92, (k / 64) * Math.PI * 2);
+        v.r.project(ox, 0.2, oy, P);
+        if (P.z >= 1) continue;
+        if (P.x > -50 && P.y > -50 && P.x < this.w + 50 && P.y < this.h + 50) any = true;
+        if (k === 0) ctx.moveTo(P.x, P.y);
+        else ctx.lineTo(P.x, P.y);
+      }
+      if (any) ctx.stroke();
       ctx.setLineDash([]);
       if (this.proj(v, x, 0.2, y)) {
         ctx.fillStyle = ctx.strokeStyle;

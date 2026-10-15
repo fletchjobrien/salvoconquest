@@ -2,6 +2,7 @@
 // the cloud decks, rain shafts and fog layers (weatherView.ts) use the same density
 // functions, so shadows sit under clouds and fog edges match everywhere.
 import * as THREE from 'three';
+import { WEATHER_AXES } from '../../shared/weather';
 
 const N = 6;
 export const weatherUniforms = {
@@ -29,15 +30,22 @@ float wxFbm(vec2 p) {
   for (int i = 0; i < 4; i++) { s += a * wxNoise(p); p = p * 2.03 + 17.1; a *= 0.5; }
   return s / 0.9375;
 }
-// Smooth radial strength of a cell (drives waves, gloom and gameplay-like falloff).
+// Elliptical distance in wind-aligned axes (same shape as shared/weather.ts): 1 on the edge.
+float ellD(vec2 d, vec2 axes) {
+  vec2 w = normalize(wWind);
+  return length(vec2(dot(d, w) / axes.x, dot(d, vec2(-w.y, w.x)) / axes.y));
+}
+const vec2 STORM_AX = vec2(${WEATHER_AXES[0][0]}, ${WEATHER_AXES[0][1]});
+const vec2 FOG_AX = vec2(${WEATHER_AXES[1][0]}, ${WEATHER_AXES[1][1]});
+// Smooth strength of a storm cell (drives waves, gloom and matches the gameplay falloff).
 float cellAmount(vec4 c, vec2 p) {
-  float d = length(p - c.xy);
-  return c.w * clamp((1.0 - d / c.z) * 2.2, 0.0, 1.0);
+  float d = ellD(p - c.xy, STORM_AX * c.z);
+  return c.w * clamp((1.0 - d) * 2.2, 0.0, 1.0);
 }
 // Broken cloud cover of a storm cell: ragged edge, dense core, holes between cells.
 float stormCover(vec4 c, vec2 p, float layer) {
   vec2 q = p - wWind * wTime + vec2(layer * 37.0, layer * 11.0);
-  float d = length(p - c.xy) / c.z;
+  float d = ellD(p - c.xy, STORM_AX * c.z);
   float edge = 1.0 - smoothstep(0.35, 1.0, d + (wxFbm(q * 0.07) - 0.5) * 0.8);
   // Big convective cells plus cauliflower detail; gaps between them show the sea.
   float cells = wxFbm(q * (0.17 + layer * 0.1));
@@ -51,7 +59,7 @@ float fogCover(vec4 c, vec2 p, float layer) {
   // Stretch along the wind so the bank forms long tongues and wisps.
   vec2 w = normalize(wWind);
   vec2 qs = vec2(dot(q, w) * 0.55, dot(q, vec2(-w.y, w.x)) * 1.6);
-  float d = length(p - c.xy) / c.z;
+  float d = ellD(p - c.xy, FOG_AX * c.z);
   float edge = 1.0 - smoothstep(0.3, 1.0, d + (wxFbm(qs * 0.09 + 31.0) - 0.5) * 1.0);
   float body = 0.3 + 0.7 * wxFbm(qs * 0.35 + 7.0);
   return c.w * edge * body;

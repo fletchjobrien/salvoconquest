@@ -1,5 +1,6 @@
 // Radar-scope minimap with a rotating sweep.
 import * as THREE from 'three';
+import { WEATHER_AXES, WIND_ANGLE } from '../../shared/weather';
 import type { World } from '../state';
 import { SIDE } from '../theme';
 import { UNITS } from '../../shared/defs';
@@ -108,8 +109,9 @@ export class Minimap {
     // weather
     for (const [kind, x, y, rad, i] of w.weather) {
       ctx.fillStyle = kind === 0 ? `rgba(120,130,150,${(i / 100) * 0.35})` : `rgba(220,225,230,${(i / 100) * 0.2})`;
+      const [a, b] = WEATHER_AXES[kind as 0 | 1];
       ctx.beginPath();
-      ctx.arc(x * k, y * k, rad * k, 0, Math.PI * 2);
+      ctx.ellipse(x * k, y * k, rad * a * k, rad * b * k, WIND_ANGLE, 0, Math.PI * 2);
       ctx.fill();
     }
     // sites

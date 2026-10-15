@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { weatherUniforms, WEATHER_FUNCS, WEATHER_UNIFORMS_GLSL } from './weatherfx';
 import type { WeatherRow } from '../../shared/protocol';
+import { weatherOutline } from '../../shared/weather';
 
 const MAX = 6;
 const CLOUD_Y = [2.5, 3.6];
@@ -202,16 +203,17 @@ export class WeatherView {
           d.visible = inten > 0.02;
           d.position.x = x;
           d.position.z = y;
-          d.scale.set(r * 2.6, 1, r * 2.6);
+          d.scale.set(r * 4, 1, r * 4);
           d.material.uniforms.uCell.value.set(x, y, r, inten);
         }
         s.shafts.forEach((m, k) => {
           // Shafts sit at fixed spots inside the cell (golden-angle spiral) and drift with it.
           const a = k * 2.399 + si * 1.3;
-          const rr = r * 0.62 * Math.sqrt((k + 0.5) / SHAFTS);
+          const rr = 0.62 * Math.sqrt((k + 0.5) / SHAFTS);
           const width = r * (0.22 + 0.12 * ((k * 7) % 3));
           m.visible = inten > 0.05;
-          m.position.set(x + Math.cos(a) * rr, 0, y + Math.sin(a) * rr);
+          const [px, py] = weatherOutline(0, x, y, r * rr, a);
+          m.position.set(px, 0, py);
           m.scale.set(width, CLOUD_Y[0] + 0.1, 1);
           // Cylindrical billboard: face the camera around the vertical axis.
           m.rotation.y = Math.atan2(camera.position.x - m.position.x, camera.position.z - m.position.z);
@@ -224,7 +226,7 @@ export class WeatherView {
           l.visible = inten > 0.02;
           l.position.x = x;
           l.position.z = y;
-          l.scale.set(r * 2.5, 1, r * 2.5);
+          l.scale.set(r * 4.2, 1, r * 4.2);
           l.material.uniforms.uCell.value.set(x, y, r, inten);
         }
       }
