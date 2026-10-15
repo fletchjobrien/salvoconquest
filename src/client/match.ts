@@ -1,0 +1,673 @@
+// A running match: wires world state, rendering, overlay, HUD, input, audio and the connection.
+import { UNITS, UNIT_TYPES, UnitType, MODULES, UNLOAD_RANGE } from '../shared/defs';
+import { islandAt } from '../shared/map';
+import type { Command, GameEvent, ServerMsg, StartInfo } from '../shared/protocol';
+import { ORDER_CODES } from '../shared/protocol';
+import { Conn } from './net';
+import { World, UView } from './state';
+import { Renderer, CameraRig } from './render/renderer';
+import { GameScene } from './render/scene';
+import { Overlay, OverlayView, Hover } from './render/overlay';
+import { groundY } from './render/coords';
+import { Hud } from './ui/hud';
+import { Minimap, screenToGround } from './ui/minimap';
+import { audio, Sfx } from './audio/sfx';
+import { voices, VoiceCat } from './audio/voice';
+import { unitName } from './theme';
+import { matchLoadoutOf, freezeForMatch } from './loadouts';
+
+type Cat = 'naval' | 'ground' | 'air';
+
+export class Match {
+  world: World;
+  scene: GameScene;
+  overlay: Overlay;
+  rig: CameraRig;
+  hud: Hud;
+  minimap: Minimap;
+  selected = new Set<number>();
+  groups = new Map<number, number[]>();
+  view: OverlayView;
+  private keys = new Set<string>();
+  private drag: { x: number; y: number; btn: number; moved: boolean; tx: number; ty: number } | null = null;
+  private lastClick = { t: 0, id: -1 };
+  private lastAlert: { x: number; y: number } | null = null;
+  private disposers: (() => void)[] = [];
+  private announcedSites = new Set<string>();
+  private lastUnderFire = 0;
+  private ended = false;
+  onExit: () => void = () => {};
+  onEnd: (msg: ServerMsg & { t: 'end' }) => void = () => {};
+
+  constructor(
+    readonly r: Renderer,
+    readonly conn: Conn,
+    info: StartInfo,
+    readonly ui: HTMLElement,
+  ) {
+    freezeForMatch();
+    this.world = new World(info);
+    this.rig = new CameraRig(r.camera);
+    this.overlay = new Overlay(document.getElementById('ov') as HTMLCanvasElement);
+    this.overlay.resize(r.width, r.height);
+    this.scene = new GameScene(r, this.world);
+    this.scene.overlay = this.overlay;
+    this.scene.onSound = (n, x, y, v) => audio.play(n as Sfx, x, y, v);
+    this.view = {
+      world: this.world,
+      r,
+      rig: this.rig,
+      selected: this.selected,
+      hover: null,
+      dragRect: null,
+      mode: null,
+      mouse: { x: 0, y: 0, wx: 0, wy: 0, valid: false },
+      showRanges: false,
+      rain: 0,
+      pings: [],
+    };
+    this.hud = new Hud(this.world, {
+      build: (cat, type) => this.send({ c: 'build', cat, type }, true),
+      cancel: (cat, type) => {
+        const q = this.world.queues[cat];
+        for (let i = q.length - 1; i >= 0; i--)
+          if (q[i].type === type) {
+            this.send({ c: 'cancel', cat, index: i });
+            audio.play('deny');
+            return;
+          }
+      },
+      selectOnly: (ids) => this.select(ids, false),
+      unloadMode: () => this.enterUnload(),
+      toggleCargo: (id) => {
+        if (this.hud.cargoSel.has(id)) this.hud.cargoSel.delete(id);
+        else this.hud.cargoSel.add(id);
+        audio.play('click');
+        this.hud.invalidate();
+      },
+      ability: (a) => this.ability(a),
+    });
+    this.minimap = new Minimap(this.world);
+    this.minimap.onJump = (x, y) => this.rig.flyTo(x, y);
+    this.minimap.onCommand = (x, y) => this.commandAt(x, y, null, false);
+    this.hud.root.appendChild(this.minimap.el);
+    ui.appendChild(this.hud.root);
+    voices.onSubtitle = (_cat, text, who) => this.hud.log(who, text);
+    this.world.onEvent = (e) => this.onEvent(e);
+    // Start the camera over our home island.
+    const me = info.players[info.you];
+    const spawn = this.world.map.spawns[me.slot];
+    if (spawn) {
+      const c = this.world.map.size / 2;
+      this.rig.flyTo(spawn.x + (c - spawn.x) * 0.15, spawn.y + (c - spawn.y) * 0.15);
+      this.rig.yaw = this.rig.yaw;
+    }
+    this.rig.setDist(24, true);
+    this.bindInput();
+    audio.startAmbient();
+    setTimeout(() => this.hud.banner(this.world.map.islands[0].name + ' AO', 'Capture resource sites · Take the enemy HQ'), 400);
+    setTimeout(() => this.hud.toggleHelp(false), 25000);
+  }
+
+  onServer(m: ServerMsg) {
+    if (m.t === 's') this.world.apply(m);
+    else if (m.t === 'end') {
+      this.ended = true;
+      this.onEnd(m);
+    } else if (m.t === 'chat') this.hud.log(m.from, m.text);
+  }
+
+  send(cmd: Command, uiSound = false) {
+    this.conn.send({ t: 'cmd', cmd });
+    if (uiSound) audio.play('click');
+  }
+
+  // ------------------------------------------------------------------ frame
+
+  frame(dt: number) {
+    const w = this.world;
+    w.update(dt);
+    // Keyboard panning.
+    let px = 0;
+    let py = 0;
+    if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) py -= 1;
+    if (this.keys.has('KeyS') && !this.selected.size) py += 1;
+    if (this.keys.has('ArrowDown')) py += 1;
+    if (this.keys.has('KeyA') || this.keys.has('ArrowLeft')) px -= 1;
+    if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) px += 1;
+    // Edge scrolling.
+    const m = this.view.mouse;
+    if (this.edgeScroll && this.mouseInside && document.hasFocus() && !this.drag) {
+      if (m.x < 4) px -= 1;
+      if (m.x > this.r.width - 4) px += 1;
+      if (m.y < 4) py -= 1;
+      if (m.y > this.r.height - 4) py += 1;
+    }
+    this.rig.push(px, py);
+    if (this.keys.has('KeyQ')) this.rig.rotate(-dt * 1.2);
+    if (this.keys.has('KeyE')) this.rig.rotate(dt * 1.2);
+    this.rig.update(dt, w.map.size, w.clock);
+    // Drop selections that no longer exist.
+    for (const id of this.selected) if (!w.units.has(id)) this.selected.delete(id);
+    if (this.view.mode && !w.units.has(this.view.mode.ship)) this.view.mode = null;
+    this.updateMouseWorld();
+    this.scene.update(dt, this.rig);
+    this.r.render(w.clock);
+    this.overlay.draw(this.view, dt);
+    this.updateHover();
+    this.hud.update(this.selectedUnits(), w.clock);
+    this.minimap.draw(dt, this.r, this.rig);
+    audio.listener = { x: this.rig.tx, y: this.rig.ty, dist: this.rig.dist, yaw: this.rig.yaw };
+    const wx = this.weatherAtCam();
+    this.view.rain = wx;
+    audio.setWeather(wx, this.rig.dist);
+    this.view.pings = this.view.pings.filter((p) => w.clock - p.t < 1);
+  }
+
+  edgeScroll = true;
+  private mouseInside = false;
+
+  private weatherAtCam(): number {
+    let storm = 0;
+    for (const [kind, x, y, r, i] of this.world.weather) {
+      if (kind !== 0) continue;
+      const d = Math.hypot(x - this.rig.tx, y - this.rig.ty);
+      if (d < r) storm = Math.max(storm, (i / 100) * Math.min(1, (1 - d / r) * 2.2));
+    }
+    return storm;
+  }
+
+  private selectedUnits(): UView[] {
+    const out: UView[] = [];
+    for (const id of this.selected) {
+      const u = this.world.units.get(id);
+      if (u) out.push(u);
+    }
+    return out;
+  }
+
+  private updateMouseWorld() {
+    const m = this.view.mouse;
+    let p = screenToGround(this.r, m.x, m.y, 0);
+    if (p) {
+      // Refine against terrain height.
+      for (let i = 0; i < 3; i++) {
+        const gy = groundY(this.world.map, p[0], p[1]);
+        const q = screenToGround(this.r, m.x, m.y, gy);
+        if (!q) break;
+        p = q;
+      }
+      m.wx = p[0];
+      m.wy = p[1];
+      m.valid = true;
+    } else m.valid = false;
+  }
+
+  private pick(x: number, y: number, ownOnly = false): Hover | null {
+    let best: Hover | null = null;
+    let bd = 18;
+    let bestPri = 9;
+    for (const it of this.overlay.items) {
+      if (ownOnly && !(it.kind === 'unit' && it.own)) continue;
+      const d = Math.hypot(it.sx - x, it.sy - y);
+      if (d > 18) continue;
+      const pri = it.kind === 'unit' ? (it.own ? 0 : 1) : it.kind === 'contact' ? 2 : it.kind === 'site' ? 3 : 4;
+      if (pri < bestPri || (pri === bestPri && d < bd)) {
+        best = { kind: it.kind, id: it.id };
+        bd = d;
+        bestPri = pri;
+      }
+    }
+    return best;
+  }
+
+  private updateHover() {
+    if (this.drag?.moved) return;
+    this.view.hover = this.pick(this.view.mouse.x, this.view.mouse.y);
+  }
+
+  // ------------------------------------------------------------------ selection & commands
+
+  select(ids: number[], add: boolean) {
+    if (!add) this.selected.clear();
+    for (const id of ids) this.selected.add(id);
+    this.hud.cargoSel.clear();
+    this.hud.siteSel = null;
+    this.view.mode = null;
+    const first = this.world.units.get(ids[0]);
+    if (first) {
+      audio.play('select');
+      void voices.say(this.world.myFaction, this.voiceCat(first.type), 'select', unitName(this.world.myFaction, first.type, first.id));
+    }
+  }
+
+  private voiceCat(t: UnitType): VoiceCat {
+    const c = UNITS[t].category;
+    return c === 'air' ? 'air' : c === 'ground' ? 'ground' : 'naval';
+  }
+
+  private ownSelectedIds(): number[] {
+    return [...this.selected].filter((id) => this.world.units.get(id)?.owner === this.world.me);
+  }
+
+  private ping(x: number, y: number, kind: 'move' | 'attack' | 'unload') {
+    const color = kind === 'attack' ? '#ff6e5a' : kind === 'unload' ? '#8dffb4' : '#a6e6ff';
+    this.view.pings.push({ x, y, t: this.world.clock, color, kind });
+  }
+
+  private commandAt(x: number, y: number, hover: Hover | null, forceMove: boolean) {
+    const w = this.world;
+    const ids = this.ownSelectedIds();
+    if (this.view.mode?.k === 'unload') {
+      const mode = this.view.mode;
+      if (islandAt(w.map, x, y) < 0) {
+        audio.play('deny');
+        return;
+      }
+      this.send({ c: 'unload', ship: mode.ship, ids: mode.ids, x, y });
+      this.ping(x, y, 'unload');
+      audio.play('order');
+      void voices.say(w.myFaction, 'ground', 'unload', unitName(w.myFaction, 'infantry', mode.ids[0] ?? mode.ship));
+      this.view.mode = null;
+      this.hud.cargoSel.clear();
+      return;
+    }
+    if (!ids.length) return;
+    const first = w.units.get(ids[0])!;
+    const cat = this.voiceCat(first.type);
+    const who = unitName(w.myFaction, first.type, first.id);
+    if (hover && !forceMove) {
+      if (hover.kind === 'unit') {
+        const t = w.units.get(hover.id);
+        if (t && w.teamOf(t.owner) !== w.myTeam) {
+          this.send({ c: 'attack', ids, target: t.id });
+          this.ping(t.x, t.y, 'attack');
+          audio.play('order');
+          void voices.say(w.myFaction, cat, 'attack', who);
+          return;
+        }
+        if (t && t.owner === w.me && UNITS[t.type].hold > 0 || (t && t.owner === w.me && matchLoadoutOf(t.type).includes('troopbay'))) {
+          const ground = ids.filter((id) => UNITS[w.units.get(id)!.type].domain === 'land');
+          if (ground.length) {
+            this.send({ c: 'board', ids: ground, ship: t!.id });
+            this.ping(t!.x, t!.y, 'unload');
+            audio.play('order');
+            void voices.say(w.myFaction, 'ground', 'board', unitName(w.myFaction, 'infantry', ground[0]));
+            const rest = ids.filter((id) => !ground.includes(id) && id !== t!.id);
+            if (rest.length) this.send({ c: 'move', ids: rest, x, y });
+            return;
+          }
+        }
+      } else if (hover.kind === 'contact') {
+        this.send({ c: 'attack', ids, target: hover.id });
+        const c = w.contacts.get(hover.id);
+        if (c) this.ping(c.x, c.y, 'attack');
+        audio.play('order');
+        void voices.say(w.myFaction, cat, 'attack', who);
+        return;
+      }
+    }
+    this.send({ c: 'move', ids, x, y, mode: forceMove ? 'move' : 'attack' });
+    this.ping(x, y, 'move');
+    audio.play('order');
+    void voices.say(w.myFaction, cat, 'move', who);
+  }
+
+  private enterUnload() {
+    const w = this.world;
+    for (const id of this.selected) {
+      const d = w.details.get(id);
+      if (d && d[2].length) {
+        const ids = this.hud.cargoSel.size ? d[2].filter((c) => this.hud.cargoSel.has(c)) : d[2].slice();
+        this.view.mode = { k: 'unload', ship: id, ids };
+        audio.play('click');
+        this.hud.log('ORDERS', `Pick a landing point within ${UNLOAD_RANGE} km — the ship closes in if needed.`, 'good');
+        return;
+      }
+    }
+    audio.play('deny');
+  }
+
+  private ability(a: 'mines' | 'rtb' | 'retreat' | 'stop' | 'carrierFactory' | 'siteFactory') {
+    const ids = this.ownSelectedIds();
+    const w = this.world;
+    switch (a) {
+      case 'mines':
+        this.send({ c: 'mines', ids });
+        break;
+      case 'rtb':
+        this.send({ c: 'rtb', ids });
+        void voices.say(w.myFaction, 'air', 'rtb', 'FLIGHT');
+        break;
+      case 'retreat': {
+        const on = !ids.every((id) => ((w.details.get(id)?.[7] ?? 1) & 1) === 1);
+        this.send({ c: 'autoretreat', ids, on });
+        this.hud.log('ORDERS', `Auto-retreat ${on ? 'ON' : 'OFF'}`);
+        break;
+      }
+      case 'stop':
+        this.send({ c: 'stop', ids });
+        break;
+      case 'carrierFactory':
+        if (ids.length === 1) this.send({ c: 'factory', cat: 'air', unit: ids[0] });
+        break;
+      case 'siteFactory': {
+        const s = this.hud.siteSel;
+        if (s === null) break;
+        const site = w.map.sites[s];
+        const cat = site.type === 'navalbase' || site.type === 'dockyard' ? 'naval' : site.type === 'airbase' ? 'air' : 'ground';
+        this.send({ c: 'factory', cat: cat as Cat, site: s });
+        break;
+      }
+    }
+    this.hud.invalidate();
+  }
+
+  // ------------------------------------------------------------------ events → feedback
+
+  private onEvent(e: GameEvent) {
+    const w = this.world;
+    this.scene.onEvent(e);
+    const fac = w.myFaction;
+    switch (e.k) {
+      case 'built': {
+        if (e.o !== w.me) break;
+        const type = UNIT_TYPES[e.ty];
+        audio.play('built');
+        void voices.say(fac, this.voiceCat(type), 'ready', unitName(fac, type, e.id), true);
+        break;
+      }
+      case 'kill': {
+        const type = UNIT_TYPES[e.ty];
+        if (e.o === w.me) {
+          if (type !== 'lander') {
+            this.hud.log(unitName(fac, type, e.id), type === 'merchant' ? 'Merchant sunk!' : 'Unit lost.', 'bad');
+            if (type !== 'merchant') void voices.say(fac, this.voiceCat(type), 'lost', unitName(fac, type, e.id), true);
+            this.lastAlert = { x: e.x, y: e.y };
+          }
+        } else if (w.teamOf(e.o) !== w.myTeam && type !== 'lander') {
+          this.hud.log('CIC', `Splash one ${UNITS[type].short}. ${type === 'merchant' ? 'Enemy merchant sunk.' : 'Target destroyed.'}`, 'good');
+        }
+        break;
+      }
+      case 'capture': {
+        const s = w.map.sites[e.site];
+        const isl = w.map.islands[s.island];
+        const name = `${isl.home >= 0 ? 'HOME' : isl.name} ${s.type === 'resource' ? 'RESOURCES' : s.type.toUpperCase()}`;
+        if (e.o === w.me) {
+          audio.play('capture');
+          this.hud.banner('SITE CAPTURED', name);
+          void voices.say(fac, 'ground', 'capture', 'MARINES', true);
+        } else if (e.prev === w.me) {
+          audio.play('lost');
+          this.hud.log('CIC', `${name} lost to ${w.players[e.o]?.name ?? 'enemy'}!`, 'bad');
+          this.hud.alert();
+          this.lastAlert = { x: s.x, y: s.y };
+        } else if (w.teamOf(e.o) !== w.myTeam && e.o >= 0) {
+          const key = `${e.site}:${e.o}`;
+          if (!this.announcedSites.has(key)) {
+            this.announcedSites.add(key);
+            this.hud.log('INTEL', `${w.players[e.o].name} took ${name}.`, 'warn');
+          }
+        }
+        break;
+      }
+      case 'cash':
+        if (e.o === w.me) {
+          audio.play('cash', e.x, e.y);
+          this.overlay.shock(e.x, e.y, 0.05, 0.6, '#7dff9a', 0.8);
+        }
+        break;
+      case 'vampire': {
+        audio.play('vampire');
+        const near = [...w.units.values()].find((u) => u.owner === w.me && UNITS[u.type].category === 'naval' && Math.hypot(u.x - e.x, u.y - e.y) < 30);
+        if (near) void voices.say(fac, 'naval', 'vampire', unitName(fac, near.type, near.id), true);
+        else this.hud.log('CIC', 'Vampire! Missiles inbound!', 'warn');
+        this.lastAlert = { x: e.x, y: e.y };
+        this.hud.alert();
+        break;
+      }
+      case 'retreat': {
+        const u = w.units.get(e.id);
+        if (u && u.owner === w.me) void voices.say(fac, this.voiceCat(u.type), 'retreat', unitName(fac, u.type, u.id));
+        break;
+      }
+      case 'boom': {
+        // Shake when something blows up close to the camera.
+        const d = Math.hypot(e.x - this.rig.tx, e.y - this.rig.ty);
+        if (d < this.rig.dist * 0.6 && e.s > 0.5) this.rig.shake = Math.max(this.rig.shake, Math.min(0.6, e.s * 0.4 * (1 - d / (this.rig.dist * 0.6))));
+        // Under fire callout.
+        if (w.clock - this.lastUnderFire > 20) {
+          const hit = [...w.units.values()].find((u) => u.owner === w.me && Math.hypot(u.x - e.x, u.y - e.y) < 0.4);
+          if (hit) {
+            this.lastUnderFire = w.clock;
+            this.lastAlert = { x: e.x, y: e.y };
+            const cat = this.voiceCat(hit.type);
+            if (cat === 'naval') void voices.say(fac, 'naval', 'underfire', unitName(fac, hit.type, hit.id));
+          }
+        }
+        break;
+      }
+      case 'land':
+        if (w.units.get(e.id)?.owner === w.me) audio.play('splash', e.x, e.y, 0.5);
+        break;
+      case 'defeat': {
+        const p = w.players[e.o];
+        if (e.o === w.me) this.hud.banner('HQ LOST', 'Your forces have surrendered');
+        else this.hud.banner(`${p?.name ?? 'ENEMY'} DEFEATED`, 'Headquarters captured');
+        break;
+      }
+      case 'fire': {
+        // Sonar ping when one of our subs launches.
+        const m = MODULES[e.m];
+        const u = w.units.get(e.id);
+        if (u?.owner === w.me && u.type === 'sub' && m?.proj === 'torpedo') audio.play('sonar');
+        break;
+      }
+    }
+  }
+
+  // ------------------------------------------------------------------ input
+
+  private bindInput() {
+    const canvas = this.r.canvas;
+    const on = <K extends keyof WindowEventMap>(t: K, f: (e: WindowEventMap[K]) => void, target: Window | HTMLElement = window) => {
+      target.addEventListener(t, f as EventListener);
+      this.disposers.push(() => target.removeEventListener(t, f as EventListener));
+    };
+    on('resize', () => {
+      this.r.resize();
+      this.overlay.resize(this.r.width, this.r.height);
+    });
+    on('mousemove', (e) => {
+      this.mouseInside = true;
+      this.view.mouse.x = e.clientX;
+      this.view.mouse.y = e.clientY;
+      const d = this.drag;
+      if (!d) return;
+      if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 5) d.moved = true;
+      if (d.btn === 0 && d.moved) this.view.dragRect = { x0: d.x, y0: d.y, x1: e.clientX, y1: e.clientY };
+      if (d.btn === 1) {
+        // Grab-pan: keep the grabbed ground point under the cursor.
+        const p = screenToGround(this.r, e.clientX, e.clientY);
+        if (p) {
+          this.rig.tx += d.tx - p[0];
+          this.rig.ty += d.ty - p[1];
+        }
+      }
+    });
+    on(
+      'mousedown',
+      (e) => {
+        audio.unlock();
+        if (e.button === 1) {
+          e.preventDefault();
+          const p = screenToGround(this.r, e.clientX, e.clientY);
+          this.drag = { x: e.clientX, y: e.clientY, btn: 1, moved: false, tx: p?.[0] ?? 0, ty: p?.[1] ?? 0 };
+          return;
+        }
+        if (e.button === 0) this.drag = { x: e.clientX, y: e.clientY, btn: 0, moved: false, tx: 0, ty: 0 };
+        if (e.button === 2) {
+          const m = this.view.mouse;
+          if (!m.valid) return;
+          if (this.view.mode && !this.selected.size) this.view.mode = null;
+          this.commandAt(m.wx, m.wy, this.pick(e.clientX, e.clientY), e.ctrlKey || e.metaKey);
+        }
+      },
+      canvas,
+    );
+    on('mouseup', (e) => {
+      const d = this.drag;
+      this.drag = null;
+      this.view.dragRect = null;
+      if (!d || d.btn !== 0 || e.button !== 0) return;
+      if (this.view.mode?.k === 'unload' && !d.moved) {
+        const m = this.view.mouse;
+        if (m.valid) this.commandAt(m.wx, m.wy, null, false);
+        return;
+      }
+      if (d.moved) this.boxSelect(d.x, d.y, e.clientX, e.clientY, e.shiftKey);
+      else this.clickSelect(e.clientX, e.clientY, e.shiftKey);
+    });
+    on('contextmenu', (e) => e.preventDefault());
+    on(
+      'wheel',
+      (e) => {
+        e.preventDefault();
+        const m = this.view.mouse;
+        const f = Math.exp(Math.sign(e.deltaY) * Math.min(0.35, Math.abs(e.deltaY) * 0.0015 + 0.08));
+        this.rig.zoom(f, m.valid ? m.wx : undefined, m.valid ? m.wy : undefined);
+      },
+      canvas,
+    );
+    on('keydown', (e) => {
+      if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
+      audio.unlock();
+      this.keys.add(e.code);
+      const ids = this.ownSelectedIds();
+      if (e.code === 'Escape') {
+        if (this.view.mode) this.view.mode = null;
+        else if (this.selected.size || this.hud.siteSel !== null) {
+          this.selected.clear();
+          this.hud.siteSel = null;
+        } else this.onExit();
+        return;
+      }
+      if (e.code === 'F1') {
+        e.preventDefault();
+        this.hud.toggleHelp();
+      }
+      if (e.code === 'Tab') {
+        e.preventDefault();
+        this.view.showRanges = true;
+      }
+      if (e.code === 'Space' && this.lastAlert) {
+        e.preventDefault();
+        this.rig.flyTo(this.lastAlert.x, this.lastAlert.y);
+      }
+      const digit = e.code.startsWith('Digit') ? Number(e.code.slice(5)) : -1;
+      if (digit >= 1 && digit <= 9) {
+        if (e.ctrlKey || e.metaKey) {
+          e.preventDefault();
+          this.groups.set(digit, ids);
+          this.hud.log('ORDERS', `Group ${digit} set (${ids.length}).`);
+        } else {
+          const g = (this.groups.get(digit) ?? []).filter((id) => this.world.units.has(id));
+          if (g.length) {
+            const same = g.length === this.selected.size && g.every((id) => this.selected.has(id));
+            this.select(g, false);
+            if (same) {
+              const u = this.world.units.get(g[0])!;
+              this.rig.flyTo(u.x, u.y);
+            }
+          }
+        }
+      }
+      if (!ids.length) return;
+      if (e.code === 'KeyS') this.ability('stop');
+      if (e.code === 'KeyU') this.enterUnload();
+      if (e.code === 'KeyM') this.ability('mines');
+      if (e.code === 'KeyR') this.ability('rtb');
+      if (e.code === 'KeyT') this.ability('retreat');
+    });
+    on('keyup', (e) => {
+      this.keys.delete(e.code);
+      if (e.code === 'Tab') this.view.showRanges = false;
+    });
+    on('blur', () => this.keys.clear());
+    const leave = () => (this.mouseInside = false);
+    document.documentElement.addEventListener('mouseleave', leave);
+    this.disposers.push(() => document.documentElement.removeEventListener('mouseleave', leave));
+  }
+
+  private clickSelect(x: number, y: number, add: boolean) {
+    const hit = this.pick(x, y);
+    const w = this.world;
+    if (!hit) {
+      if (!add) {
+        this.selected.clear();
+        this.hud.siteSel = null;
+      }
+      return;
+    }
+    if (hit.kind === 'unit') {
+      const u = w.units.get(hit.id);
+      if (!u) return;
+      if (u.owner !== w.me) {
+        this.selected.clear();
+        this.hud.siteSel = null;
+        this.hud.log('INTEL', `${w.players[u.owner]?.name ?? 'Enemy'} ${UNITS[u.type].names[w.faction(u.owner)]} · hull ${u.hp}%`, 'warn');
+        return;
+      }
+      const now = performance.now();
+      if (this.lastClick.id === u.id && now - this.lastClick.t < 350) {
+        // Double click: all of this type on screen.
+        const same = this.overlay.items.filter((it) => it.kind === 'unit' && it.own && it.type === u.type && it.sx > 0 && it.sy > 0 && it.sx < this.r.width && it.sy < this.r.height).map((it) => it.id);
+        this.select(same, add);
+      } else if (add && this.selected.has(u.id)) {
+        this.selected.delete(u.id);
+      } else this.select([u.id], add);
+      this.lastClick = { t: now, id: u.id };
+      return;
+    }
+    if (hit.kind === 'site') {
+      this.selected.clear();
+      this.hud.siteSel = hit.id;
+      audio.play('click');
+      return;
+    }
+    if (hit.kind === 'contact') {
+      const c = w.contacts.get(hit.id);
+      if (c) this.hud.log('CIC', `Radar contact · position error ±${c.r.toFixed(1)} km. Get closer or bring an AEW to classify.`, 'warn');
+    }
+  }
+
+  private boxSelect(x0: number, y0: number, x1: number, y1: number, add: boolean) {
+    const ax = Math.min(x0, x1);
+    const bx = Math.max(x0, x1);
+    const ay = Math.min(y0, y1);
+    const by = Math.max(y0, y1);
+    let ids = this.overlay.items.filter((it) => it.kind === 'unit' && it.own && it.sx >= ax && it.sx <= bx && it.sy >= ay && it.sy <= by).map((it) => it.id);
+    // Prefer combat units over merchants/landers.
+    const combat = ids.filter((id) => {
+      const t = this.world.units.get(id)?.type;
+      return t && t !== 'merchant' && t !== 'lander';
+    });
+    if (combat.length) ids = combat;
+    if (ids.length) this.select(ids, add);
+    else if (!add) this.selected.clear();
+  }
+
+  dispose() {
+    for (const d of this.disposers) d();
+    this.hud.root.remove();
+    this.scene.dispose();
+    const ctx = this.overlay.ctx;
+    ctx.clearRect(0, 0, this.overlay.canvas.width, this.overlay.canvas.height);
+    void ORDER_CODES;
+  }
+
+  get isEnded() {
+    return this.ended;
+  }
+}
