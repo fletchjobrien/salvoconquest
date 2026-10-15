@@ -303,12 +303,7 @@ export class Fx {
     this.rain.add({ x, y: top, z: y, vy: -2.5, vx: 0.4, max: top / 2.5, s0: 0.012, s1: 0.012, r: 0.75, g: 0.8, b: 0.85, a0: 0.55 });
   }
 
-  fogPuff(x: number, alt: number, y: number, r: number) {
-    this.smoke.add({ x, y: alt, z: y, vx: rnd(-0.02, 0.02), vz: rnd(-0.02, 0.02), max: rnd(6, 10), s0: r * 0.6, s1: r, r: 0.86, g: 0.88, b: 0.9, a0: 0.08, drag: 0 });
-  }
 
-  cloud(x: number, alt: number, y: number, r: number, dark: number) {
-    const c = 0.2 - dark * 0.1;
-    this.smoke.add({ x, y: alt, z: y, vx: rnd(-0.02, 0.02), vz: rnd(-0.02, 0.02), max: rnd(5, 9), s0: r * 0.7, s1: r, r: c, g: c + 0.01, b: c + 0.03, a0: 0.28 + dark * 0.12, drag: 0 });
-  }
+
+
 }

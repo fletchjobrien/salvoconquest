@@ -14,6 +14,7 @@ import { groundY, visAlt, AIR_VIS, setAirZoom } from './coords';
 import type { Overlay } from './overlay';
 import { Wakes } from './wakes';
 import { setWeatherCells } from './weatherfx';
+import { WeatherView } from './weatherView';
 
 interface UnitObj {
   m: UnitModel;
@@ -48,6 +49,7 @@ export class GameScene {
   readonly terrain: TerrainView;
   readonly fx = new Fx();
   readonly wakes: Wakes;
+  readonly weatherView: WeatherView;
   private units = new Map<number, UnitObj>();
   private sites: SiteModel[] = [];
   private wrecks: Wreck[] = [];
@@ -88,6 +90,8 @@ export class GameScene {
     scene.add(this.fx.group);
     this.wakes = new Wakes(pal.foam);
     scene.add(this.wakes.mesh);
+    this.weatherView = new WeatherView(pal.sunDir);
+    scene.add(this.weatherView.group);
     for (const s of world.map.sites) {
       const ang = s.dock ? Math.atan2(s.dock.y - s.y, s.dock.x - s.x) : Math.atan2(world.map.size / 2 - s.y, world.map.size / 2 - s.x);
       const m = makeSiteModel(s.type, pal, ang);
@@ -284,38 +288,17 @@ export class GameScene {
     const fogCol = new THREE.Color(this.pal.fog).lerp(new THREE.Color(0x4a525a), wa.storm * 0.6);
     this.fog.color.copy(fogCol);
     this.bg.copy(fogCol);
-    setWeatherCells(w.weather, new THREE.Color(this.pal.fog).lerp(new THREE.Color(0xe6ebee), 0.5));
+    setWeatherCells(w.weather, new THREE.Color(this.pal.fog).lerp(new THREE.Color(0xe6ebee), 0.5), this.time);
+    this.weatherView.update(dt, w.weather, this.r.camera);
     this.terrain.update(this.time, this.fog.near, this.fog.far, fogCol);
     this.wakes.update(this.time);
     this.sun.intensity = this.pal.sunI * (1 - wa.storm * 0.6);
     this.hemi.intensity = 1.25 * (1 - wa.storm * 0.35);
-    const veil = Math.min(0.35, wa.fog * 0.3 * Math.max(0.3, 1 - rig.dist / 60));
-    this.r.setVeil(veil, new THREE.Color(0.78, 0.8, 0.82));
+    // Fog layers now carry the fog look; keep only a faint veil when the camera is inside a bank.
+    this.r.setVeil(Math.min(0.12, wa.fog * 0.12 * Math.max(0, 1 - rig.dist / 30)), new THREE.Color(0.85, 0.87, 0.89));
     this.weatherEmit -= dt;
     if (this.weatherEmit <= 0) {
       this.weatherEmit = 0.05;
-      for (const [kind, x, y, r, i] of w.weather) {
-        const inten = i / 100;
-        if (inten < 0.05) continue;
-        if (kind === 0) {
-          // Storm clouds anywhere in the cell (they are large, so few particles).
-          if (Math.random() < inten * 0.9) {
-            const a = Math.random() * Math.PI * 2;
-            const d = Math.sqrt(Math.random()) * r * 0.8;
-            this.fx.cloud(x + Math.cos(a) * d, 3.2 + Math.random() * 0.8, y + Math.sin(a) * d, 2.5 + Math.random() * 2.5, inten);
-          }
-        } else {
-          // A few drifting fog puffs near the camera when zoomed in.
-          const dc = Math.hypot(rig.tx - x, rig.ty - y);
-          if (rig.dist < 30 && dc < r + rig.dist && Math.random() < inten * 0.25) {
-            for (let k = 0; k < 1; k++) {
-              const px = rig.tx + (Math.random() - 0.5) * Math.min(40, rig.dist * 1.5);
-              const py = rig.ty + (Math.random() - 0.5) * Math.min(40, rig.dist * 1.5);
-              if (Math.hypot(px - x, py - y) < r) this.fx.fogPuff(px, 0.15 + Math.random() * 0.4, py, 1.2 + Math.random() * 1.5);
-            }
-          }
-        }
-      }
       if (wa.storm > 0.15 && rig.dist < 40) {
         const n = Math.round(wa.storm * 30);
         const R = Math.min(15, rig.dist * 0.7);
@@ -430,7 +413,7 @@ export class GameScene {
       case 'lightning': {
         this.flashLight.position.set(e.x, 3, e.y);
         this.flashLight.intensity = 45;
-        this.fx.glow.add({ x: e.x, y: 3.4, z: e.y, max: 0.18, s0: 2.5, s1: 1.5, r: 0.7, g: 0.75, b: 0.9, a0: 0.35 });
+        this.weatherView.lightning(e.x, e.y);
         const dc = Math.hypot(e.x - this.r.camera.position.x, e.y - this.r.camera.position.z);
         if (dc < 40) this.r.flash = Math.max(this.r.flash, 0.12 * (1 - dc / 40));
         this.onSound('thunder', e.x, e.y);

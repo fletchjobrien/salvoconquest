@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { GameMap, heightAt } from '../../shared/map';
 import { Palette } from '../theme';
 import { Rng, fbm } from '../../shared/rng';
-import { patchMaterial, weatherUniforms } from './weatherfx';
+import { patchMaterial, weatherUniforms, WEATHER_FUNCS, WEATHER_UNIFORMS_GLSL } from './weatherfx';
 
 export const VSCALE = 2.4; // vertical exaggeration for terrain
 
@@ -30,12 +30,9 @@ uniform vec3 sunColor;
 uniform vec3 fogColor;
 uniform float fogNear;
 uniform float fogFar;
-uniform vec4 wStorm[6];
-uniform vec4 wFog[6];
-uniform int wStormN;
-uniform int wFogN;
-uniform vec3 wFogColor;
 varying vec3 vWorld;
+${WEATHER_UNIFORMS_GLSL}
+${WEATHER_FUNCS}
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float noise(vec2 p) {
@@ -49,22 +46,11 @@ void main() {
   vec2 uv = p / mapSize;
   float depth = 1.0;
   if (uv.x > 0.0 && uv.y > 0.0 && uv.x < 1.0 && uv.y < 1.0) { depth = texture2D(depthMap, uv).r; depth *= depth; }
-  float storm = 0.0;
-  for (int i = 0; i < 6; i++) {
-    if (i >= wStormN) break;
-    vec4 s = wStorm[i];
-    float d = length(p - s.xy);
-    storm = max(storm, s.w * clamp((1.0 - d / s.z) * 2.2, 0.0, 1.0));
-  }
-  float fogb = 0.0;
-  for (int i = 0; i < 6; i++) {
-    if (i >= wFogN) break;
-    vec4 s = wFog[i];
-    float d = length(p - s.xy);
-    fogb = max(fogb, s.w * clamp((1.0 - d / s.z) * 2.2, 0.0, 1.0));
-  }
-  // Waves -> normal.
-  float amp = 0.35 + storm * 1.2;
+  float storm = stormGloom(p);
+  float shade = cloudShadow(p);
+  float fogb = fogAt(p);
+  // Waves -> normal. Storm seas are steeper and wind-driven.
+  float amp = 0.35 + storm * 1.6;
   float t = time;
   vec2 g = vec2(0.0);
   g += vec2(0.8, 0.6) * cos(dot(p, vec2(0.8, 0.6)) * 3.1 + t * 1.3) * 0.5;
@@ -97,12 +83,17 @@ void main() {
   col = mix(col, foam, clamp(foamAmt, 0.0, 1.0));
   // Whitecaps in storms: sparse wind-streaked flecks.
   vec2 wp = vec2(p.x * 9.0 + p.y * 3.0, p.y * 22.0 - p.x * 4.0);
-  float caps = step(0.93 - storm * 0.05, noise(wp + vec2(t * 2.1, t * 0.7))) * step(0.45, noise(p * 1.7 - t * 0.15)) * storm;
-  col = mix(col, foam, caps * 0.65);
-  // Storm darkening.
-  col = mix(col, col * 0.45 + vec3(0.02, 0.03, 0.04), storm * 0.75);
-  // Fog banks.
-  col = mix(col, wFogColor, fogb * 0.78);
+  float caps = step(0.95 - storm * 0.04, noise(wp + vec2(t * 2.1, t * 0.7))) * step(0.45, noise(p * 1.7 - t * 0.15)) * storm;
+  col = mix(col, foam, caps * 0.45);
+  // Storm: grey-green overcast sea, darkest under the thick cloud.
+  vec3 gloomy = mix(col, vec3(dot(col, vec3(0.3, 0.5, 0.2))) * vec3(0.8, 0.95, 0.95), 0.6);
+  col = mix(col, gloomy * 0.55, storm * 0.8);
+  col *= 1.0 - shade * 0.45;
+  // Wind streaks along the storm.
+  float streak = wxNoise(vec2(dot(p, vec2(0.93, 0.37)) * 1.6, dot(p, vec2(-0.37, 0.93)) * 30.0) + t * vec2(0.4, 0.0));
+  col = mix(col, foam * 0.8, smoothstep(0.86, 0.98, streak) * storm * 0.12);
+  // Fog banks sit on the water.
+  col = mix(col, wFogColor, fogb * 0.4);
   // Distance fog.
   float fd = length(cameraPosition - vWorld);
   float f = smoothstep(fogNear, fogFar, fd);
