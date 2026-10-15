@@ -121,6 +121,11 @@ export interface Unit {
   fuelMax: number;
   order: Order;
   resume: Order | null;
+  /**
+   * Aircraft: the mission the player gave (patrol point or strike target). After an automatic
+   * return to refuel or rearm, the flight goes back to it. Null = patrol near its base.
+   */
+  mission?: Order | null;
   path: { x: number; y: number }[] | null;
   pathGoal: { x: number; y: number } | null;
   repathAt: number;
@@ -470,9 +475,11 @@ export class Game {
         const us = own(cmd.ids);
         const t = this.units.get(Number(cmd.target));
         if (!t || t.dead || t.team === p.team) return;
+        const k = this.knowledge.get(p.team)?.get(t.id);
         for (const u of us) {
           if (u.inside >= 0) continue;
           this.setOrder(u, { k: 'attack', target: t.id });
+          if (UNITS[u.type].domain === 'air') u.mission = { k: 'attack', target: t.id, lx: k?.x ?? t.x, ly: k?.y ?? t.y };
         }
         break;
       }
@@ -481,6 +488,7 @@ export class Game {
           if (u.inside >= 0) continue;
           if (UNITS[u.type].domain === 'air') {
             this.setOrder(u, { k: 'patrol', x: u.x, y: u.y });
+            u.mission = { k: 'patrol', x: u.x, y: u.y };
           } else this.setOrder(u, { k: 'idle' });
         }
         break;
@@ -497,6 +505,7 @@ export class Game {
             u.base = { unit: ship.id };
             // Land and stay on deck until given a new order.
             u.resume = { k: 'rtb' };
+            u.mission = null;
             if (!u.landed) this.setOrder(u, { k: 'rtb' }, true);
           }
         }
@@ -522,7 +531,13 @@ export class Game {
         for (const u of own(cmd.ids)) this.dropMines(u);
         break;
       case 'rtb':
-        for (const u of own(cmd.ids)) if (UNITS[u.type].domain === 'air' && !u.landed) this.setOrder(u, { k: 'rtb' }, true);
+        // A player RTB ends the mission: land and stay down until given a new order.
+        for (const u of own(cmd.ids))
+          if (UNITS[u.type].domain === 'air' && !u.landed) {
+            this.setOrder(u, { k: 'rtb' });
+            u.resume = { k: 'rtb' };
+            u.mission = null;
+          }
         break;
       case 'autoretreat':
         for (const u of own(cmd.ids)) u.autoRetreat = !!cmd.on;
@@ -597,6 +612,7 @@ export class Game {
       if (dom === 'air') {
         // Right-click on an enemy-free spot = patrol/mission point.
         this.setOrder(u, { k: 'patrol', x: tx, y: ty });
+        u.mission = { k: 'patrol', x: tx, y: ty };
         continue;
       }
       if (dom === 'land') {
@@ -1315,6 +1331,26 @@ export class Game {
     return { need: (Math.hypot(n.x - u.x, n.y - u.y) / u.maxSpeed) * 1.12 + 6, base: n };
   }
 
+  /** Put a rearmed flight back on its mission; a dead strike target becomes a patrol of that area. */
+  private resumeMission(u: Unit, bp: { x: number; y: number }) {
+    const m = u.mission;
+    u.resume = null;
+    if (m && m.k === 'attack') {
+      const t = this.units.get(m.target);
+      const k = this.knowledge.get(u.team)?.get(m.target);
+      const area: Order = { k: 'patrol', x: k?.x ?? m.lx ?? bp.x, y: k?.y ?? m.ly ?? bp.y };
+      if (t && !t.dead && t.inside < 0 && k) {
+        u.order = { k: 'attack', target: m.target };
+        u.resume = area;
+      } else {
+        u.order = area;
+        u.mission = area;
+      }
+      return;
+    }
+    u.order = m ? { ...m } : { k: 'patrol', x: bp.x, y: bp.y };
+  }
+
   private launch(u: Unit) {
     u.landed = false;
     u.alt = 0.9;
@@ -1345,9 +1381,9 @@ export class Game {
       if (u.rearm <= 0) {
         for (const w of u.weapons) w.ammo = w.max;
         u.fuel = u.fuelMax;
-        if (u.resume && u.resume.k !== 'rtb') {
-          u.order = u.resume;
-          u.resume = null;
+        if (!u.resume || u.resume.k !== 'rtb') {
+          // Back to the mission it left to refuel or rearm.
+          this.resumeMission(u, bp);
           this.launch(u);
         }
       }
@@ -1372,7 +1408,8 @@ export class Game {
       return;
     }
     if (needRtb && u.order.k !== 'rtb') {
-      u.resume = u.order.k === 'attack' ? u.resume : u.order;
+      // Automatic return: the mission (u.mission) is kept and resumed after rearming.
+      u.resume = null;
       u.order = { k: 'rtb' };
     }
     const o = u.order;
@@ -1388,7 +1425,6 @@ export class Game {
         u.landed = true;
         u.rearm = 9;
         u.alt = 0;
-        if (!u.resume) u.resume = { k: 'patrol', x: bp.x, y: bp.y };
         return;
       }
       this.flyToward(u, bp.x, bp.y, dt);
@@ -1400,9 +1436,15 @@ export class Game {
       const k = this.knowledge.get(u.team)?.get(o.target);
       const t = this.units.get(o.target);
       if (!t || t.dead || !k || t.inside >= 0) {
-        u.order = u.resume ?? { k: 'patrol', x: u.x, y: u.y };
+        // Strike target gone: the mission becomes a patrol of that area.
+        if (u.mission?.k === 'attack' && u.mission.target === o.target) u.mission = { k: 'patrol', x: u.mission.lx ?? u.x, y: u.mission.ly ?? u.y };
+        u.order = u.resume ?? (u.mission ? { ...u.mission } : { k: 'patrol', x: u.x, y: u.y });
         u.resume = null;
         return;
+      }
+      if (u.mission?.k === 'attack' && u.mission.target === o.target) {
+        u.mission.lx = k.x;
+        u.mission.ly = k.y;
       }
       const cls = this.dmgClass(t);
       const rng = this.maxRangeVs(u, cls);
