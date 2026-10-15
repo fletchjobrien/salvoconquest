@@ -2,7 +2,11 @@ import { UNITS, UnitType } from '../../shared/defs';
 import { GameMap, heightAt } from '../../shared/map';
 import { VSCALE } from './terrain';
 
-export const AIR_VIS = 2.2;
+/** Visual altitude multiplier for aircraft and missiles; shrinks when zoomed in so planes stay in frame. */
+export let AIR_VIS = 2.2;
+export function setAirZoom(dist: number) {
+  AIR_VIS = Math.max(0.45, Math.min(2.2, 0.35 + dist * 0.07));
+}
 
 export function groundY(map: GameMap, x: number, y: number): number {
   const h = heightAt(map, x, y);

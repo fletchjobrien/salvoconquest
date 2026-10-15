@@ -7,7 +7,7 @@ import { DOMAINS } from '../state';
 import { Affil, FONT, SITE_GLYPH, SymDomain, glyphFor, sideColor, symbolCanvas } from './symbols';
 import { SIDE, unitName } from '../theme';
 import { matchLoadoutOf } from '../loadouts';
-import { groundY, visAlt } from './coords';
+import { groundY, visAlt, AIR_VIS } from './coords';
 
 export interface Hover {
   kind: 'unit' | 'contact' | 'site' | 'ghost';
@@ -50,9 +50,21 @@ export interface ScreenItem {
 
 const P = { x: 0, y: 0, z: 0 };
 
+interface Floater {
+  x: number;
+  y: number;
+  alt: number;
+  text: string;
+  color: string;
+  t: number;
+}
+
 export class Overlay {
   readonly ctx: CanvasRenderingContext2D;
   shocks: Shock[] = [];
+  floaters: Floater[] = [];
+  private selPulse = new Map<number, number>();
+  private prevSel = new Set<number>();
   /** Screen positions of everything clickable this frame. */
   items: ScreenItem[] = [];
   private dpr = 1;
@@ -75,6 +87,10 @@ export class Overlay {
 
   shock(x: number, y: number, alt: number, r: number, color: string, dur = 0.9) {
     this.shocks.push({ x, y, alt, t: 0, r, color, dur });
+  }
+
+  floater(x: number, y: number, alt: number, text: string, color: string) {
+    this.floaters.push({ x, y, alt, text, color, t: 0 });
   }
 
   private proj(v: OverlayView, x: number, alt: number, y: number) {
@@ -285,6 +301,21 @@ export class Overlay {
       sy -= liftPx;
       const sel = v.selected.has(u.id);
       const hov = v.hover?.kind === 'unit' && v.hover.id === u.id;
+      if (sel && !this.prevSel.has(u.id)) this.selPulse.set(u.id, w.clock);
+      const pt = this.selPulse.get(u.id);
+      if (pt !== undefined) {
+        const k = (w.clock - pt) / 0.45;
+        if (k >= 1) this.selPulse.delete(u.id);
+        else {
+          ctx.strokeStyle = '#e8f6ff';
+          ctx.globalAlpha = (1 - k) * 0.9;
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.arc(sx, sy, symSize * (1.2 + k * 1.6), 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+        }
+      }
       const sz = small ? symSize - 4 : symSize;
       const img = symbolCanvas(affil, dom as SymDomain, glyphFor(u.type), sz, sel || hov);
       const born = Math.min(1, (w.clock - u.born) / 0.4);
@@ -356,7 +387,7 @@ export class Overlay {
         continue;
       }
       if (p.kind === 'shell' && dist > 30) continue;
-      const a3 = p.kind === 'torpedo' ? 0 : p.ralt * (p.kind === 'shell' || p.kind === 'bomb' ? 1 : 2.2);
+      const a3 = p.kind === 'torpedo' ? 0 : p.ralt * (p.kind === 'shell' || p.kind === 'bomb' ? 1 : AIR_VIS);
       if (!this.proj(v, p.rx, a3, p.ry)) continue;
       const sx = P.x;
       const sy = P.y;
@@ -412,6 +443,22 @@ export class Overlay {
     }
     ctx.globalAlpha = 1;
     this.shocks = this.shocks.filter((s) => s.t < s.dur);
+
+    this.prevSel = new Set(v.selected);
+
+    // ---- floating text (cash, captures) ----
+    for (const f of this.floaters) {
+      f.t += dt;
+      if (f.t > 2.2 || !this.proj(v, f.x, f.alt, f.y)) continue;
+      const k = f.t / 2.2;
+      ctx.globalAlpha = k < 0.15 ? k / 0.15 : 1 - Math.max(0, (k - 0.5) / 0.5);
+      ctx.fillStyle = f.color;
+      ctx.font = `600 11px ${FONT}`;
+      ctx.textAlign = 'center';
+      ctx.fillText(f.text, P.x, P.y - 18 - k * 26);
+      ctx.globalAlpha = 1;
+    }
+    this.floaters = this.floaters.filter((f) => f.t <= 2.2);
 
     // ---- command pings ----
     for (const p of v.pings) {

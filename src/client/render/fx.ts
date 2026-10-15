@@ -217,12 +217,12 @@ export class Fx {
   }
 
   missileTrail(x: number, alt: number, y: number, hostile: boolean) {
-    this.smoke.add({ x: x + rnd(-0.01, 0.01), y: alt, z: y + rnd(-0.01, 0.01), vy: 0.01, max: rnd(2.5, 4), s0: 0.04, s1: 0.22, r: 0.85, g: 0.86, b: 0.86, a0: 0.55, drag: 1 });
+    this.smoke.add({ x: x + rnd(-0.006, 0.006), y: alt, z: y + rnd(-0.006, 0.006), vy: 0.008, max: rnd(2.5, 4), s0: 0.025, s1: 0.11, r: 0.88, g: 0.89, b: 0.9, a0: 0.42, drag: 1 });
     this.glow.add({ x, y: alt, z: y, max: 0.12, s0: 0.07, s1: 0.03, r: 1, g: hostile ? 0.55 : 0.85, b: hostile ? 0.25 : 0.5, a0: 1 });
   }
 
   samTrail(x: number, alt: number, y: number) {
-    this.smoke.add({ x, y: alt, z: y, vy: 0.005, max: rnd(1.5, 2.5), s0: 0.03, s1: 0.14, r: 0.95, g: 0.95, b: 0.95, a0: 0.5, drag: 1 });
+    this.smoke.add({ x, y: alt, z: y, vy: 0.005, max: rnd(1.5, 2.5), s0: 0.02, s1: 0.08, r: 0.95, g: 0.95, b: 0.95, a0: 0.4, drag: 1 });
     this.glow.add({ x, y: alt, z: y, max: 0.1, s0: 0.05, s1: 0.02, r: 1, g: 0.9, b: 0.7, a0: 1 });
   }
 
@@ -237,15 +237,15 @@ export class Fx {
   muzzle(x: number, alt: number, y: number, big: number) {
     this.glow.add({ x, y: alt + 0.03, z: y, max: 0.15, s0: 0.12 * big, s1: 0.3 * big, r: 1, g: 0.85, b: 0.5, a0: 1 });
     for (let i = 0; i < 4 * big; i++) {
-      this.smoke.add({ x, y: alt + 0.03, z: y, vx: rnd(-0.05, 0.05), vy: rnd(0.02, 0.06), vz: rnd(-0.05, 0.05), max: rnd(1.2, 2.2), s0: 0.06 * big, s1: 0.25 * big, r: 0.8, g: 0.8, b: 0.8, a0: 0.5, drag: 1.5 });
+      this.smoke.add({ x, y: alt + 0.03, z: y, vx: rnd(-0.04, 0.04), vy: rnd(0.02, 0.05), vz: rnd(-0.04, 0.04), max: rnd(1.0, 1.8), s0: 0.03 * big, s1: 0.14 * big, r: 0.8, g: 0.8, b: 0.8, a0: 0.45, drag: 1.5 });
     }
   }
 
   launch(x: number, alt: number, y: number) {
-    for (let i = 0; i < 14; i++) {
-      this.smoke.add({ x, y: alt + 0.03, z: y, vx: rnd(-0.08, 0.08), vy: rnd(0.0, 0.1), vz: rnd(-0.08, 0.08), max: rnd(2, 4), s0: 0.08, s1: 0.4, r: 0.88, g: 0.88, b: 0.86, a0: 0.55, drag: 1.2 });
+    for (let i = 0; i < 9; i++) {
+      this.smoke.add({ x, y: alt + 0.03, z: y, vx: rnd(-0.05, 0.05), vy: rnd(0.02, 0.12), vz: rnd(-0.05, 0.05), max: rnd(1.8, 3.2), s0: 0.04, s1: 0.2, r: 0.9, g: 0.9, b: 0.88, a0: 0.5, drag: 1.4 });
     }
-    this.glow.add({ x, y: alt + 0.05, z: y, max: 0.25, s0: 0.3, s1: 0.1, r: 1, g: 0.8, b: 0.4, a0: 1 });
+    this.glow.add({ x, y: alt + 0.05, z: y, max: 0.22, s0: 0.18, s1: 0.06, r: 1, g: 0.8, b: 0.4, a0: 1 });
   }
 
   explosion(x: number, alt: number, y: number, size: number, onWater: boolean) {

@@ -327,8 +327,8 @@ export function makeUnitModel(type: UnitType, faction: Faction, pal: Palette): U
 const MAT_DARK = new THREE.MeshLambertMaterial({ color: 0x2a2f33, flatShading: true });
 
 export function makeFlag(color: number): THREE.Mesh {
-  const g = new THREE.PlaneGeometry(0.12, 0.07);
-  g.translate(0.06, 0, 0);
+  const g = new THREE.PlaneGeometry(0.07, 0.04);
+  g.translate(0.035, 0, 0);
   const m = new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide });
   return new THREE.Mesh(g, m);
 }
@@ -448,12 +448,12 @@ export function makeSiteModel(type: BuildingType, pal: Palette, toWater: number)
     spinner = holder;
   }
   // Ownership flag.
-  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.32, 4).translate(0, 0.16, 0), MAT_DARK);
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.003, 0.003, 0.22, 4).translate(0, 0.11, 0), MAT_DARK);
   pole.position.set(-0.22 * SCALE, 0, -0.2 * SCALE);
   pole.scale.setScalar(SCALE);
   root.add(pole);
   const flag = makeFlag(0xdddddd);
-  flag.position.set(-0.22 * SCALE, 0.28 * SCALE, -0.2 * SCALE);
+  flag.position.set(-0.22 * SCALE, 0.2 * SCALE, -0.2 * SCALE);
   flag.scale.setScalar(SCALE);
   root.add(flag);
   return { root, flag, spinner };

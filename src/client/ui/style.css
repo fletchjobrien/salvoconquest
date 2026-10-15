@@ -169,6 +169,15 @@ input.field:focus {
 .title b {
   font-weight: 600;
   color: var(--accent);
+  display: inline-block;
+  animation: titleIn 1.4s var(--ease) both 0.15s;
+}
+@keyframes titleIn {
+  from {
+    opacity: 0;
+    letter-spacing: 0.9em;
+    filter: blur(6px);
+  }
 }
 .subtitle {
   color: var(--dim);

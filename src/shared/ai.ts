@@ -53,22 +53,24 @@ export class Bot {
     const count = new Map<UnitType, number>();
     for (const u of this.mine()) count.set(u.type, (count.get(u.type) ?? 0) + 1);
     for (const cat of ['naval', 'ground', 'air'] as const) for (const it of p.queues[cat]) count.set(it.type, (count.get(it.type) ?? 0) + 1);
+    // Rich bots field bigger forces.
+    const rich = 1 + Math.min(3, p.cash / 2000);
     const want: Record<UnitType, number> = {
-      infantry: Math.min(12, 4 + Math.floor(t / 90)),
-      coastal: t > 150 ? Math.min(3, 1 + Math.floor(t / 400)) : 0,
-      sam: t > 120 ? Math.min(3, 1 + Math.floor(t / 400)) : 0,
-      destroyer: Math.min(7, 2 + Math.floor(t / 120)),
-      sub: t > 180 ? Math.min(3, Math.floor(t / 240)) : 0,
-      battleship: t > 360 ? 1 : 0,
+      infantry: Math.min(12 * rich, (4 + Math.floor(t / 90)) * rich),
+      coastal: t > 150 ? Math.min(4, 1 + Math.floor(t / 400)) : 0,
+      sam: t > 120 ? Math.min(4, 1 + Math.floor(t / 400)) : 0,
+      destroyer: Math.min(6 * rich, (2 + Math.floor(t / 120)) * rich),
+      sub: t > 180 ? Math.min(4, Math.floor(t / 240) * rich) : 0,
+      battleship: t > 360 ? Math.floor(rich) : 0,
       carrier: t > 540 ? 1 : 0,
-      fighter: Math.min(3, 1 + Math.floor(t / 240)),
-      strike: t > 150 ? Math.min(3, 1 + Math.floor(t / 300)) : 0,
+      fighter: Math.min(3 * rich, (1 + Math.floor(t / 240)) * rich),
+      strike: t > 150 ? Math.min(3 * rich, (1 + Math.floor(t / 300)) * rich) : 0,
       recon: t > 200 ? 1 : 0,
       merchant: 0,
       lander: 0,
     };
     for (const cat of ['ground', 'naval', 'air'] as const) {
-      if (p.queues[cat].length >= 2) continue;
+      if (p.queues[cat].length >= (p.cash > 2000 ? 3 : 2)) continue;
       let best: UnitType | null = null;
       let bestNeed = 0;
       for (const type of BUILDABLE[cat]) {
@@ -93,12 +95,16 @@ export class Bot {
     const hq = this.home();
     if (!hq) return [];
     const best = new Map<number, { island: number; x: number; y: number; d: number }>();
+    const neutralLeft = g.sites.some((s) => s.owner < 0 && s.island !== hq.island);
+    // Late game (or nothing neutral left): go for the throat.
+    const assault = !neutralLeft || g.time > 900;
     for (const s of g.sites) {
       if (s.owner >= 0 && g.team(s.owner) === myTeam) continue;
       if (s.island === hq.island) continue;
       let d = Math.hypot(s.x - hq.x, s.y - hq.y);
       if (s.type === 'resource') d -= 8;
-      if (s.type === 'hq') d += 30;
+      if (s.type === 'hq') d += assault ? -40 : 30;
+      if (s.owner >= 0 && !assault) d += 15;
       const cur = best.get(s.island);
       if (!cur || d < cur.d) best.set(s.island, { island: s.island, x: s.x, y: s.y, d });
     }
@@ -118,10 +124,13 @@ export class Bot {
       return true;
     });
     const busyShips = new Set(this.transports.map((t) => t.ship));
-    const targets = this.targetIslands().filter((t) => !this.transports.some((tr) => tr.island === t.island));
+    const all = this.targetIslands();
+    const hqIslands = new Set(g.sites.filter((x) => x.type === 'hq').map((x) => x.island));
+    // Up to three transports may converge on an enemy home island; one per other island.
+    const targets = all.filter((t) => this.transports.filter((tr) => tr.island === t.island).length < (hqIslands.has(t.island) ? 3 : 1));
     // Start a new transport if possible.
     const idleInf = units.filter((u) => UNITS[u.type].domain === 'land' && u.inside < 0 && islandAt(g.map, u.x, u.y) === hq.island && u.order.k === 'idle');
-    if (targets.length && idleInf.length >= 2 && this.transports.length < 3) {
+    if (targets.length && idleInf.length >= 2 && this.transports.length < 4) {
       const ship = units
         .filter((u) => (u.type === 'destroyer' || u.type === 'battleship') && !busyShips.has(u.id) && u.holdCap > u.cargo.length && u.inside < 0 && !u.retreating)
         .sort((a, b) => Math.hypot(a.x - hq.x, a.y - hq.y) - Math.hypot(b.x - hq.x, b.y - hq.y))[0];
@@ -173,7 +182,16 @@ export class Bot {
       }
     }
     const islands = this.targetIslands();
-    const rally = target && bd < 45 ? target : islands[0] ? { x: (islands[0].x + hq.x) / 2, y: (islands[0].y + hq.y) / 2 } : { x: g.map.size / 2, y: g.map.size / 2 };
+    // Escort a landing on an enemy-held island; otherwise hunt nearby ships or screen the next objective.
+    const myTeam = g.players[this.pid].team;
+    const contested = this.transports.find((tr) => tr.state === 'sailing' && g.sites.some((x) => x.island === tr.island && x.owner >= 0 && g.team(x.owner) !== myTeam));
+    const rally = contested
+      ? { x: contested.tx, y: contested.ty }
+      : target && bd < 45
+        ? target
+        : islands[0]
+          ? { x: (islands[0].x + hq.x) / 2, y: (islands[0].y + hq.y) / 2 }
+          : { x: g.map.size / 2, y: g.map.size / 2 };
     const surface = ships.filter((s) => s.type !== 'sub');
     const subs = ships.filter((s) => s.type === 'sub');
     if (surface.length) g.command(this.pid, { c: 'move', ids: surface.map((s) => s.id), x: rally.x, y: rally.y });

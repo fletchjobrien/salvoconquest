@@ -533,7 +533,14 @@ export function lineClear(map: GameMap, x0: number, y0: number, x1: number, y1: 
   return true;
 }
 
-const gScore = new Map<number, number>();
+interface Scratch {
+  g: Float32Array;
+  came: Int32Array;
+  stamp: Uint32Array;
+  closed: Uint32Array;
+  gen: number;
+}
+const scratch = new WeakMap<GameMap, Scratch>();
 
 /**
  * A* over the nav grid. Returns world-space waypoints (excluding start), or null.
@@ -542,6 +549,14 @@ const gScore = new Map<number, number>();
 export function findPath(map: GameMap, sx: number, sy: number, gx: number, gy: number, pass: Passable): { x: number; y: number }[] | null {
   if (lineClear(map, sx, sy, gx, gy, pass)) return [{ x: gx, y: gy }];
   const nn = map.nn;
+  let sc = scratch.get(map);
+  if (!sc) {
+    const n = nn * nn;
+    sc = { g: new Float32Array(n), came: new Int32Array(n), stamp: new Uint32Array(n), closed: new Uint32Array(n), gen: 0 };
+    scratch.set(map, sc);
+  }
+  const gen = ++sc.gen;
+  const { g: gS, came, stamp, closed } = sc;
   let start = cellOf(map, sx, sy);
   if (!pass(start)) {
     start = nearestCell(map, sx, sy, pass, 8);
@@ -555,51 +570,52 @@ export function findPath(map: GameMap, sx: number, sy: number, gx: number, gy: n
     snapped = true;
   }
   const [gcx, gcy] = cellCenter(map, goal);
-  const came = new Map<number, number>();
-  gScore.clear();
-  gScore.set(start, 0);
+  const gi = goal % nn;
+  const gj = Math.floor(goal / nn);
+  stamp[start] = gen;
+  gS[start] = 0;
   const open = new Heap();
   const h = (c: number) => {
-    const dx = Math.abs((c % nn) - (goal % nn));
-    const dy = Math.abs(Math.floor(c / nn) - Math.floor(goal / nn));
+    const dx = Math.abs((c % nn) - gi);
+    const dy = Math.abs(Math.floor(c / nn) - gj);
     return Math.max(dx, dy) + 0.414 * Math.min(dx, dy);
   };
   open.push(start, h(start));
-  const closed = new Set<number>();
   let found = false;
   let iter = 0;
-  while (open.size && iter++ < 40000) {
+  while (open.size && iter++ < 30000) {
     const cur = open.pop();
     if (cur === goal) {
       found = true;
       break;
     }
-    if (closed.has(cur)) continue;
-    closed.add(cur);
+    if (closed[cur] === gen) continue;
+    closed[cur] = gen;
     const ci = cur % nn;
-    const cj = Math.floor(cur / nn);
-    const g0 = gScore.get(cur)!;
+    const cj = (cur - ci) / nn;
+    const g0 = gS[cur];
     for (let dj = -1; dj <= 1; dj++) {
+      const nj = cj + dj;
+      if (nj < 0 || nj >= nn) continue;
       for (let di = -1; di <= 1; di++) {
         if (!di && !dj) continue;
         const ni = ci + di;
-        const nj = cj + dj;
-        if (ni < 0 || nj < 0 || ni >= nn || nj >= nn) continue;
+        if (ni < 0 || ni >= nn) continue;
         const nc = nj * nn + ni;
-        if (closed.has(nc) || !pass(nc)) continue;
+        if (closed[nc] === gen || !pass(nc)) continue;
         if (di && dj && (!pass(cj * nn + ni) || !pass(nj * nn + ci))) continue;
         const g = g0 + (di && dj ? 1.414 : 1);
-        const old = gScore.get(nc);
-        if (old !== undefined && old <= g) continue;
-        gScore.set(nc, g);
-        came.set(nc, cur);
+        if (stamp[nc] === gen && gS[nc] <= g) continue;
+        stamp[nc] = gen;
+        gS[nc] = g;
+        came[nc] = cur;
         open.push(nc, g + h(nc));
       }
     }
   }
   if (!found) return null;
   const cells: number[] = [];
-  for (let c = goal; c !== start; c = came.get(c)!) cells.push(c);
+  for (let c = goal; c !== start; c = came[c]) cells.push(c);
   cells.reverse();
   const pts = cells.map((c) => {
     const [x, y] = cellCenter(map, c);

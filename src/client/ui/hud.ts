@@ -475,7 +475,7 @@ const HELP = `<b>FIELD MANUAL</b> <span style="float:right;color:var(--faint)">[
 <span class="k">U</span> unload troops, then click land in the ring<br>
 <span class="k">M</span> mines · <span class="k">R</span> aircraft RTB · <span class="k">S</span> stop<br>
 <span class="k">CTRL+1-9</span> group · <span class="k">1-9</span> recall · <span class="k">SPACE</span> last alert<br>
-<span class="k">TAB</span> show weapon ranges · <span class="k">ESC</span> menu<br>
+<span class="k">TAB</span> show weapon ranges · <span class="k">ENTER</span> chat · <span class="k">ESC</span> menu<br>
 Troops board ships by RMB on a ship. Capture <b>$</b> sites — merchants haul cash home. Take the enemy <b>HQ</b> to win.`;
 
 function esc(s: string): string {

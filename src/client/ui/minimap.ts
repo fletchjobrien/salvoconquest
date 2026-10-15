@@ -1,4 +1,5 @@
 // Radar-scope minimap with a rotating sweep.
+import * as THREE from 'three';
 import type { World } from '../state';
 import { SIDE } from '../theme';
 import { UNITS } from '../../shared/defs';
@@ -186,7 +187,6 @@ export class Minimap {
   }
 }
 
-import * as THREE from 'three';
 const ray = new THREE.Raycaster();
 const ndc = new THREE.Vector2();
 const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);

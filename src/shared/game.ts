@@ -142,7 +142,7 @@ export interface Unit {
   // lander
   ferry?: { mode: 'unload' | 'board'; ship: number; dest: { x: number; y: number }; then: { x: number; y: number } | null; island: number };
   // ground: board bookkeeping
-  boardWait?: number;
+  boardShore?: { x: number; y: number; sx: number; sy: number };
 }
 
 export interface Projectile {
@@ -964,13 +964,19 @@ export class Game {
       return;
     }
     const isl = islandAt(this.map, u.x, u.y);
-    // Find shore point on my island closest to the ship.
-    const shore = nearestCell(this.map, ship.x, ship.y, (k) => this.map.islandOf[k] === isl && this.isCoastCell(k), 160);
-    if (shore < 0) {
-      u.order = { k: 'idle' };
-      return;
+    // Shore point on my island closest to the ship (cached; recomputed when the ship moves).
+    let bs = u.boardShore;
+    if (!bs || Math.hypot(bs.sx - ship.x, bs.sy - ship.y) > 1.5) {
+      const shore = nearestCell(this.map, ship.x, ship.y, (k) => this.map.islandOf[k] === isl && this.isCoastCell(k), 160);
+      if (shore < 0) {
+        u.order = { k: 'idle' };
+        return;
+      }
+      const [cx, cy] = cellCenter(this.map, shore);
+      bs = u.boardShore = { x: cx, y: cy, sx: ship.x, sy: ship.y };
     }
-    const [sx, sy] = cellCenter(this.map, shore);
+    const sx = bs.x;
+    const sy = bs.y;
     const dShip = Math.hypot(ship.x - u.x, ship.y - u.y);
     const dShore = Math.hypot(sx - u.x, sy - u.y);
     const used = ship.cargo.length + this.incomingTo(ship.id);
@@ -1390,7 +1396,10 @@ export class Game {
         const direct = lineClear(this.map, u.x, u.y, x, y, (c) => this.map.nav[c] !== 1 || this.map.islandOf[c] === u.ferry?.island);
         u.path = direct ? [{ x, y }] : findPath(this.map, u.x, u.y, x, y, pass) ?? [{ x, y }];
       } else {
-        u.path = findPath(this.map, u.x, u.y, x, y, pass) ?? [];
+        const path = findPath(this.map, u.x, u.y, x, y, pass);
+        u.path = path ?? [];
+        // Unreachable: don't hammer the path finder.
+        if (!path) u.repathAt = this.time + 6;
       }
     }
   }
@@ -2059,7 +2068,7 @@ export class Game {
           else if (dom === 'land') R = s.surf * radMul * 0.45;
           else if (dom === 'sub') {
             R = s.sonar * e.quiet * (e.speed > e.maxSpeed * 0.7 ? 1.4 : 1);
-            if (d < R * 0.12) {
+            if (d < R * 0.35) {
               exact = true;
               break;
             }

@@ -10,7 +10,7 @@ import { Renderer, CameraRig } from './renderer';
 import { TerrainView } from './terrain';
 import { Fx } from './fx';
 import { UnitModel, makeSiteModel, makeUnitModel, SiteModel, VIS_LEN } from './models';
-import { groundY, visAlt, AIR_VIS } from './coords';
+import { groundY, visAlt, AIR_VIS, setAirZoom } from './coords';
 import type { Overlay } from './overlay';
 import { Wakes } from './wakes';
 import { setWeatherCells } from './weatherfx';
@@ -109,6 +109,7 @@ export class GameScene {
     const w = this.world;
     const map = w.map;
     const scene = this.r.scene;
+    setAirZoom(rig.dist);
 
     // ---- units ----
     const seen = new Set<number>();
@@ -360,7 +361,7 @@ export class GameScene {
         const alt = (e.a ?? 0) * (e.a && e.a > 0.3 ? AIR_VIS : 1) + groundY(map, e.x, e.y) * (e.a && e.a > 0.3 ? 0 : 1);
         if (m.proj === 'missile') {
           this.fx.launch(e.x, alt, e.y);
-          this.onSound(m.dmg?.land && !m.dmg.sea ? 'launch' : 'launch', e.x, e.y);
+          this.onSound('launch', e.x, e.y);
         } else if (m.proj === 'sam') {
           this.fx.launch(e.x, alt, e.y);
           this.onSound('sam', e.x, e.y);

@@ -2,7 +2,6 @@
 import { UNITS, UNIT_TYPES, UnitType, MODULES, UNLOAD_RANGE } from '../shared/defs';
 import { islandAt } from '../shared/map';
 import type { Command, GameEvent, ServerMsg, StartInfo } from '../shared/protocol';
-import { ORDER_CODES } from '../shared/protocol';
 import { Conn } from './net';
 import { World, UView } from './state';
 import { Renderer, CameraRig } from './render/renderer';
@@ -374,6 +373,8 @@ export class Match {
         if (e.o !== w.me) break;
         const type = UNIT_TYPES[e.ty];
         audio.play('built');
+        const nu = w.units.get(e.id);
+        if (nu) this.overlay.shock(nu.x, nu.y, 0, UNITS[type].domain === 'air' ? 0.6 : 0.9, '#6fd0ff', 0.9);
         void voices.say(fac, this.voiceCat(type), 'ready', unitName(fac, type, e.id), true);
         break;
       }
@@ -397,6 +398,7 @@ export class Match {
         if (e.o === w.me) {
           audio.play('capture');
           this.hud.banner('SITE CAPTURED', name);
+          this.overlay.floater(s.x, s.y, 0.3, s.type === 'resource' ? 'MERCHANTS DISPATCHED' : 'CAPTURED', '#6fd0ff');
           void voices.say(fac, 'ground', 'capture', 'MARINES', true);
         } else if (e.prev === w.me) {
           audio.play('lost');
@@ -416,6 +418,7 @@ export class Match {
         if (e.o === w.me) {
           audio.play('cash', e.x, e.y);
           this.overlay.shock(e.x, e.y, 0.05, 0.6, '#7dff9a', 0.8);
+          this.overlay.floater(e.x, e.y, 0.05, `+$${e.v}`, '#7dff9a');
         }
         break;
       case 'vampire': {
@@ -553,6 +556,11 @@ export class Match {
         } else this.onExit();
         return;
       }
+      if (e.code === 'Enter' && !this.conn.local) {
+        e.preventDefault();
+        this.openChat();
+        return;
+      }
       if (e.code === 'F1') {
         e.preventDefault();
         this.hud.toggleHelp();
@@ -598,6 +606,34 @@ export class Match {
     const leave = () => (this.mouseInside = false);
     document.documentElement.addEventListener('mouseleave', leave);
     this.disposers.push(() => document.documentElement.removeEventListener('mouseleave', leave));
+  }
+
+  private chatEl: HTMLInputElement | null = null;
+  private openChat() {
+    if (!this.chatEl) {
+      const el = document.createElement('input');
+      el.className = 'field hp';
+      el.placeholder = 'SAY TO ALL — ENTER TO SEND';
+      el.maxLength = 140;
+      Object.assign(el.style, { position: 'absolute', left: '16px', bottom: '230px', width: '300px', fontSize: '11px' });
+      el.addEventListener('keydown', (e) => {
+        e.stopPropagation();
+        if (e.code === 'Enter') {
+          const text = el.value.trim();
+          if (text) this.conn.send({ t: 'chat', text });
+          el.value = '';
+          el.blur();
+          el.classList.add('hidden');
+        } else if (e.code === 'Escape') {
+          el.blur();
+          el.classList.add('hidden');
+        }
+      });
+      this.hud.root.appendChild(el);
+      this.chatEl = el;
+    }
+    this.chatEl.classList.remove('hidden');
+    this.chatEl.focus();
   }
 
   private clickSelect(x: number, y: number, add: boolean) {
@@ -664,7 +700,6 @@ export class Match {
     this.scene.dispose();
     const ctx = this.overlay.ctx;
     ctx.clearRect(0, 0, this.overlay.canvas.width, this.overlay.canvas.height);
-    void ORDER_CODES;
   }
 
   get isEnded() {
