@@ -85,7 +85,7 @@ export interface ModuleDef {
   /** Interceptors kill it this much less often (sea-skimming stealth, supersonic sprint): 1 = normal. */
   evade?: number;
   /** Manually triggered ability instead of automatic fire. */
-  ability?: 'mines';
+  ability?: 'mines' | 'buoys';
   // Utility modifiers.
   mods?: {
     hp?: number;
@@ -113,22 +113,22 @@ export const MODULES: Record<string, ModuleDef> = {
   gun127: M({ id: 'gun127', faction: 'coalition', name: 'Mk 45 5-inch Gun', short: 'GUN', slots: ['mount'], desc: 'Fast-firing gun. Good against boats, coast and landing craft.', proj: 'shell', range: 10, dmg: { sea: 7, land: 9 }, cooldown: 2, ammo: -1, speed: 2.4, accuracy: 0.55 }),
   gun406: M({ id: 'gun406', faction: 'coalition', name: '16-inch Triple Turret', short: 'MAIN', slots: ['heavy'], desc: 'Huge shells. Long range shore bombardment and ship killing. Never runs dry.', proj: 'shell', range: 17, dmg: { sea: 28, land: 30 }, cooldown: 5, ammo: -1, speed: 2.2, accuracy: 0.42 }),
   railgun: M({ id: 'railgun', faction: 'coalition', name: 'Railgun', short: 'RAIL', slots: ['heavy'], desc: 'Hypersonic slug. Very long range, slower to cycle.', proj: 'shell', range: 22, dmg: { sea: 32, land: 26 }, cooldown: 8, ammo: -1, speed: 5, accuracy: 0.5 }),
-  vls_ashm: M({ id: 'vls_ashm', faction: 'coalition', name: 'Naval Strike Missile', short: 'NSM', slots: ['vls'], desc: 'Stealthy sea-skimmer: 30 km, seen late, interceptors hit it 30% less often.', proj: 'missile', range: 30, dmg: { sea: 40 }, cooldown: 4, ammo: 4, speed: 0.85, accuracy: 0.9, seeker: 5, evade: 0.7 }),
-  vls_sam: M({ id: 'vls_sam', faction: 'coalition', name: 'SM-6 Standard Missile', short: 'SM-6', slots: ['vls'], desc: 'Long-reach SAM: aircraft and missiles out to 24 km.', proj: 'sam', range: 24, dmg: { air: 38, missile: 1 }, cooldown: 1.2, ammo: 8, speed: 1.7, accuracy: 0.75, intercept: 0.5 }),
+  vls_ashm: M({ id: 'vls_ashm', faction: 'coalition', name: 'Naval Strike Missile', short: 'NSM', slots: ['vls'], desc: 'Stealthy sea-skimmer: 21 km, seen late, interceptors hit it 30% less often.', proj: 'missile', range: 21, dmg: { sea: 40 }, cooldown: 4, ammo: 4, speed: 0.85, accuracy: 0.9, seeker: 5, evade: 0.7 }),
+  vls_sam: M({ id: 'vls_sam', faction: 'coalition', name: 'SM-6 Standard Missile', short: 'SM-6', slots: ['vls'], desc: 'Long-reach SAM: aircraft and missiles out to 24 km.', proj: 'sam', range: 24, dmg: { air: 38, missile: 1 }, cooldown: 1.2, ammo: 5, speed: 1.7, accuracy: 0.75, intercept: 0.5 }),
   vls_lacm: M({ id: 'vls_lacm', faction: 'coalition', name: 'Tomahawk', short: 'TLAM', slots: ['vls'], desc: 'Cruise missiles against ground forces from 45 km.', proj: 'missile', range: 45, dmg: { land: 40 }, cooldown: 5, ammo: 4, speed: 0.75, accuracy: 0.9, seeker: 4 }),
   vls_asroc: M({ id: 'vls_asroc', faction: 'coalition', name: 'VL-ASROC', short: 'ASW', slots: ['vls', 'tube'], desc: 'Rocket-thrown torpedoes out to 12 km. Outranges a submarine\'s torpedoes.', proj: 'torpedo', range: 12, dmg: { sub: 45 }, cooldown: 6, ammo: 8, speed: 0.9, accuracy: 0.85, seeker: 2.5 }),
   torp: M({ id: 'torp', faction: 'coalition', name: 'Mk 48 ADCAP Torpedo', short: 'TORP', slots: ['tube'], desc: 'Fast, smart heavy torpedo: 10 km, wide seeker.', proj: 'torpedo', range: 10, dmg: { sea: 55, sub: 50 }, cooldown: 8, ammo: 8, speed: 0.46, accuracy: 0.87, seeker: 3 }),
-  tube_ashm: M({ id: 'tube_ashm', faction: 'coalition', name: 'Sub Harpoon', short: 'ASM', slots: ['tube'], desc: 'Anti-ship missiles fired from underwater. Reveals the sub.', proj: 'missile', range: 24, dmg: { sea: 38 }, cooldown: 6, ammo: 2, speed: 0.85, accuracy: 0.85, seeker: 5 }),
+  tube_ashm: M({ id: 'tube_ashm', faction: 'coalition', name: 'Sub Harpoon', short: 'ASM', slots: ['tube'], desc: 'Anti-ship missiles fired from underwater. Reveals the sub.', proj: 'missile', range: 17, dmg: { sea: 38 }, cooldown: 6, ammo: 2, speed: 0.85, accuracy: 0.85, seeker: 5 }),
   // Union (PLAN-pattern) naval weapons.
   gun130: M({ id: 'gun130', faction: 'union', name: 'H/PJ-38 130mm Gun', short: 'GUN', slots: ['mount'], desc: 'Heavy automatic gun: longer reach, slower to fire.', proj: 'shell', range: 12, dmg: { sea: 8, land: 10 }, cooldown: 2.4, ammo: -1, speed: 2.3, accuracy: 0.55 }),
   twin130: M({ id: 'twin130', faction: 'union', name: 'AK-130 Twin Mount', short: 'GUN', slots: ['heavy'], desc: 'Twin 130mm: fast, medium range. Never runs dry.', proj: 'shell', range: 13, dmg: { sea: 12, land: 14 }, cooldown: 2.4, ammo: -1, speed: 2.4, accuracy: 0.5 }),
-  heavy_ashm: M({ id: 'heavy_ashm', faction: 'union', name: 'Heavy Anti-Ship Missiles', short: 'HASM', slots: ['heavy'], desc: 'Granit-class giants: 36 km, huge warhead, supersonic, hard to stop. 3 rounds.', proj: 'missile', range: 36, dmg: { sea: 55 }, cooldown: 7, ammo: 3, speed: 1.3, accuracy: 0.9, seeker: 5, evade: 0.7 }),
-  yj18: M({ id: 'yj18', faction: 'union', name: 'YJ-18 Supersonic ASM', short: 'YJ18', slots: ['vls'], desc: 'Supersonic terminal sprint: 31 km, interceptors hit it 25% less often.', proj: 'missile', range: 31, dmg: { sea: 44 }, cooldown: 4, ammo: 4, speed: 1.0, accuracy: 0.9, seeker: 5, evade: 0.75 }),
-  hq9: M({ id: 'hq9', faction: 'union', name: 'HQ-9B SAM', short: 'HQ-9', slots: ['vls'], desc: 'Area SAM out to 20 km with a deep magazine (10).', proj: 'sam', range: 20, dmg: { air: 38, missile: 1 }, cooldown: 1.2, ammo: 10, speed: 1.6, accuracy: 0.75, intercept: 0.38 }),
+  heavy_ashm: M({ id: 'heavy_ashm', faction: 'union', name: 'Heavy Anti-Ship Missiles', short: 'HASM', slots: ['heavy'], desc: 'Granit-class giants: 25 km, huge warhead, supersonic, hard to stop. 3 rounds.', proj: 'missile', range: 25, dmg: { sea: 55 }, cooldown: 7, ammo: 3, speed: 1.3, accuracy: 0.9, seeker: 5, evade: 0.7 }),
+  yj18: M({ id: 'yj18', faction: 'union', name: 'YJ-18 Supersonic ASM', short: 'YJ18', slots: ['vls'], desc: 'Supersonic terminal sprint: 22 km, interceptors hit it 25% less often.', proj: 'missile', range: 22, dmg: { sea: 44 }, cooldown: 4, ammo: 4, speed: 1.0, accuracy: 0.9, seeker: 5, evade: 0.75 }),
+  hq9: M({ id: 'hq9', faction: 'union', name: 'HQ-9B SAM', short: 'HQ-9', slots: ['vls'], desc: 'Area SAM out to 20 km with a larger magazine (6).', proj: 'sam', range: 20, dmg: { air: 38, missile: 1 }, cooldown: 1.2, ammo: 6, speed: 1.6, accuracy: 0.75, intercept: 0.38 }),
   cj10: M({ id: 'cj10', faction: 'union', name: 'CJ-10 Cruise Missile', short: 'LACM', slots: ['vls'], desc: 'Cruise missiles against ground forces from 38 km.', proj: 'missile', range: 38, dmg: { land: 42 }, cooldown: 5, ammo: 4, speed: 0.75, accuracy: 0.9, seeker: 4 }),
   cy5: M({ id: 'cy5', faction: 'union', name: 'CY-5 ASW Missile', short: 'ASW', slots: ['vls', 'tube'], desc: 'Rocket-thrown torpedoes out to 11 km.', proj: 'torpedo', range: 11, dmg: { sub: 48 }, cooldown: 6, ammo: 8, speed: 0.9, accuracy: 0.85, seeker: 2.5 }),
   yu6: M({ id: 'yu6', faction: 'union', name: 'Yu-6 Heavy Torpedo', short: 'TORP', slots: ['tube'], desc: 'Heavy torpedo: 9.5 km, bigger warhead, slower.', proj: 'torpedo', range: 9.5, dmg: { sea: 60, sub: 50 }, cooldown: 8, ammo: 8, speed: 0.4, accuracy: 0.85, seeker: 2.5 }),
-  tube_yj18: M({ id: 'tube_yj18', faction: 'union', name: 'Sub YJ-18', short: 'ASM', slots: ['tube'], desc: 'Supersonic anti-ship missiles from underwater: 26 km. Reveals the sub.', proj: 'missile', range: 26, dmg: { sea: 40 }, cooldown: 6, ammo: 2, speed: 1.1, accuracy: 0.85, seeker: 5, evade: 0.7 }),
+  tube_yj18: M({ id: 'tube_yj18', faction: 'union', name: 'Sub YJ-18', short: 'ASM', slots: ['tube'], desc: 'Supersonic anti-ship missiles from underwater: 18 km. Reveals the sub.', proj: 'missile', range: 18, dmg: { sea: 40 }, cooldown: 6, ammo: 2, speed: 1.1, accuracy: 0.85, seeker: 5, evade: 0.7 }),
   // Shared kit (both factions).
   gun76: M({ id: 'gun76', name: '76mm Rapid Gun', short: 'GUN', slots: ['mount', 'aux'], desc: 'Light rapid gun. Shorter range, can also shoot at aircraft.', proj: 'shell', range: 7, dmg: { sea: 4, land: 5, air: 4 }, cooldown: 0.8, ammo: -1, speed: 2.8, accuracy: 0.5 }),
   ciws: M({ id: 'ciws', name: 'CIWS', short: 'CIWS', slots: ['aux', 'mount'], desc: 'Last-ditch gun that shreds incoming missiles at close range.', proj: 'bullet', range: 2, dmg: { air: 6, missile: 1 }, cooldown: 0.6, ammo: -1, accuracy: 0.6, intercept: 0.15 }),
@@ -143,8 +143,8 @@ export const MODULES: Record<string, ModuleDef> = {
   agm: M({ id: 'agm', faction: 'coalition', name: 'Joint Strike Missile', short: 'JSM', slots: ['hard'], desc: 'Stealthy stand-off missile vs ground units and ships: 12 km.', proj: 'missile', range: 12, dmg: { land: 26, sea: 24 }, cooldown: 2, ammo: 2, speed: 1.0, accuracy: 0.85, seeker: 3, evade: 0.8 }),
   kd88: M({ id: 'kd88', faction: 'union', name: 'KD-88 Missile', short: 'AGM', slots: ['hard'], desc: 'Stand-off missile vs ground units and ships: 10 km, bigger warhead.', proj: 'missile', range: 10, dmg: { land: 30, sea: 26 }, cooldown: 2, ammo: 2, speed: 1.0, accuracy: 0.85, seeker: 3 }),
   bombs: M({ id: 'bombs', name: 'Guided Bombs', short: 'BOMB', slots: ['hard'], desc: 'Heavy damage, must overfly the target.', proj: 'bomb', range: 2.5, dmg: { land: 38, sea: 34 }, cooldown: 1.5, ammo: 2, speed: 0.8, accuracy: 0.8 }),
-  air_ashm: M({ id: 'air_ashm', faction: 'coalition', name: 'LRASM', short: 'ASM', slots: ['hard'], desc: 'One stealthy heavy missile that kills ships from 30 km.', proj: 'missile', range: 30, dmg: { sea: 55 }, cooldown: 2, ammo: 1, speed: 0.9, accuracy: 0.9, seeker: 5, evade: 0.8 }),
-  yj83k: M({ id: 'yj83k', faction: 'union', name: 'YJ-83K', short: 'ASM', slots: ['hard'], desc: 'Two air-launched anti-ship missiles, 24 km.', proj: 'missile', range: 24, dmg: { sea: 40 }, cooldown: 2, ammo: 2, speed: 1.0, accuracy: 0.88, seeker: 5 }),
+  air_ashm: M({ id: 'air_ashm', faction: 'coalition', name: 'LRASM', short: 'ASM', slots: ['hard'], desc: 'One stealthy heavy missile that kills ships from 21 km.', proj: 'missile', range: 21, dmg: { sea: 55 }, cooldown: 2, ammo: 1, speed: 0.9, accuracy: 0.9, seeker: 5, evade: 0.8 }),
+  yj83k: M({ id: 'yj83k', faction: 'union', name: 'YJ-83K', short: 'ASM', slots: ['hard'], desc: 'Two air-launched anti-ship missiles, 17 km.', proj: 'missile', range: 17, dmg: { sea: 40 }, cooldown: 2, ammo: 2, speed: 1.0, accuracy: 0.88, seeker: 5 }),
   air_torp: M({ id: 'air_torp', name: 'ASW Torpedo', short: 'TORP', slots: ['hard'], desc: 'Drop torpedoes on submarine contacts.', proj: 'torpedo', range: 4, dmg: { sub: 45, sea: 25 }, cooldown: 2, ammo: 2, speed: 0.5, accuracy: 0.8, seeker: 2.5 }),
   aam_long: M({ id: 'aam_long', faction: 'coalition', name: 'AIM-120D AMRAAM', short: 'AAM', slots: ['hard'], desc: 'Beyond-visual-range missiles with an active seeker: 16 km, accurate.', proj: 'sam', range: 16, dmg: { air: 40 }, cooldown: 2, ammo: 2, speed: 1.8, accuracy: 0.8, seeker: 2.5 }),
   pl15: M({ id: 'pl15', faction: 'union', name: 'PL-15', short: 'AAM', slots: ['hard'], desc: 'Very long-range air-to-air missiles with an active seeker: 20 km, less accurate.', proj: 'sam', range: 20, dmg: { air: 40 }, cooldown: 2, ammo: 2, speed: 2.0, accuracy: 0.62, seeker: 2.5 }),
@@ -152,16 +152,16 @@ export const MODULES: Record<string, ModuleDef> = {
   gunpod: M({ id: 'gunpod', name: 'Cannon', short: 'GUN', slots: ['pod'], desc: 'Close range gun. Never runs dry.', proj: 'bullet', range: 1.6, dmg: { air: 6, land: 3, sea: 2 }, cooldown: 0.8, ammo: -1, accuracy: 0.5 }),
   droptank: M({ id: 'droptank', name: 'Drop Tank', short: 'FUEL', slots: ['pod', 'hard'], desc: '+60% time on station.', mods: { fuel: 1.6 } }),
   radarpod: M({ id: 'radarpod', name: 'Surveillance Radar', short: 'AEW', slots: ['pod'], desc: 'Huge radar bubble with good accuracy.', mods: { radarAir: 34, radarSurf: 28 } }),
-  sonobuoy: M({ id: 'sonobuoy', name: 'Sonobuoys', short: 'BUOY', slots: ['pod'], desc: 'Detect submarines under the aircraft.', mods: { sonar: 7 } }),
+  sonobuoy: M({ id: 'sonobuoy', name: 'Sonobuoys', short: 'BUOY', slots: ['pod'], desc: 'Drop listening buoys into the sea [M]. Each one hears submarines within 6 km, and ships further, for 150 s. 8 buoys.', proj: 'mine', range: 0, cooldown: 1.5, ammo: 8, ability: 'buoys' }),
   // ---- ground ----
   rifles: M({ id: 'rifles', name: 'Rifles + MG', short: 'MG', slots: ['arms'], desc: 'Infantry small arms. Holds ground.', proj: 'bullet', range: 2.2, dmg: { land: 5 }, cooldown: 1, ammo: -1, accuracy: 0.6 }),
   atgm: M({ id: 'atgm', faction: 'coalition', name: 'Javelin Teams', short: 'ATGM', slots: ['arms'], desc: 'Top-attack anti-tank missiles. Also hit boats near the beach.', proj: 'missile', range: 3, dmg: { land: 18, sea: 8 }, cooldown: 4, ammo: -1, speed: 0.5, accuracy: 0.85, seeker: 0.8 }),
   hj12: M({ id: 'hj12', faction: 'union', name: 'HJ-12 Teams', short: 'ATGM', slots: ['arms'], desc: 'Anti-tank missiles with a little more reach. Also hit boats near the beach.', proj: 'missile', range: 3.4, dmg: { land: 16, sea: 9 }, cooldown: 4, ammo: -1, speed: 0.5, accuracy: 0.8, seeker: 0.8 }),
   mortar: M({ id: 'mortar', name: 'Mortars', short: 'MORT', slots: ['arms'], desc: 'Indirect fire. Longer range than rifles.', proj: 'shell', range: 4, dmg: { land: 7 }, cooldown: 3, ammo: -1, speed: 0.6, accuracy: 0.45 }),
   manpads: M({ id: 'manpads', name: 'MANPADS', short: 'AA', slots: ['arms', 'kit'], desc: 'Shoulder-fired missiles against low aircraft.', proj: 'sam', range: 4, dmg: { air: 22 }, cooldown: 4, ammo: 4, regen: 0.05, speed: 1.4, accuracy: 0.6 }),
-  coastal_ashm: M({ id: 'coastal_ashm', building: true, name: 'Coastal Anti-Ship Missiles', short: 'ASM', slots: ['arms'], desc: 'Truck-launched missiles against ships.', proj: 'missile', range: 26, dmg: { sea: 40 }, cooldown: 10, ammo: 4, regen: 0.04, speed: 0.85, accuracy: 0.9, seeker: 5 }),
-  nsm_coastal: M({ id: 'nsm_coastal', faction: 'coalition', name: 'NMESIS (NSM)', short: 'NSM', slots: ['arms'], desc: 'Stealthy truck-launched anti-ship missiles: 28 km.', proj: 'missile', range: 28, dmg: { sea: 40 }, cooldown: 10, ammo: 4, regen: 0.04, speed: 0.85, accuracy: 0.9, seeker: 5, evade: 0.8 }),
-  yj12c: M({ id: 'yj12c', faction: 'union', name: 'YJ-12 Coastal', short: 'YJ12', slots: ['arms'], desc: 'Supersonic heavy anti-ship missiles: 32 km, bigger warhead, slower to reload.', proj: 'missile', range: 32, dmg: { sea: 48 }, cooldown: 12, ammo: 4, regen: 0.035, speed: 1.2, accuracy: 0.9, seeker: 5, evade: 0.7 }),
+  coastal_ashm: M({ id: 'coastal_ashm', building: true, name: 'Coastal Anti-Ship Missiles', short: 'ASM', slots: ['arms'], desc: 'Truck-launched missiles against ships.', proj: 'missile', range: 18, dmg: { sea: 40 }, cooldown: 10, ammo: 4, regen: 0.04, speed: 0.85, accuracy: 0.9, seeker: 5 }),
+  nsm_coastal: M({ id: 'nsm_coastal', faction: 'coalition', name: 'NMESIS (NSM)', short: 'NSM', slots: ['arms'], desc: 'Stealthy truck-launched anti-ship missiles: 20 km.', proj: 'missile', range: 20, dmg: { sea: 40 }, cooldown: 10, ammo: 4, regen: 0.04, speed: 0.85, accuracy: 0.9, seeker: 5, evade: 0.8 }),
+  yj12c: M({ id: 'yj12c', faction: 'union', name: 'YJ-12 Coastal', short: 'YJ12', slots: ['arms'], desc: 'Supersonic heavy anti-ship missiles: 22 km, bigger warhead, slower to reload.', proj: 'missile', range: 22, dmg: { sea: 48 }, cooldown: 12, ammo: 4, regen: 0.035, speed: 1.2, accuracy: 0.9, seeker: 5, evade: 0.7 }),
   ground_sam: M({ id: 'ground_sam', building: true, name: 'SAM Launchers', short: 'SAM', slots: ['arms'], desc: 'Medium range air defence. Also intercepts missiles.', proj: 'sam', range: 16, dmg: { air: 36, missile: 1 }, cooldown: 3.2, ammo: 8, regen: 0.08, speed: 1.6, accuracy: 0.72, intercept: 0.4 }),
   patriot: M({ id: 'patriot', faction: 'coalition', name: 'Patriot PAC-3', short: 'PAC3', slots: ['arms'], desc: 'Hit-to-kill SAM: 16 km, best against missiles.', proj: 'sam', range: 16, dmg: { air: 36, missile: 1 }, cooldown: 3.2, ammo: 8, regen: 0.08, speed: 1.7, accuracy: 0.75, intercept: 0.48 }),
   hq9g: M({ id: 'hq9g', faction: 'union', name: 'HQ-9 Launchers', short: 'HQ-9', slots: ['arms'], desc: 'Long-reach SAM: 20 km, slightly less effective against missiles.', proj: 'sam', range: 20, dmg: { air: 38, missile: 1 }, cooldown: 3.2, ammo: 8, regen: 0.08, speed: 1.6, accuracy: 0.72, intercept: 0.4 }),
@@ -317,6 +317,9 @@ export const ESM = {
   err: 7,
 };
 
+/** Dropped sonobuoys: passive sonar range (km) and life (s). */
+export const BUOY = { sonar: 6, life: 150 };
+
 export type CounterKind = 'chaff' | 'smoke';
 
 export function counterOf(type: UnitType): CounterKind | null {
@@ -365,7 +368,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
   navalbase: { type: 'navalbase', name: 'Naval Base', short: 'NAV', desc: 'Builds ships. Repairs and rearms ships nearby.', radarAir: 0, radarSurf: 10, visual: 6, produces: 'naval', captureTime: 20, weapons: [] },
   airbase: { type: 'airbase', name: 'Airbase', short: 'AIR', desc: 'Builds, launches and rearms aircraft.', radarAir: 16, radarSurf: 0, visual: 5, produces: 'air', captureTime: 18, weapons: [] },
   barracks: { type: 'barracks', name: 'Barracks', short: 'BKS', desc: 'Trains ground units right on this island.', radarAir: 0, radarSurf: 0, visual: 5, produces: 'ground', captureTime: 15, weapons: [] },
-  radar: { type: 'radar', name: 'Radar Station', short: 'RDR', desc: 'Long range radar coverage over a huge area.', radarAir: 36, radarSurf: 28, visual: 5, captureTime: 12, weapons: [] },
+  radar: { type: 'radar', name: 'Radar Station', short: 'RDR', desc: 'Long range radar coverage over a wide area.', radarAir: 24, radarSurf: 18, visual: 5, captureTime: 12, weapons: [] },
   dockyard: { type: 'dockyard', name: 'Dockyard', short: 'DOCK', desc: 'Forward port. Builds, repairs and rearms ships.', radarAir: 0, radarSurf: 10, visual: 5, produces: 'naval', captureTime: 15, weapons: [] },
   battery: { type: 'battery', name: 'Missile Battery', short: 'MSL', desc: 'Fires anti-ship and anti-air missiles for its owner.', radarAir: 20, radarSurf: 16, visual: 5, captureTime: 15, weapons: ['coastal_ashm', 'ground_sam'] },
   resource: { type: 'resource', name: 'Resource Site', short: 'RES', desc: 'Merchant ships haul its output home as cash.', radarAir: 0, radarSurf: 0, visual: 4, captureTime: 10, weapons: [] },
@@ -413,10 +416,10 @@ export const CRIT = {
   stunMax: 6,
 };
 
-export const MAP_SIZE = 80; // km
+export const MAP_SIZE = 160; // km
 export const TICK = 0.1; // s
 export const HQ_INCOME = 3; // $/s
-export const MERCHANT_PAYOUT = 260;
+export const MERCHANT_PAYOUT = 450;
 /** Deployment budget (prices are tripled, see COST_SCALE); what you don't spend carries into battle. */
 export const START_CASH = 6500;
 /** Deployment phase: place your starting force, then launch (or wait for the timer). */

@@ -114,6 +114,8 @@ interface IslandSpec {
 }
 
 const C = MAP_SIZE / 2;
+/** Island layout spreads with the map; islands keep their size, so a bigger map means more open water. */
+const K = MAP_SIZE / 80;
 
 function rotQ(x: number, y: number, k: number): [number, number] {
   // Rotate (x,y) around the map centre by k quarter turns.
@@ -213,7 +215,7 @@ export function generateMap(seed: number, theme: Theme, occupied?: number[]): Ga
   islands.push({ id: 0, name: info.centerName, x: C, y: C, r: 10.5, home: -1 });
 
   // Home islands: one shape, rotated into the four corners, so every start is identical.
-  const homeOff = 26.5;
+  const homeOff = 26.5 * K;
   const homeLobes = makeLobes(rng, 5.6, 2, 0.9, 1.0);
   const placed: { x: number; y: number; r: number }[] = [{ x: C, y: C, r: 10.5 * 1.4 }];
   for (let k = 0; k < 4; k++) {
@@ -242,7 +244,7 @@ export function generateMap(seed: number, theme: Theme, occupied?: number[]): Ga
     for (const roles of roleSets) {
       for (let t = 0; t < 600; t++) {
         const a = base + rng.range(-0.25, Math.PI / 2 + 0.25);
-        const dist = rng.range(15, 37);
+        const dist = rng.range(15 * K, 37 * K);
         const r = rng.range(2.2, 4.4);
         const x = C + Math.cos(a) * dist;
         const y = C + Math.sin(a) * dist;
@@ -256,7 +258,7 @@ export function generateMap(seed: number, theme: Theme, occupied?: number[]): Ga
   }
 
   // Islet chains: rocky strings of small islands that funnel ships through straits.
-  const chains = rng.int(4, 6);
+  const chains = Math.round(rng.int(4, 6) * K);
   for (let c = 0; c < chains; c++) {
     // Start each chain in open water.
     let x = 0;

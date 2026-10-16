@@ -11,7 +11,7 @@ import { Renderer, CameraRig } from './render/renderer';
 import { GameScene } from './render/scene';
 import { Overlay, OverlayView, Hover } from './render/overlay';
 import { groundY } from './render/coords';
-import { Hud } from './ui/hud';
+import { Hud, fireModeOf } from './ui/hud';
 import { Minimap, screenToGround } from './ui/minimap';
 import { audio, Sfx } from './audio/sfx';
 import { voices, VoiceCat } from './audio/voice';
@@ -417,10 +417,21 @@ export class Match {
     this.hud.log('ORDERS', `Pick a landing point${ships.length > 1 ? ` for ${ships.length} ships` : ''} within ${UNLOAD_RANGE} km — ships close in if needed.`, 'good');
   }
 
-  private ability(a: 'mines' | 'rtb' | 'retreat' | 'stop' | 'siteFactory' | 'refund' | 'counter' | 'radar') {
+  private ability(a: 'mines' | 'rtb' | 'retreat' | 'stop' | 'siteFactory' | 'refund' | 'counter' | 'radar' | 'firemode') {
     const ids = this.ownSelectedIds();
     const w = this.world;
     switch (a) {
+      case 'firemode': {
+        // Cycle hold fire -> weapons tight -> weapons free; a mixed selection goes to tight.
+        const us = ids.map((id) => w.units.get(id)).filter((u) => !!u);
+        if (!us.length) break;
+        const modes = new Set(us.map((u) => fireModeOf(u!.flags)));
+        const mode = modes.size === 1 ? ([...modes][0] + 1) % 3 : 1;
+        this.send({ c: 'firemode', ids: us.map((u) => u!.id), mode });
+        audio.play('order');
+        this.hud.log('FIRE CONTROL', mode === 0 ? 'Hold fire. Self-defence only.' : mode === 1 ? 'Weapons tight: two rounds per target.' : 'Weapons free: fire everything that bears.', mode === 2 ? 'warn' : 'good');
+        break;
+      }
       case 'radar': {
         // Toggle as a group: if any selected radar is on, switch them all off; otherwise all on.
         const radars = ids.map((id) => w.units.get(id)).filter((u) => !!u && (UNITS[u.type].radarAir > 0 || UNITS[u.type].radarSurf > 0 || matchLoadoutOf(u.type).some((m) => !!(MODULES[m]?.mods?.radarAir || MODULES[m]?.mods?.radarSurf))));
@@ -797,6 +808,7 @@ export class Match {
       if ((e.code === 'Delete' || e.code === 'Backspace') && this.world.setup) this.ability('refund');
       if (e.code === 'KeyX') this.ability('stop');
       if (e.code === 'KeyC') this.ability('counter');
+      if (e.code === 'KeyF') this.ability('firemode');
       if (e.code === 'KeyG') this.ability('radar');
       if (e.code === 'KeyU') this.enterUnload();
       if (e.code === 'KeyM') this.ability('mines');

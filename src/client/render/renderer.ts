@@ -180,7 +180,7 @@ export class CameraRig {
   private wantDist = 45;
   private wantYaw = 0;
   minDist = 2.2;
-  maxDist = 140;
+  maxDist = 240;
   shake = 0;
 
   constructor(private cam: THREE.PerspectiveCamera) {}

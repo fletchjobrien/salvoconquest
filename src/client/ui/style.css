@@ -585,6 +585,23 @@ input[type='range'] {
   color: #fff;
   letter-spacing: 0.08em;
 }
+.sp-head .kc {
+  margin-left: auto;
+  align-self: flex-start;
+  font-size: 11px;
+  color: var(--dim);
+  letter-spacing: 0.1em;
+  text-align: right;
+  line-height: 1.1;
+}
+.sp-head .kc.z {
+  opacity: 0.4;
+}
+.sp-head .kc span {
+  display: block;
+  font-size: 7px;
+  letter-spacing: 0.2em;
+}
 .sp-head .ty {
   font-size: 9px;
   color: var(--dim);

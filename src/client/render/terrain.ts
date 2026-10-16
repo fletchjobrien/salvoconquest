@@ -211,7 +211,7 @@ export class TerrainView {
 
   private buildWater() {
     const map = this.map;
-    const res = 512;
+    const res = 1024;
     const data = new Uint8Array(res * res * 4);
     for (let j = 0; j < res; j++) {
       for (let i = 0; i < res; i++) {

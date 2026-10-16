@@ -34,6 +34,7 @@ import {
   COUNTER,
   counterOf,
   ESM,
+  BUOY,
   PASSIVE_SHIP,
   TORPEDO_VS,
 } from './defs';
@@ -68,6 +69,8 @@ import {
   F_STUN,
   F_PAINTED,
   F_DARK,
+  F_HOLD,
+  F_FREE,
   CritPart,
   DamageRow,
   GameEvent,
@@ -113,6 +116,7 @@ export type Order =
   | { k: 'unload'; x: number; y: number; ids: number[] };
 
 const OVERKILL_CHECK = new Set<string>(['missile', 'torpedo', 'bomb']);
+const GUIDED = new Set<string>(['missile', 'torpedo', 'sam']);
 
 export interface ShipSystems {
   engine: number;
@@ -194,6 +198,11 @@ export interface Unit {
   cm: number;
   /** When the last countermeasure was used (no refill until it has cleared). */
   cmAt: number;
+  /** Fire control: 0 hold fire, 1 weapons tight (at most 2 own missiles in flight per target), 2 weapons free. */
+  fireMode: number;
+  /** Enemy units this unit has destroyed, and the last of our enemies' units to hit it. */
+  kills: number;
+  lastHitUnit: number;
   /** Active radar on (default) or switched off for emission control. */
   radarOn: boolean;
   /** Last time an enemy radar held this unit in track. */
@@ -249,6 +258,8 @@ export interface Projectile {
   evade?: number;
   /** Missile arc: launch altitude, apex height above the launch-to-target line, distance flown. */
   arc?: { a0: number; apex: number; flown: number; f: number };
+  /** Unit that fired it (-1: a building), for fire control and kill credit. */
+  shooter: number;
   /** Expected damage reserved on a unit (anti-overkill); released when the projectile ends. */
   resv?: { id: number; dmg: number };
   /** Pulled off its target by chaff: flies into the cloud (at this altitude) and detonates there. */
@@ -344,6 +355,8 @@ export class Game {
   units = new Map<number, Unit>();
   projs: Projectile[] = [];
   mines: Mine[] = [];
+  /** Sonobuoys dropped by aircraft: passive listening posts on the sea. */
+  buoys: { x: number; y: number; team: number; until: number }[] = [];
   /** Chaff clouds (drift with the wind of the launching unit) and smoke screens. */
   chaffs: { x: number; y: number; alt: number; until: number; unit: number; team: number }[] = [];
   smokes: { x: number; y: number; r: number; until: number; team: number }[] = [];
@@ -498,6 +511,9 @@ export class Game {
       cm: counterOf(type) ? 1 : 0,
       cmAt: -999,
       radarOn: true,
+      fireMode: 1,
+      kills: 0,
+      lastHitUnit: -1,
       paintedAt: -999,
       lastHitBy: -1,
       lastHitAt: -1e9,
@@ -619,11 +635,19 @@ export class Game {
         break;
       }
       case 'mines':
-        for (const u of own(cmd.ids)) this.dropMines(u);
+        for (const u of own(cmd.ids)) {
+          this.dropMines(u);
+          this.dropBuoy(u);
+        }
         break;
       case 'counter':
         for (const u of own(cmd.ids)) this.useCounter(u);
         break;
+      case 'firemode': {
+        const mode = Math.max(0, Math.min(2, Math.floor(Number(cmd.mode) || 0)));
+        for (const u of own(cmd.ids)) u.fireMode = mode;
+        break;
+      }
       case 'radar':
         for (const u of own(cmd.ids)) if (u.radarAir > 0 || u.radarSurf > 0) u.radarOn = !!cmd.on;
         break;
@@ -802,6 +826,7 @@ export class Game {
       }
     }
     if (this.smokes.length) this.smokes = this.smokes.filter((m) => m.until > this.time);
+    if (this.buoys.length) this.buoys = this.buoys.filter((b) => b.until > this.time);
   }
 
   private dropMines(u: Unit) {
@@ -815,6 +840,17 @@ export class Game {
       this.mines.push({ id: this.nextId++, owner: u.owner, team: u.team, x: bx, y: by, armAt: this.time + 4 });
     }
     this.emit({ k: 'mine', x: u.x, y: u.y }, u.x, u.y, u.team);
+  }
+
+  /** An aircraft drops one sonobuoy below it (only over water). */
+  dropBuoy(u: Unit) {
+    const w = u.weapons.find((w) => w.mod.ability === 'buoys');
+    if (!w || w.ammo < 1 || w.cd > 0 || u.landed || u.inside >= 0) return;
+    if (heightAt(this.map, u.x, u.y) > -0.01) return;
+    w.ammo--;
+    w.cd = w.mod.cooldown ?? 1.5;
+    this.buoys.push({ x: u.x, y: u.y, team: u.team, until: this.time + BUOY.life });
+    this.emit({ k: 'buoy', x: u.x, y: u.y }, u.x, u.y, u.team);
   }
 
   // ------------------------------------------------------------------ tick
@@ -2069,7 +2105,7 @@ export class Game {
         // Stunned crews hold fire; a knocked-out mount is silent until repaired.
         if (sys && (sys.stun > 0 || sys.weaponOut === wi)) continue;
         if (w.max >= 0 && w.ammo < 1) continue;
-        // Interceptors first.
+        // Interceptors first (self-defence: allowed even on hold fire).
         if (w.mod.intercept) {
           const m = this.pickMissileTarget(sh, w);
           if (m) {
@@ -2077,10 +2113,18 @@ export class Game {
             continue;
           }
         }
+        if (sh.unit && sh.unit.fireMode === 0) continue;
         const t = this.pickTarget(sh, w);
         if (t) this.fire(sh, w, t.unit, t.x, t.y, t.exact);
       }
     }
+  }
+
+  /** Guided rounds one unit has in flight at one target. */
+  private inFlightFrom(shooter: number, target: number): number {
+    let n = 0;
+    for (const q of this.projs) if (!q.dead && q.shooter === shooter && q.target === target) n++;
+    return n;
   }
 
   /** Live SAMs homing on a target (unit id, or -2-projId for a missile). */
@@ -2164,7 +2208,11 @@ export class Game {
       if (w.mod.proj === 'sam' && this.samsAt(id) >= 2) continue;
       // Don't waste limited, slow munitions on a target that is already as good as dead.
       // Guns are not held back: their rounds are free and arrive in seconds.
-      if (OVERKILL_CHECK.has(w.mod.proj!) && t.pendingDmg >= t.hp * 1.2) continue;
+      // Fire control. Weapons free: everything that bears, no holding back. Weapons tight (default):
+      // at most two of our own guided rounds in flight at one target, and no overkill.
+      const free = sh.unit?.fireMode === 2;
+      if (!free && OVERKILL_CHECK.has(w.mod.proj!) && t.pendingDmg >= t.hp * 1.2) continue;
+      if (sh.unit && sh.unit.fireMode === 1 && GUIDED.has(w.mod.proj!) && this.inFlightFrom(sh.unit.id, id) >= 2) continue;
       // Ground small arms only fight on the same island.
       if (sh.unit && UNITS[sh.unit.type].domain === 'land' && cls === 'land' && islandAt(this.map, t.x, t.y) !== islandAt(this.map, sh.x, sh.y)) continue;
       let score = d / range;
@@ -2193,7 +2241,7 @@ export class Game {
     if (w.mod.proj === 'bullet') {
       this.emit({ k: 'fire', id: u?.id ?? 0, m: w.mod.id, x: sh.x, y: sh.y, tx: t.x, ty: t.y, a: t.alt }, sh.x, sh.y);
       const acc = (w.mod.accuracy ?? 0.5) * (cls === 'air' ? 0.6 : 1);
-      if (this.rng.next() < acc) this.damage(t, dmg, sh.owner, 'bullet');
+      if (this.rng.next() < acc) this.damage(t, dmg, sh.owner, 'bullet', u?.id);
       return;
     }
     // Lead the target for shells.
@@ -2245,6 +2293,7 @@ export class Game {
       dead: false,
       seeking: false,
       hostileSeen: false,
+      shooter: sh.unit?.id ?? -1,
     };
     if (kind === 'missile') {
       if (!sh.unit || UNITS[sh.unit.type].domain !== 'air') p.alt = Math.max(0.05, heightAt(this.map, sh.x, sh.y) + 0.03);
@@ -2452,7 +2501,7 @@ export class Game {
     const w = this.weatherAt(t.x, t.y);
     chance *= 1 - 0.25 * w.storm;
     if (this.rng.next() < chance) {
-      this.damage(t, dmg * mul, p.owner, p.kind);
+      this.damage(t, dmg * mul, p.owner, p.kind, p.shooter);
       this.emit({ k: 'boom', x: t.x, y: t.y, s: Math.min(1.5, (dmg * mul) / 30), w: false, a: t.alt }, t.x, t.y);
     } else {
       const [ox, oy] = this.rng.inDisc(0.25);
@@ -2462,8 +2511,9 @@ export class Game {
     }
   }
 
-  damage(t: Unit, dmg: number, by: number, src?: string) {
+  damage(t: Unit, dmg: number, by: number, src?: string, shooter = -1) {
     if (t.dead) return;
+    if (shooter >= 0) t.lastHitUnit = shooter;
     let d = dmg;
     if (UNITS[t.type].domain === 'land' && t.stillFor > 4) d *= t.entrench;
     t.hp -= d;
@@ -2583,7 +2633,8 @@ export class Game {
       (this.speedFactor(u) === 0 ? F_STOPPED : 0) |
       (s.stun > 0 ? F_STUN : 0) |
       (this.time - u.paintedAt < 1.2 ? F_PAINTED : 0) |
-      (hasRadar && !u.radarOn ? F_DARK : 0)
+      (hasRadar && !u.radarOn ? F_DARK : 0) |
+      (u.fireMode === 0 ? F_HOLD : u.fireMode === 2 ? F_FREE : 0)
     );
   }
 
@@ -2600,6 +2651,8 @@ export class Game {
     const owner = this.players[t.owner];
     if (t.type !== 'merchant' && t.type !== 'lander') owner.losses++;
     if (by >= 0 && by !== t.owner && t.type !== 'lander') this.players[by].kills++;
+    const killer = this.units.get(t.lastHitUnit);
+    if (killer && killer.team !== t.team) killer.kills++;
     for (const cid of t.cargo) {
       const c = this.units.get(cid);
       if (c) {
@@ -2738,6 +2791,8 @@ export class Game {
           sub: dom === 'sub',
         });
       }
+      // Sonobuoys: quiet passive listeners (they hear ships like a submarine does).
+      for (const b of this.buoys) if (b.team === team) sensors.push({ x: b.x, y: b.y, air: 0, surf: 0, sonar: BUOY.sonar, vis: 0, isUnit: false, sub: true });
       for (const s of this.sites) {
         if (s.owner < 0 || this.team(s.owner) !== team) continue;
         const b = BUILDINGS[s.type];
@@ -2945,6 +3000,7 @@ export class Game {
             UNITS[x.type].deck ? this.deckIds(x) : [],
             this.damageRow(x),
             x.cm,
+            x.kills,
           ]);
         }
         continue;
@@ -2991,6 +3047,8 @@ export class Game {
     }
     const snap: Snapshot = { t: 's', time: r2(this.time), cash: Math.floor(p.cash), income: r2(p.income), u, c, p: pr, d, e };
     if (this.phase === 'setup') snap.ph = { left: Math.ceil(this.setupLeft), ready: [...this.readySet] };
+    const bu = this.buoys.filter((b) => b.team === team);
+    if (bu.length) snap.bu = bu.map((b) => [Math.round(b.x * 100) / 100, Math.round(b.y * 100) / 100, Math.ceil(b.until - this.time)]);
     if (this.smokes.length) snap.sm = this.smokes.map((m) => [Math.round(m.x * 100) / 100, Math.round(m.y * 100) / 100, m.r, Math.ceil(m.until - this.time)]);
     if (full || this.sitesDirty || this.tickN % 10 === 0) {
       const intel = this.siteIntel.get(team);

@@ -1,6 +1,6 @@
 // DOM heads-up display: top bar, radio log, build bar, selection panel, tooltips, banners.
 import { BUILDABLE, BUILDINGS, CRIT, MODULES, UNITS, UnitType, unitBuildTime, unitCost, counterOf, unitDef, deriveStats, FACTION_MOD } from '../../shared/defs';
-import { ORDER_CODES, F_DARK, F_PAINTED } from '../../shared/protocol';
+import { ORDER_CODES, F_DARK, F_PAINTED, F_HOLD, F_FREE } from '../../shared/protocol';
 import type { World, UView } from '../state';
 import { FACTION_STYLE, SIDE, unitName } from '../theme';
 import { SymDomain, glyphFor, symbolDataUrl, SITE_GLYPH } from '../render/symbols';
@@ -15,7 +15,7 @@ export interface HudActions {
   selectOnly(ids: number[]): void;
   unloadMode(ship: number, ids: number[]): void;
   toggleCargo(id: number): void;
-  ability(name: 'mines' | 'rtb' | 'retreat' | 'stop' | 'siteFactory' | 'refund' | 'counter' | 'radar'): void;
+  ability(name: 'mines' | 'rtb' | 'retreat' | 'stop' | 'siteFactory' | 'refund' | 'counter' | 'radar' | 'firemode'): void;
   ready(on: boolean): void;
 }
 
@@ -369,7 +369,7 @@ export class Hud {
     if (sel.length === 1) {
       const u = sel[0];
       const d = w.details.get(u.id);
-      const key = `u:${u.id}:${u.hp}:${u.flags & (F_DARK | F_PAINTED)}:${JSON.stringify(d)}:${[...this.cargoSel].join(',')}`;
+      const key = `u:${u.id}:${u.hp}:${u.flags & (F_DARK | F_PAINTED | F_HOLD | F_FREE)}:${JSON.stringify(d)}:${[...this.cargoSel].join(',')}`;
       if (key === this.selKey) return;
       this.selKey = key;
       el.innerHTML = this.unitHtml(u);
@@ -382,7 +382,7 @@ export class Hud {
       a.push(u);
       groups.set(u.type, a);
     }
-    const key = 'm:' + [...groups.entries()].map(([t, a]) => `${t}${a.length}`).join(',') + sel.map((u) => `${u.hp}/${u.flags & F_DARK}`).join(',');
+    const key = 'm:' + [...groups.entries()].map(([t, a]) => `${t}${a.length}`).join(',') + sel.map((u) => `${u.hp}/${u.flags & (F_DARK | F_HOLD | F_FREE)}`).join(',');
     if (key === this.selKey) return;
     this.selKey = key;
     const avg = sel.reduce((s, u) => s + u.hp, 0) / sel.length;
@@ -438,7 +438,8 @@ export class Hud {
       merchant: 'HAULING CARGO',
       lander: 'FERRYING',
     };
-    let html = `<div class="sp-head"><img src="${symbolDataUrl('own', def.domain as SymDomain, glyphFor(u.type), 13)}"><div><div class="nm">${esc(unitName(fac, u.type, u.id))}</div><div class="ty">${def.names[fac]}</div></div></div>`;
+    const kills = d?.[15] ?? 0;
+    let html = `<div class="sp-head"><img src="${symbolDataUrl('own', def.domain as SymDomain, glyphFor(u.type), 13)}"><div><div class="nm">${esc(unitName(fac, u.type, u.id))}</div><div class="ty">${def.names[fac]}</div></div><div class="kc${kills ? '' : ' z'}" title="Enemy units destroyed">${kills}<span>KILLS</span></div></div>`;
     const portFlags = d ? d[7] : 0;
     const port = portFlags & 8 ? ' · <span style="color:var(--bad)">IN PORT · UNDER ATTACK, REPAIRS HELD</span>' : portFlags & 4 ? ' · <span style="color:var(--good)">IN PORT · REPAIRING &amp; REARMING</span>' : '';
     html += `<div class="status">${statusTxt[order] ?? order.toUpperCase()}${u.flags & 8 ? ' · REARMING' : ''}${port}</div>`;
@@ -534,6 +535,7 @@ export class Hud {
     const ships = sel.filter((u) => (w.details.get(u.id)?.[2].length ?? 0) > 0);
     if (ships.length >= 1) b.push(`<button class="btn small" data-act="unload">UNLOAD${ships.length > 1 ? ` ×${ships.length}` : ''}<span class="kbd">U</span></button>`);
     if (any((u) => matchLoadoutOf(u.type).includes('mines'))) b.push(`<button class="btn small" data-act="mines">DROP MINES<span class="kbd">M</span></button>`);
+    if (any((u) => matchLoadoutOf(u.type).includes('sonobuoy'))) b.push(`<button class="btn small" data-act="mines">DROP BUOY<span class="kbd">M</span></button>`);
     if (any((u) => UNITS[u.type].domain === 'air')) b.push(`<button class="btn small" data-act="rtb">RTB<span class="kbd">R</span></button>`);
     if (any((u) => UNITS[u.type].category === 'naval' || UNITS[u.type].category === 'ground')) {
       const on = sel.every((u) => ((w.details.get(u.id)?.[7] ?? 1) & 1) === 1);
@@ -542,6 +544,13 @@ export class Hud {
     if (w.setup) {
       b.push(`<button class="btn small" data-act="refund">REFUND<span class="kbd">DEL</span></button>`);
       return b.join('');
+    }
+    // Fire control: hold fire / weapons tight / weapons free (the button shows the current state).
+    if (sel.some((u) => matchLoadoutOf(u.type).some((id) => MODULES[id]?.proj))) {
+      const modes = new Set(sel.map((u) => fireModeOf(u.flags)));
+      const m = modes.size === 1 ? [...modes][0] : -1;
+      const label = m === 0 ? 'HOLD FIRE' : m === 2 ? 'WEAPONS FREE' : m === 1 ? 'WEAPONS TIGHT' : 'FIRE: MIXED';
+      b.push(`<button class="btn small ${m === 0 ? '' : m === 2 ? 'on' : ''}" data-act="firemode" title="Hold fire: only self-defence against missiles · Weapons tight: at most 2 guided rounds in flight per target · Weapons free: fire everything that bears">${label}<span class="kbd">F</span></button>`);
     }
     // Radar on/off (only units that have a radar of their own).
     const radars = sel.filter((u) => this.hasRadar(u.type));
@@ -595,7 +604,7 @@ const HELP = `<b>FIELD MANUAL</b> <span style="float:right;color:var(--faint)">[
 <span class="k">CTRL+RMB</span> force move (no fighting)<br>
 <span class="k">WASD · MMB drag</span> pan · <span class="k">Q/E</span> rotate · <span class="k">wheel</span> zoom<br>
 <span class="k">U</span> unload troops, then click land in the ring<br>
-<span class="k">C</span> chaff / smoke · <span class="k">G</span> radar on/off · <span class="k">M</span> mines · <span class="k">R</span> aircraft RTB · <span class="k">X</span> stop<br>
+<span class="k">C</span> chaff / smoke · <span class="k">G</span> radar on/off · <span class="k">F</span> fire control · <span class="k">M</span> mines / sonobuoy · <span class="k">R</span> aircraft RTB · <span class="k">X</span> stop<br>
 <span class="k">CTRL+1-9</span> group · <span class="k">1-9</span> recall · <span class="k">SPACE</span> last alert<br>
 <span class="k">TAB</span> weapon ranges · <span class="k">V</span> sensor coverage<br>
 <span class="k">ENTER</span> chat · <span class="k">ESC</span> menu<br>
@@ -604,4 +613,9 @@ Troops board ships by RMB on a ship. Capture <b>$</b> sites — merchants haul c
 
 function esc(s: string): string {
   return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+}
+
+/** 0 hold fire, 1 weapons tight, 2 weapons free (from the unit flags). */
+export function fireModeOf(flags: number): number {
+  return flags & F_HOLD ? 0 : flags & F_FREE ? 2 : 1;
 }

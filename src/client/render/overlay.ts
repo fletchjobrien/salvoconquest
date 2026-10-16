@@ -3,7 +3,7 @@ import { BUILDINGS, MODULES, UNITS, UNIT_TYPES, UNLOAD_RANGE, UnitType, unitCost
 import { canDeployAt, deployZone, rallySite } from '../../shared/game';
 import { cellOf } from '../../shared/map';
 import { sensorCoverage, unionOutline, COVER_COLORS, Disc } from '../sensors';
-import { ORDER_CODES, F_RETREAT, F_LANDED, F_FIRE, F_STOPPED, F_STUN, F_PAINTED, F_DARK } from '../../shared/protocol';
+import { ORDER_CODES, F_RETREAT, F_LANDED, F_FIRE, F_STOPPED, F_STUN, F_PAINTED, F_DARK, F_HOLD, F_FREE } from '../../shared/protocol';
 import type { Renderer, CameraRig } from './renderer';
 import type { World, UView } from '../state';
 import { DOMAINS } from '../state';
@@ -242,6 +242,20 @@ export class Overlay {
         ctx.setLineDash([]);
         ctx.globalAlpha = 1;
       }
+    }
+
+    // ---- our sonobuoys: a small violet ring with a dot, fading in their last 20 s ----
+    for (const [bx, by, left] of w.buoys) {
+      if (!this.proj(v, bx, 0, by)) continue;
+      ctx.globalAlpha = 0.55 * Math.min(1, left / 20);
+      ctx.strokeStyle = '#a890ff';
+      ctx.fillStyle = '#a890ff';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(P.x, P.y, 3.5, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillRect(P.x - 0.75, P.y - 0.75, 1.5, 1.5);
+      ctx.globalAlpha = 1;
     }
 
     // ---- ghosts (last known positions) ----
@@ -658,6 +672,8 @@ export class Overlay {
     if (d && d[4] > 0) out.push(['FLD', '#6fb8ff']);
     if (u.flags & F_STUN) out.push(['STUN', '#ffe14a']);
     if (u.flags & F_DARK && w.teamOf(u.owner) === w.myTeam) out.push(['DARK', '#9fb0bd']);
+    if (u.owner === w.me && u.flags & F_HOLD) out.push(['HOLD', '#9fb0bd']);
+    if (u.owner === w.me && u.flags & F_FREE) out.push(['FREE', '#ff9a6b']);
     return out;
   }
 

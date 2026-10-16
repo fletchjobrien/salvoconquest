@@ -1,7 +1,7 @@
 // Our side's sensor coverage, for the minimap outlines and the sensor view (V).
 // Mirrors the simulation's sensor ranges: eyes and surface radar, air-search radar, sonar.
 // A ship with a knocked-out radar shows its reduced (35 %) range.
-import { BUILDINGS, UNITS, deriveStats, unitDef } from '../shared/defs';
+import { BUILDINGS, BUOY, UNITS, deriveStats, unitDef } from '../shared/defs';
 import { F_DARK, F_LANDED } from '../shared/protocol';
 import type { World } from './state';
 import { matchLoadoutOf } from './loadouts';
@@ -31,6 +31,7 @@ export function sensorCoverage(w: World): Coverage {
     if (st.radarAir * radarDown > near) out.air.push([u.x, u.y, st.radarAir * radarDown]);
     if (st.sonar > 0 && def.domain !== 'land') out.sonar.push([u.x, u.y, st.sonar]);
   }
+  for (const [x, y] of w.buoys) out.sonar.push([x, y, BUOY.sonar]);
   for (const s of w.map.sites) {
     const o = w.sites[s.id].owner;
     if (o < 0 || w.teamOf(o) !== w.myTeam) continue;

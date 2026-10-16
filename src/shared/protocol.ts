@@ -22,7 +22,9 @@ export type Command =
   // Countermeasure of the selected units (chaff or smoke), hotkey C:
   | { c: 'counter'; ids: number[] }
   // Active radar on/off (emission control), hotkey G:
-  | { c: 'radar'; ids: number[]; on: boolean };
+  | { c: 'radar'; ids: number[]; on: boolean }
+  // Fire control: 0 hold fire, 1 weapons tight (2 missiles per target), 2 weapons free. Hotkey F:
+  | { c: 'firemode'; ids: number[]; mode: number };
 
 export interface LobbySlot {
   slot: number;
@@ -70,9 +72,9 @@ export type SiteRow = [number, number, number, number];
 /**
  * Own-unit details: id, ammo, cargo ids, fuel %, order code, order x, order y, flags, type index,
  * then (aircraft) range left before bingo in km, nearest base x, y, (carriers) the deck: ids of
- * flights based on it, (ships) the damage state, and countermeasure charges left.
+ * flights based on it, (ships) the damage state, countermeasure charges left, and kills.
  */
-export type DetailRow = [number, number[], number[], number, number, number, number, number, number, number, number, number, number[], DamageRow, number];
+export type DetailRow = [number, number[], number[], number, number, number, number, number, number, number, number, number, number[], DamageRow, number, number];
 /** Seconds left on each damaged system: engine, rudder, radar, fire, flood, stun, disabled weapon index (-1 none), weapon. */
 export type DamageRow = [number, number, number, number, number, number, number, number];
 /** Weather cell: kind (0 storm, 1 fog), x, y, radius, intensity 0-100. */
@@ -108,6 +110,8 @@ export interface Snapshot {
   ph?: { left: number; ready: number[] };
   /** Smoke screens: x, y, radius, seconds left. */
   sm?: [number, number, number, number][];
+  /** Our team's sonobuoys: x, y, seconds left. */
+  bu?: [number, number, number][];
 }
 
 export type GameEvent =
@@ -125,6 +129,7 @@ export type GameEvent =
   | { k: 'vampire'; x: number; y: number }
   | { k: 'lightning'; x: number; y: number }
   | { k: 'mine'; x: number; y: number }
+  | { k: 'buoy'; x: number; y: number }
   | { k: 'defeat'; o: number }
   | { k: 'crit'; id: number; part: CritPart; o: number; m?: string }
   | { k: 'battle' }
@@ -157,6 +162,8 @@ export const F_STOPPED = 256; // engine knocked out: dead in the water
 export const F_STUN = 512; // crew stunned: cannot fire
 export const F_PAINTED = 1024; // an enemy radar is tracking this unit right now
 export const F_DARK = 2048; // own radar switched off (emission control)
+export const F_HOLD = 4096; // fire control: hold fire
+export const F_FREE = 8192; // fire control: weapons free (neither bit: weapons tight)
 
 /** Ship systems that a hit can knock out (WARNO-style critical damage). */
 export type CritPart = 'engine' | 'rudder' | 'radar' | 'weapon' | 'fire' | 'flood' | 'stun';

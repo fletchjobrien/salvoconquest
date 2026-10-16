@@ -470,7 +470,8 @@ export class GameScene {
         this.fx.splash(e.x, e.y, 0.3);
         break;
       case 'mine':
-        this.fx.splash(e.x, e.y, 0.25);
+      case 'buoy':
+        this.fx.splash(e.x, e.y, e.k === 'buoy' ? 0.15 : 0.25);
         break;
       case 'built': {
         const type = UNIT_TYPES[e.ty];

@@ -18,7 +18,7 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
 | Ctrl + RMB | Move without stopping to fight |
 | WASD / MMB drag / screen edge | Pan · Q/E rotate · wheel zoom |
 | U | Unload troops: a ring shows the landing range, click land inside it (every selected ship with troops lands there) |
-| C / G / M / R / T / X | Chaff or smoke · radar on/off · drop mines · aircraft return to base · toggle auto-retreat · stop |
+| F / C / G / M / R / T / X | Fire control (hold fire → weapons tight → weapons free) · chaff or smoke · radar on/off · drop mines or a sonobuoy · aircraft return to base · toggle auto-retreat · stop |
 | Ctrl+1–9 / 1–9 | Save / recall group (press twice to jump the camera) |
 | Tab / V | Show weapon ranges / sensor view (darkens what you cannot see) |
 | Space · Enter · F1 · Esc | Jump to last alert · chat (online) · field manual · menu |
@@ -36,11 +36,11 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
   built; then the unit moves out to that spot. Ships can only go to water connected to one of your naval bases or
   dockyards, troops only to an island with one of your barracks; aircraft can be sent anywhere.
 - Units are expensive (prices ×3): forces are small and every hull counts. Ships carry few missiles
-  (destroyer: 4 anti-ship, 8 SAM) and rearm at a naval base or dockyard, but only while not under attack (no hit in
+  (destroyer: 4 anti-ship missiles; 5 SM-6 or 6 HQ-9B SAMs per launcher) and rearm at a naval base or dockyard, but only while not under attack (no hit in
   the last 15 s and nothing homing on them). Missile batteries (buildings and trucks) fire at half their old rate.
 - Ground units capture buildings by standing next to them. Captured **resource sites** spawn merchant
   ships that sail cargo home and turn it into cash. Enemy subs love merchants.
-- Other buildings give bonuses: radar stations (huge radar bubble), airbases, barracks and dockyards (forward production, repair, rearm),
+- Other buildings give bonuses: radar stations (24 km air / 18 km surface radar), airbases, barracks and dockyards (forward production, repair, rearm),
   missile batteries (fire for whoever owns them).
 - Ships carry troops (destroyer 2, battleship 3; a Troop Bay module adds 2). Carriers carry up to 4 air flights instead: right-click a carrier with aircraft selected to base them there. Aircraft are built at airbases only.
   RMB a ship with troops selected and they walk to the shore and ride landing craft out to it.
@@ -50,11 +50,23 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
   crew (no firing for a few seconds). Torpedoes and mines flood and wreck engines; shells hit mounts; missiles start
   fires. Systems repair over time, three times faster at a friendly naval base. Damaged systems show as tags under
   the unit (DIW, RUD, RAD, WPN, FIRE, FLD, STUN) and in the selection panel with the seconds left.
+- **Fire control (F):** each unit is on **weapons tight** by default: at most two of its own guided rounds
+  (missiles, torpedoes, SAMs) in flight at one target, and it holds fire when the target is already as good as
+  dead. **Weapons free** fires everything that bears, as fast as the launchers reload. **Hold fire** stops all
+  shooting except self-defence against incoming missiles (SAMs and CIWS). The selection panel shows each unit's
+  **kills** (top right).
 - **Countermeasures (C):** every warship and air flight carries one load of **chaff**, every ground unit one load of
   **smoke**. Chaff throws a cloud of foil that pulls each enemy missile or SAM homing on the unit off course
   (60% chance each, 40% for hypersonic missiles), while the unit stays within 2.5 km of the cloud (8 s). Smoke hides
   ground units inside it from everything further than 350 m, makes shots already on the way hit less than half as
   often, and keeps laying more smoke behind the unit for 12 s so it can run. Loads refill when the unit rearms.
+- **Computer opponents** use only what their side detects. They focus fire by class matchup (destroyers on
+  subs, battleships on destroyers), keep carriers behind the screen, pull capital ships away from known subs,
+  send subs after carriers, battleships and merchant lanes while dodging destroyers, strike only lightly
+  defended ships, cover raided merchant lanes with fighters, seed sonobuoys from the AEW, ferry troops from
+  any island they hold, and counter-build what they see.
+- **Map:** 160 × 160 km. Islands keep their size, so there is far more open water between them; merchants
+  are paid more per trip (450) because the trips are longer.
 - **Automation:** ground units attack-move by default, idle troops engage enemies on their island, damaged units
   retreat to friendly buildings and come back when repaired, aircraft fly their mission, return to rearm and
   go back on station. Ships close the distance on their own when you order an unload out of range.
@@ -87,6 +99,23 @@ outside your surface picture are always shaded with a light, hatched veil, with 
 **V** (or the SENSORS button above the minimap) for the full sensor view: everything your sensors cannot see goes dark. At most two weather systems are on the map at once. Storms cut radar range and eyesight; fog banks cut eyesight. Submarines are
 invisible until a sonar hears them, and they reveal themselves briefly when they fire.
 
+**What the coverage lines mean** (minimap and the V view): **blue** is your surface picture (surface radar
+and eyesight: where ships and, closer in, ground units are seen); **white** is air-search radar that reaches
+beyond it (aircraft and missiles only); **purple** is sonar (the only way to find submarines), including your
+sonobuoys.
+
+**Why something inside your radar ring can be unidentified.** The ring is the radar's range against a
+standard target. Each contact gets a quality from 0 (at the edge) to 1 (on top of you): 1 − distance ÷ range.
+The range is scaled by the target: ships by their radar signature (a stealthy Coalition destroyer is seen
+later than a large Union one), ground units at 45%, aircraft by their stealth (0.6× to 1.4×), and storms cut it.
+A contact becomes **identified** (and can be targeted) only above quality 0.4, that is, inside about 60% of
+that scaled range; it becomes an exact track (error radius 0) closer still, or at once within eyesight
+(about 6 km). So a 15 km surface radar identifies a typical destroyer at about 9 km. Aircraft (AEW), sonobuoys
+and more ships close to the target raise the quality.
+
+**Sonobuoys (M).** The AEW carries 8 sonobuoys. Press M to drop one below it (only over water). Each buoy
+listens for 150 s: it hears submarines within 6 km, and ships further away, and shows as a small purple ring.
+
 **Radar on/off (G).** Every unit with a radar (warships, AEW, radar trucks) can switch it off. Radar on: you see
 far, but enemy electronic support measures (ESM) hear your radar out to 1.5× its range and get a rough,
 unidentified position for you (marker only, cannot be targeted). Radar off (tag **DARK**): your unit sees only by
@@ -104,14 +133,14 @@ utility kit such as CIWS, ECM, mines, sonar and armour is shared). See `HULLS` a
 
 | Unit | Atlantic Coalition (US pattern) | Pacific Union (PLAN / Russian pattern) |
 |---|---|---|
-| Destroyer | Hull 100, sonar 18 km, air radar 24 km, radar signature 1.0. Mk 45 5-inch (10 km), **NSM** (30 km, stealthy: 30% harder to intercept), **SM-6** (24 km, best interceptor), VL-ASROC (12 km) | Hull 102, sonar 15 km, air radar 22 km, signature 1.15. 130mm gun (12 km), **YJ-18** (31 km, supersonic sprint: 25% harder to intercept), **HQ-9B** (20 km, 10 rounds), CY-5 ASW (11 km) |
-| Submarine | Hull 70, quieter hull (noise 80%), sonar 12 km. Mk 48 ADCAP (10 km, wide seeker), Sub Harpoon (24 km) | Hull 75, faster (0.28), sonar 10 km. Yu-6 (9.5 km, bigger warhead), sub-launched YJ-18 (26 km, supersonic) |
-| Battleship | Iowa: hull 265, two **16-inch triple turrets** (17 km, never run dry), NSM, SM-6 | Kirov-type: hull 230, faster, better radar. **Heavy anti-ship missiles** (36 km, 55 damage, 3 rounds, hard to stop), AK-130 twin gun (13 km), YJ-18, HQ-9B |
+| Destroyer | Hull 100, sonar 18 km, air radar 24 km, radar signature 1.0. Mk 45 5-inch (10 km), **NSM** (21 km, stealthy: 30% harder to intercept), **SM-6** (24 km, best interceptor, 5 rounds), VL-ASROC (12 km) | Hull 102, sonar 15 km, air radar 22 km, signature 1.15. 130mm gun (12 km), **YJ-18** (22 km, supersonic sprint: 25% harder to intercept), **HQ-9B** (20 km, 6 rounds), CY-5 ASW (11 km) |
+| Submarine | Hull 70, quieter hull (noise 80%), sonar 12 km. Mk 48 ADCAP (10 km, wide seeker), Sub Harpoon (17 km) | Hull 75, faster (0.28), sonar 10 km. Yu-6 (9.5 km, bigger warhead), sub-launched YJ-18 (18 km, supersonic) |
+| Battleship | Iowa: hull 265, two **16-inch triple turrets** (17 km, never run dry), NSM, SM-6 | Kirov-type: hull 230, faster, better radar. **Heavy anti-ship missiles** (25 km, 55 damage, 3 rounds, hard to stop), AK-130 twin gun (13 km), YJ-18, HQ-9B |
 | Carrier | Ford: hull 210, **5 flights** on deck, SM-6 | Hull 200, 4 flights, bigger radar (32 km), HQ-9B |
 | Infantry | ACV: hull 60, faster, Javelin (stronger) | ZBD-05: hull 70, slower, HJ-12 (longer reach) |
-| Coastal / SAM | NMESIS (NSM, 28 km, stealthy), Patriot PAC-3 (16 km, best vs missiles) | YJ-12 (32 km, supersonic, bigger warhead), HQ-9 (20 km) |
+| Coastal / SAM | NMESIS (NSM, 20 km, stealthy), Patriot PAC-3 (16 km, best vs missiles) | YJ-12 (22 km, supersonic, bigger warhead), HQ-9 (20 km) |
 | Fighter | F-22: stealthiest (signature 0.3), faster, AIM-120D (16 km, accurate) | J-20: signature 0.4, PL-15 (20 km, less accurate) |
-| Strike | F-35: stealthy (0.35), JSM (12 km, stealthy), guided bombs | J-15: tougher (36), less stealthy (0.7), shorter range, two YJ-83K (24 km) and KD-88 |
+| Strike | F-35: stealthy (0.35), JSM (12 km, stealthy), guided bombs | J-15: tougher (36), less stealthy (0.7), shorter range, two YJ-83K (17 km) and KD-88 |
 
 Aircraft stealth is real in the sim: radar sees a stealthy jet at down to 0.6× its normal range.
 
@@ -133,7 +162,7 @@ Each side has its own models, after real equipment of the type:
 
 Every unit has slots (deck mount, VLS, torpedo room, auxiliary, hardpoints, pods, arms, kit). Open **Loadouts** from the
 menu, pick the faction, and drag modules into slots: e.g. give destroyers **Mine Rails**, swap a VLS for land-attack missiles, add a Troop Bay,
-or put sonobuoys on the AEW. The defaults are the recommended fit.
+or swap the AEW's sonobuoys for a drop tank. The defaults are the recommended fit.
 
 ### Theatres
 
