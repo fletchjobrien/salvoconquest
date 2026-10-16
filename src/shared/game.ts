@@ -180,6 +180,8 @@ export interface Projectile {
   hostileSeen: boolean;
   /** Closest approach so far (SAMs). */
   best?: number;
+  /** Missile arc: launch altitude, apex height above the launch-to-target line, distance flown. */
+  arc?: { a0: number; apex: number; flown: number; f: number };
   /** Expected damage reserved on a unit (anti-overkill); released when the projectile ends. */
   resv?: { id: number; dmg: number };
 }
@@ -1329,6 +1331,23 @@ export class Game {
     return { need: (Math.hypot(n.x - u.x, n.y - u.y) / u.maxSpeed) * 1.12 + 6, base: n };
   }
 
+  /**
+   * Apex of a missile's ballistic-looking arc: higher for longer shots, and raised so the arc
+   * clears every hill on the straight line to the aim point (with a 100 m margin).
+   */
+  private arcApex(a0: number, x0: number, y0: number, x1: number, y1: number): number {
+    const D = Math.hypot(x1 - x0, y1 - y0);
+    let apex = Math.min(1.2, Math.max(0.2, D * 0.04));
+    for (let i = 1; i < 24; i++) {
+      const f = i / 24;
+      const h = heightAt(this.map, x0 + (x1 - x0) * f, y0 + (y1 - y0) * f);
+      if (h <= 0) continue;
+      const base = a0 * (1 - f) + 0.02 * f;
+      apex = Math.max(apex, (h + 0.1 - base) / Math.sin(Math.PI * f));
+    }
+    return Math.min(2.2, apex);
+  }
+
   /** Put a rearmed flight back on its mission; a dead strike target becomes a patrol of that area. */
   private resumeMission(u: Unit, bp: { x: number; y: number }) {
     const m = u.mission;
@@ -1912,9 +1931,9 @@ export class Game {
       seeking: false,
       hostileSeen: false,
     };
-    if (kind === 'missile' && sh.unit && UNITS[sh.unit.type].domain !== 'air') {
-      // Missiles launch upward from VLS, then dive to sea-skim.
-      p.alt = 0.05;
+    if (kind === 'missile') {
+      if (!sh.unit || UNITS[sh.unit.type].domain !== 'air') p.alt = Math.max(0.05, heightAt(this.map, sh.x, sh.y) + 0.03);
+      p.arc = { a0: p.alt, apex: this.arcApex(p.alt, sh.x, sh.y, tx, ty), flown: 0, f: 0 };
     }
     this.projs.push(p);
     this.emit({ k: 'fire', id: sh.unit?.id ?? 0, m: w.mod.id, x: sh.x, y: sh.y, tx, ty, a: sh.alt }, sh.x, sh.y);
@@ -1972,12 +1991,26 @@ export class Game {
       p.y += Math.sin(p.heading) * p.speed * dt;
       const dist = Math.hypot(gx - p.x, gy - p.y);
       if (p.kind === 'missile') {
-        // Sea-skim over water, hug the terrain (look ahead) over land.
-        const ground = Math.max(0, heightAt(this.map, p.x, p.y), heightAt(this.map, p.x + Math.cos(p.heading) * 0.6, p.y + Math.sin(p.heading) * 0.6));
-        const cruise = (p.mod.dmg?.land ? 0.12 : 0.025) + ground * 1.15;
-        p.alt += ((dist < 1 ? Math.max(galt, ground) : cruise) - p.alt) * Math.min(1, dt * 3);
-        if (p.t < 1.2) p.alt += dt * 0.25;
-        p.alt = Math.max(p.alt, ground + 0.015);
+        // One smooth arc from launch to target: progress f is the share of the path flown so
+        // far (it adapts when the target moves or the seeker re-aims).
+        const arc = p.arc ?? (p.arc = { a0: p.alt, apex: 0.3, flown: 0, f: 0 });
+        arc.flown += p.speed * dt;
+        // Progress only moves forward (a target that runs away must not make the arc climb again).
+        arc.f = Math.max(arc.f, Math.min(1, arc.flown / (arc.flown + dist)));
+        const f = arc.f;
+        let want = arc.a0 * (1 - f) + galt * f + Math.sin(Math.PI * f) * arc.apex;
+        // Soft clearance: if the real path bends over a hill the straight-line apex missed, rise
+        // early and gently (look 2 km ahead) instead of popping up at the slope.
+        if (f < 0.9) {
+          const c = Math.cos(p.heading);
+          const s = Math.sin(p.heading);
+          let hi = 0;
+          for (let k = 0; k <= 4; k++) hi = Math.max(hi, heightAt(this.map, p.x + c * k * 0.5, p.y + s * k * 0.5));
+          want = Math.max(want, hi + 0.1);
+        }
+        p.alt += (want - p.alt) * Math.min(1, dt * 2.5);
+        // Hard floor, last resort only.
+        p.alt = Math.max(p.alt, Math.max(0, heightAt(this.map, p.x, p.y)) + 0.02);
       } else if (p.kind === 'sam') {
         // Boost straight up out of the launcher, then climb to the target.
         if (p.t < 0.6) p.alt += dt * 0.8;
@@ -2445,7 +2478,9 @@ export class Game {
         if (q.kind === 'torpedo' && !nearAsset(q.x, q.y, 8)) continue;
         if (!nearAsset(q.x, q.y, q.kind === 'shell' ? 14 : 30)) continue;
       }
-      pr.push([q.id, PROJ_KINDS.indexOf(q.kind), r2(q.x), r2(q.y), r2(q.alt), mine ? 1 : 0]);
+      // Flags: 1 = ours, 2 = a SAM chasing an aircraft (drawn in the aircraft height frame).
+      const airSam = q.kind === 'sam' && q.target >= 0 && UNITS[this.units.get(q.target)?.type ?? 'destroyer'].domain === 'air';
+      pr.push([q.id, PROJ_KINDS.indexOf(q.kind), r2(q.x), r2(q.y), r2(q.alt), (mine ? 1 : 0) | (airSam ? 2 : 0)]);
     }
     for (const m of this.mines) if (m.team === team) pr.push([m.id, PROJ_KINDS.indexOf('mine'), r2(m.x), r2(m.y), 0, 1]);
     const e: GameEvent[] = [];

@@ -87,6 +87,22 @@ export function airY(map: GameMap, x: number, y: number, alt: number): number {
   return Math.max(groundY(map, x, y) + 0.03, alt * AIR_VIS + lift);
 }
 
+/**
+ * Visual height of a guided weapon. Missiles (and SAMs chasing missiles) are drawn on the same
+ * vertical scale as the terrain, so their arcs read as arcs over the islands. SAMs chasing
+ * aircraft use the aircraft frame so they meet their target. Air-launched missiles blend from
+ * the aircraft frame into the missile frame over their first 1.5 s.
+ */
+export function weaponY(map: GameMap, kind: string, air: boolean, x: number, y: number, alt: number, alt0: number, age: number): number {
+  const ym = Math.max(groundY(map, x, y) + 0.03, alt * VSCALE);
+  if (kind === 'sam' && air) return airY(map, x, y, alt);
+  if (kind === 'missile' && alt0 > 0.3 && age < 1.5) {
+    const k = age / 1.5;
+    return airY(map, x, y, alt) * (1 - k) + ym * k;
+  }
+  return ym;
+}
+
 /** Visual height for a unit (three.js Y). */
 export function visAlt(map: GameMap, type: UnitType, x: number, y: number, alt: number): number {
   const dom = UNITS[type].domain;

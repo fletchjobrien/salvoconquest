@@ -7,7 +7,7 @@ import { DOMAINS } from '../state';
 import { Affil, FONT, SITE_GLYPH, SymDomain, glyphFor, sideColor, symbolCanvas } from './symbols';
 import { SIDE, unitName } from '../theme';
 import { matchLoadoutOf } from '../loadouts';
-import { groundY, visAlt, airY } from './coords';
+import { groundY, visAlt, weaponY } from './coords';
 import { weatherOutline } from '../../shared/weather';
 
 export interface Hover {
@@ -387,7 +387,7 @@ export class Overlay {
           ? 0
           : p.kind === 'shell' || p.kind === 'bomb'
             ? p.ralt
-            : airY(w.map, p.rx, p.ry, p.ralt);
+            : weaponY(w.map, p.kind, p.air, p.rx, p.ry, p.ralt, p.alt0, w.clock - p.born);
       if (!this.proj(v, p.rx, a3, p.ry)) continue;
       const sx = P.x;
       const sy = P.y;

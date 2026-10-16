@@ -57,6 +57,11 @@ export interface PView {
   py: number;
   palt: number;
   mine: boolean;
+  /** A SAM chasing an aircraft (drawn in the aircraft height frame, not the missile one). */
+  air: boolean;
+  /** Altitude at first sight (air-launched missiles blend from the aircraft frame). */
+  alt0: number;
+  born: number;
   t0: number;
   t1: number;
   rx: number;
@@ -212,8 +217,9 @@ export class World {
       seenP.add(id);
       const p = this.projs.get(id);
       if (!p) {
-        this.projs.set(id, { id, kind: PROJ_KINDS[ki], x, y, alt, px: x, py: y, palt: alt, mine: mine === 1, t0: T - 0.1, t1: T, rx: x, ry: y, ralt: alt });
+        this.projs.set(id, { id, kind: PROJ_KINDS[ki], x, y, alt, px: x, py: y, palt: alt, mine: (mine & 1) === 1, air: (mine & 2) === 2, alt0: alt, born: this.clock, t0: T - 0.1, t1: T, rx: x, ry: y, ralt: alt });
       } else {
+        p.air = (mine & 2) === 2;
         p.px = p.rx;
         p.py = p.ry;
         p.palt = p.ralt;

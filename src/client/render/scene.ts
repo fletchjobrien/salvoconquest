@@ -7,10 +7,10 @@ import { F_LANDED } from '../../shared/protocol';
 import type { World } from '../state';
 import { PALETTES, Palette } from '../theme';
 import { Renderer, CameraRig } from './renderer';
-import { TerrainView } from './terrain';
+import { TerrainView, VSCALE } from './terrain';
 import { Fx } from './fx';
 import { UnitModel, makeSiteModel, makeUnitModel, SiteModel, VIS_LEN } from './models';
-import { groundY, visAlt, setAirZoom, airY } from './coords';
+import { groundY, visAlt, setAirZoom, airY, weaponY } from './coords';
 import type { Overlay } from './overlay';
 import { Wakes } from './wakes';
 import { setWeatherCells } from './weatherfx';
@@ -250,7 +250,7 @@ export class GameScene {
 
     // ---- projectiles ----
     for (const p of w.projs.values()) {
-      const ma = p.kind === 'missile' || p.kind === 'sam' ? airY(map, p.rx, p.ry, p.ralt) : 0;
+      const ma = p.kind === 'missile' || p.kind === 'sam' ? weaponY(map, p.kind, p.air, p.rx, p.ry, p.ralt, p.alt0, w.clock - p.born) : 0;
       if (p.kind === 'missile') this.fx.missileTrail(p.rx, ma, p.ry, !p.mine);
       else if (p.kind === 'sam') this.fx.samTrail(p.rx, ma, p.ry);
       else if (p.kind === 'torpedo') {
@@ -368,7 +368,9 @@ export class GameScene {
           this.fx.muzzle(e.x, alt, e.y, big);
           this.onSound(big > 1.5 ? 'bigGun' : 'gun', e.x, e.y);
         } else if (m.proj === 'bullet') {
-          const ta = airY(map, e.tx, e.ty, e.a ?? 0);
+          // CIWS at a missile: missile height frame; at an aircraft: aircraft frame.
+          const atMissile = [...w.projs.values()].some((q) => q.kind === 'missile' && Math.abs(q.rx - e.tx) < 0.4 && Math.abs(q.ry - e.ty) < 0.4);
+          const ta = atMissile ? Math.max(groundY(map, e.tx, e.ty) + 0.03, (e.a ?? 0) * VSCALE) : airY(map, e.tx, e.ty, e.a ?? 0);
           this.fx.tracer(e.x, alt + 0.05, e.y, e.tx, ta, e.ty);
           this.onSound('ciws', e.x, e.y, 0.5);
         } else if (m.proj === 'torpedo') {
@@ -392,7 +394,7 @@ export class GameScene {
         this.onSound('splash', e.x, e.y, 0.6);
         break;
       case 'intercept':
-        const ia = airY(map, e.x, e.y, e.a);
+        const ia = Math.max(groundY(map, e.x, e.y) + 0.03, e.a * VSCALE);
         this.fx.intercept(e.x, ia, e.y);
         this.overlay?.shock(e.x, e.y, ia, 0.6, '#ffffff', 0.5);
         this.overlay?.splash(e.x, e.y, ia);
