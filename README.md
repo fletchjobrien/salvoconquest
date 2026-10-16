@@ -18,7 +18,7 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
 | Ctrl + RMB | Move without stopping to fight |
 | WASD / MMB drag / screen edge | Pan · Q/E rotate · wheel zoom |
 | U | Unload troops: a ring shows the landing range, click land inside it |
-| M / R / T / S | Drop mines · aircraft return to base · toggle auto-retreat · stop |
+| M / R / T / X | Drop mines · aircraft return to base · toggle auto-retreat · stop |
 | Ctrl+1–9 / 1–9 | Save / recall group (press twice to jump the camera) |
 | Tab / V | Show weapon ranges / toggle radar and sonar coverage |
 | Space · Enter · F1 · Esc | Jump to last alert · chat (online) · field manual · menu |

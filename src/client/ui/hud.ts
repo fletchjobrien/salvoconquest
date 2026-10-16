@@ -514,7 +514,7 @@ export class Hud {
       b.push(`<button class="btn small" data-act="refund">REFUND<span class="kbd">DEL</span></button>`);
       return b.join('');
     }
-    b.push(`<button class="btn small" data-act="stop">STOP<span class="kbd">S</span></button>`);
+    b.push(`<button class="btn small" data-act="stop">STOP<span class="kbd">X</span></button>`);
     return b.join('');
   }
 
@@ -551,7 +551,7 @@ const HELP = `<b>FIELD MANUAL</b> <span style="float:right;color:var(--faint)">[
 <span class="k">CTRL+RMB</span> force move (no fighting)<br>
 <span class="k">WASD · MMB drag</span> pan · <span class="k">Q/E</span> rotate · <span class="k">wheel</span> zoom<br>
 <span class="k">U</span> unload troops, then click land in the ring<br>
-<span class="k">M</span> mines · <span class="k">R</span> aircraft RTB · <span class="k">S</span> stop<br>
+<span class="k">M</span> mines · <span class="k">R</span> aircraft RTB · <span class="k">X</span> stop<br>
 <span class="k">CTRL+1-9</span> group · <span class="k">1-9</span> recall · <span class="k">SPACE</span> last alert<br>
 <span class="k">TAB</span> weapon ranges · <span class="k">V</span> sensor coverage<br>
 <span class="k">ENTER</span> chat · <span class="k">ESC</span> menu<br>

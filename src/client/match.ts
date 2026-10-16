@@ -150,7 +150,7 @@ export class Match {
     let px = 0;
     let py = 0;
     if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) py -= 1;
-    if (this.keys.has('KeyS') && !this.selected.size) py += 1;
+    if (this.keys.has('KeyS')) py += 1;
     if (this.keys.has('ArrowDown')) py += 1;
     if (this.keys.has('KeyA') || this.keys.has('ArrowLeft')) px -= 1;
     if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) px += 1;
@@ -706,7 +706,7 @@ export class Match {
       }
       if (!ids.length) return;
       if ((e.code === 'Delete' || e.code === 'Backspace') && this.world.setup) this.ability('refund');
-      if (e.code === 'KeyS') this.ability('stop');
+      if (e.code === 'KeyX') this.ability('stop');
       if (e.code === 'KeyU') this.enterUnload();
       if (e.code === 'KeyM') this.ability('mines');
       if (e.code === 'KeyR') this.ability('rtb');
