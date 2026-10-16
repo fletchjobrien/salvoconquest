@@ -54,17 +54,32 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
   retreat to friendly buildings and come back when repaired, aircraft fly their mission, return to rearm and
   go back on station. Ships close the distance on their own when you order an unload out of range.
 
+### Ship counters
+
+The navy works as a rock-paper-scissors triangle. Each counter wins its 1-vs-1 duel clearly (tested in 30
+duels per pair, both factions):
+
+| Ship | Beats | Loses to | Why |
+|---|---|---|---|
+| Submarine ($1,140) | Battleship, carrier | Destroyer | Passive sonar hears ships at 1.3× its sonar range, so it finds them first and stays hidden. Heavy torpedoes explode under the keel: ×1.6 damage to battleships and carriers. Those two ships are nearly deaf to subs (sonar 2 km) and have no anti-sub weapons. |
+| Destroyer ($1,200) | Submarine | Battleship | Bow and towed sonar (18 km) and ASW rockets that reach 12 km, further than a sub's 9 km torpedoes. Towed torpedo decoys halve torpedo hits. |
+| Battleship ($2,700) | Destroyer | Submarine | 16 km main guns, a thick hull and its own air defence. Two destroyers (about the same price) are an even fight. |
+
+Escort battleships and carriers with destroyers. Hunt destroyers with battleships and aircraft.
+
 ### Sensors and fog of war
 
 ![Strategic view with radar contacts, storms and fog](docs/strategic.png)
 
-Radar (surface and air), sonar (submarines only) and eyesight. Far-away or poor-quality detections show as a
+Radar (surface and air), sonar and eyesight. Sonar is the only way to find submarines; passive sonar also hears
+surface ships (a submarine far better than a noisy surface ship). Far-away or poor-quality detections show as a
 **radar contact**: one calm marker per track, placed somewhere within the error radius of the true position (the
 error shows on hover). As you close in, the estimate glides toward the truth until the contact becomes an identified
 track. **Unidentified contacts cannot be targeted**: they mark a position only (right-click there is a move);
 once a contact is classified you can attack it. Ground contacts use a square marker, surface contacts a quatrefoil.
-The minimap outlines your sensor coverage (surface radar and eyes, air radar, sonar). Press **V** (or the
-SENSORS button above the minimap) for the sensor view: everything your sensors cannot see goes dark. At most two weather systems are on the map at once. Storms cut radar range and eyesight; fog banks cut eyesight. Submarines are
+The minimap outlines your sensor coverage (surface radar and eyes, air radar, sonar). On the main map, water and land
+outside your surface picture are always shaded with a light, hatched veil, with a thin line where coverage ends. Press
+**V** (or the SENSORS button above the minimap) for the full sensor view: everything your sensors cannot see goes dark. At most two weather systems are on the map at once. Storms cut radar range and eyesight; fog banks cut eyesight. Submarines are
 invisible until a sonar hears them, and they reveal themselves briefly when they fire.
 
 ![Storm cell and fog bank](docs/weather.png)
@@ -80,6 +95,18 @@ fight: every class has a faction **trait** (passive) and a **special** (active, 
 | Submarine | **Silent Running** (on/off): half as easy to hear, half speed. Trait: sonar ×1.3 | **Minefield**: lays 4 mines at once. Trait: 4 tube-launched anti-ship missiles |
 | Battleship | **Naval Gunfire Support** (20 s): main guns fire twice as fast, +4 km. Trait: hull ×1.2 | **Hypersonic Strike** (30 s): anti-ship missiles 1.7× faster, 35% harder to stop. Trait: 6 anti-ship missiles per launcher |
 | Carrier | **Surge Sorties** (30 s): its flights rearm and refuel instantly. Trait: 5 flights on deck | **Electronic Screen** (25 s): enemy missiles at ships within 8 km hit 40% less often. Trait: built-in jamming |
+
+Each side has its own models, after real equipment of the type:
+
+| Unit | Coalition | Union |
+|---|---|---|
+| Destroyer | Arleigh Burke (four SPY-1 faces, two funnels) | Type 055 (integrated mast, one funnel) |
+| Submarine | Virginia (pump-jet, no sail planes) | Type 09x (hull hump, sail planes, X tail) |
+| Battleship | Iowa (three triple 16-inch turrets) | Kirov-type strike cruiser (missile hatch grid) |
+| Carrier | Ford (catapults, small island aft) | Ski-jump carrier (big island amidships) |
+| Infantry | ACV 8x8, theatre camouflage | ZBD-05 tracked amphibious IFV, blue-grey camouflage |
+| Coastal / SAM | NMESIS, Patriot | YJ-12 TEL, HQ-9 (upright tubes) |
+| Aircraft | F-22, F-35, E-2 Hawkeye | J-20 (canards), J-15 (Flanker), KJ-600 |
 
 ### Loadouts
 

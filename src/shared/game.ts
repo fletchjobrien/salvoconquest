@@ -30,6 +30,9 @@ import {
   ProjKind,
   moduleFor,
   deckCap,
+  PASSIVE_SUB,
+  PASSIVE_SHIP,
+  TORPEDO_VS,
 } from './defs';
 import { shipDoctrine, SpecialDef, SpecialId } from './doctrine';
 import {
@@ -2403,13 +2406,19 @@ export class Game {
     const cls = this.dmgClass(t);
     const dmg = (p.mod.dmg?.[cls] ?? 0) * p.dmgMul;
     let chance = p.kind === 'shell' ? p.hitChance * (0.75 + 0.25 * (1 - Math.min(1, t.speed / 0.35))) + 0.2 : p.hitChance;
+    let mul = 1;
+    if (p.kind === 'torpedo' && cls === 'sea') {
+      // Heavy torpedoes explode under the keel: big hulls break. Destroyers tow decoys.
+      mul = TORPEDO_VS[t.type]?.dmg ?? 1;
+      chance *= TORPEDO_VS[t.type]?.hit ?? 1;
+    }
     if (p.kind === 'missile') chance *= (1 - t.ecm) * (this.screened(t) ? 0.6 : 1);
     if (p.kind === 'sam' && cls === 'air') chance *= 1 - t.ecm * 0.5;
     const w = this.weatherAt(t.x, t.y);
     chance *= 1 - 0.25 * w.storm;
     if (this.rng.next() < chance) {
-      this.damage(t, dmg, p.owner, p.kind);
-      this.emit({ k: 'boom', x: t.x, y: t.y, s: Math.min(1.5, dmg / 30), w: false, a: t.alt }, t.x, t.y);
+      this.damage(t, dmg * mul, p.owner, p.kind);
+      this.emit({ k: 'boom', x: t.x, y: t.y, s: Math.min(1.5, (dmg * mul) / 30), w: false, a: t.alt }, t.x, t.y);
     } else {
       const [ox, oy] = this.rng.inDisc(0.25);
       if (cls === 'air') this.emit({ k: 'boom', x: t.x + ox, y: t.y + oy, s: 0.2, w: false, a: t.alt }, t.x, t.y);
@@ -2672,7 +2681,7 @@ export class Game {
     const teams = new Set(this.players.filter((p) => !p.defeated).map((p) => p.team));
     for (const team of teams) {
       const know = this.knowledge.get(team)!;
-      const sensors: { x: number; y: number; air: number; surf: number; sonar: number; vis: number; isUnit: boolean }[] = [];
+      const sensors: { x: number; y: number; air: number; surf: number; sonar: number; vis: number; isUnit: boolean; sub?: boolean }[] = [];
       for (const u of this.units.values()) {
         if (!this.inWorld(u) || u.team !== team) continue;
         const dom = UNITS[u.type].domain;
@@ -2684,6 +2693,7 @@ export class Game {
           sonar: dom === 'sea' || dom === 'sub' || dom === 'air' ? u.sonar : 0,
           vis: u.visual,
           isUnit: true,
+          sub: dom === 'sub',
         });
       }
       for (const s of this.sites) {
@@ -2724,8 +2734,20 @@ export class Game {
           }
           let R = 0;
           if (dom === 'air') R = s.air * radMul;
-          else if (dom === 'sea') R = s.surf * radMul * Math.sqrt(UNITS[e.type].signature);
-          else if (dom === 'land') R = s.surf * radMul * 0.45;
+          else if (dom === 'sea') {
+            R = s.surf * radMul * Math.sqrt(UNITS[e.type].signature);
+            // Passive sonar hears ship propellers. A quiet submarine hears far; a surface ship's
+            // own noise limits its hull sonar. This is how a submarine finds its prey.
+            const hear = s.sonar * (s.sub ? PASSIVE_SUB : PASSIVE_SHIP) * Math.sqrt(UNITS[e.type].signature) * (e.speed > e.maxSpeed * 0.7 ? 1.25 : 1);
+            if (hear > R && d < hear) {
+              const qq = 1 - d / hear;
+              if (qq > q) {
+                q = qq;
+                viaSonar = true;
+              }
+              continue;
+            }
+          } else if (dom === 'land') R = s.surf * radMul * 0.45;
           else if (dom === 'sub') {
             R = s.sonar * e.quiet * (e.speed > e.maxSpeed * 0.7 ? 1.4 : 1) * (this.specialActive(e, 'silent') ? 0.5 : 1);
             if (d < R * 0.35) {

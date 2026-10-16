@@ -122,13 +122,31 @@ export class Overlay {
     const ctx = this.ctx;
     ctx.beginPath();
     let any = false;
+    let started = false;
     for (let i = 0; i <= seg; i++) {
       const a = (i / seg) * Math.PI * 2;
-      v.r.project(x + Math.cos(a) * rad, alt, y + Math.sin(a) * rad, P);
-      if (P.z >= 1) continue;
+      const c = Math.cos(a);
+      const s = Math.sin(a);
+      v.r.project(x + c * rad, alt, y + s * rad, P);
+      if (P.z >= 1) {
+        // Behind the camera (or past the far plane): pull the point in toward the centre until
+        // it projects again. Skipping it instead joins the neighbours with a straight line
+        // across the screen.
+        let lo = 0;
+        let hi = 1;
+        for (let k = 0; k < 10; k++) {
+          const m = (lo + hi) / 2;
+          v.r.project(x + c * rad * m, alt, y + s * rad * m, P);
+          if (P.z < 1) lo = m;
+          else hi = m;
+        }
+        if (lo === 0) continue;
+        v.r.project(x + c * rad * lo, alt, y + s * rad * lo, P);
+      }
       if (P.x > -50 && P.y > -50 && P.x < this.w + 50 && P.y < this.h + 50) any = true;
-      if (i === 0) ctx.moveTo(P.x, P.y);
+      if (!started) ctx.moveTo(P.x, P.y);
       else ctx.lineTo(P.x, P.y);
+      started = true;
     }
     return any;
   }
@@ -157,7 +175,8 @@ export class Overlay {
     this.drawWeather(v, zoomedOut);
     this.drawIslandLabels(v, dist);
 
-    if (v.showSensors) this.drawSensors(v);
+    // Fog of war on the map: a light veil always, the full sensor view with V.
+    this.drawSensors(v, v.showSensors);
 
     // ---- range rings & orders for selection ----
     const selUnits: UView[] = [];
@@ -738,7 +757,7 @@ export class Overlay {
    * radar reaches (aircraft and missiles only) it is half dark. Coverage edges are drawn as one
    * merged outline per sensor kind.
    */
-  private drawSensors(v: OverlayView) {
+  private drawSensors(v: OverlayView, full: boolean) {
     const w = v.world;
     const real = this.ctx;
     const cov = sensorCoverage(w);
@@ -763,8 +782,13 @@ export class Overlay {
     vg.setTransform(1, 0, 0, 1, 0, 0);
     vg.clearRect(0, 0, veil.canvas.width, veil.canvas.height);
     vg.globalCompositeOperation = 'source-over';
-    vg.fillStyle = 'rgba(2, 6, 10, 0.62)';
+    vg.fillStyle = full ? 'rgba(2, 6, 10, 0.62)' : 'rgba(4, 10, 18, 0.32)';
     vg.fillRect(0, 0, veil.canvas.width, veil.canvas.height);
+    if (!full) {
+      // Faint diagonal hatching marks the fog as "not seen" without hiding the map.
+      vg.fillStyle = this.hatch(vg);
+      vg.fillRect(0, 0, veil.canvas.width, veil.canvas.height);
+    }
     vg.globalCompositeOperation = 'destination-out';
     fillUnion(cov.air);
     vg.globalAlpha = 0.5;
@@ -775,6 +799,19 @@ export class Overlay {
     vg.globalCompositeOperation = 'source-over';
     real.setTransform(1, 0, 0, 1, 0, 0);
     real.drawImage(veil.canvas, 0, 0);
+    if (!full) {
+      // A thin, faint edge where the surface picture ends.
+      if (cov.surf.length) {
+        mask.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+        mask.ctx.clearRect(0, 0, this.w, this.h);
+        unionOutline(mask.ctx, cov.surf, COVER_COLORS.surf, 0.75, (g, d) => disc(g, d));
+        real.globalAlpha = 0.4;
+        real.drawImage(mask.canvas, 0, 0);
+        real.globalAlpha = 1;
+      }
+      real.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+      return;
+    }
     // 2. Merged outlines per sensor kind.
     const kinds: [Disc[], string, number][] = [
       [cov.air, COVER_COLORS.air, 0.45],
@@ -811,6 +848,23 @@ export class Overlay {
     }
     real.fillStyle = 'rgba(232, 246, 255, 0.6)';
     real.fillText('V: CLOSE', lx - 10, ly);
+  }
+
+  private hatchPat: CanvasPattern | null = null;
+  private hatch(g: CanvasRenderingContext2D): CanvasPattern {
+    if (!this.hatchPat) {
+      const c = document.createElement('canvas');
+      c.width = c.height = 8;
+      const h = c.getContext('2d')!;
+      h.strokeStyle = 'rgba(150, 190, 220, 0.1)';
+      h.lineWidth = 1;
+      h.beginPath();
+      h.moveTo(0, 8);
+      h.lineTo(8, 0);
+      h.stroke();
+      this.hatchPat = g.createPattern(c, 'repeat')!;
+    }
+    return this.hatchPat;
   }
 
   private scratch2: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } | null = null;

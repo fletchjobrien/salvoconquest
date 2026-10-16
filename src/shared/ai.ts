@@ -19,6 +19,8 @@ export class Bot {
   private fleetOrderAt = 0;
   private airOrderAt = 0;
   private deployed = false;
+  /** Enemy warships our side has identified (id -> type), for counter-building. */
+  private spotted = new Map<number, UnitType>();
 
   constructor(
     private game: Game,
@@ -170,6 +172,23 @@ export class Bot {
       merchant: 0,
       lander: 0,
     };
+    // Counter-build against what we have seen: destroyers hunt subs, subs kill capital ships,
+    // a battleship outguns a destroyer group.
+    const know = g.knowledge.get(p.team);
+    if (know) {
+      for (const [id, k] of know) {
+        const e = g.units.get(id);
+        if (e && k.ident >= 1 && (e.type === 'sub' || e.type === 'destroyer' || e.type === 'battleship' || e.type === 'carrier')) this.spotted.set(id, e.type);
+      }
+    }
+    const seen = { sub: 0, destroyer: 0, battleship: 0, carrier: 0 } as Record<string, number>;
+    for (const [id, type] of this.spotted) {
+      if (!g.units.get(id) || g.units.get(id)!.dead) this.spotted.delete(id);
+      else seen[type]++;
+    }
+    want.destroyer += Math.min(4, seen.sub);
+    want.sub += Math.min(3, seen.battleship + seen.carrier);
+    if (seen.destroyer >= 3 && t > 240) want.battleship = Math.max(want.battleship, 1);
     for (const cat of ['ground', 'naval', 'air'] as const) {
       if (p.queues[cat].length >= (p.cash > 6000 ? 3 : 2)) continue;
       let best: UnitType | null = null;

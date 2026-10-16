@@ -587,6 +587,7 @@ const HELP = `<b>FIELD MANUAL</b> <span style="float:right;color:var(--faint)">[
 <span class="k">CTRL+1-9</span> group · <span class="k">1-9</span> recall · <span class="k">SPACE</span> last alert<br>
 <span class="k">TAB</span> weapon ranges · <span class="k">V</span> sensor coverage<br>
 <span class="k">ENTER</span> chat · <span class="k">ESC</span> menu<br>
+<b>SSN</b> beats <b>BB/CV</b> · <b>BB</b> beats <b>DDG</b> · <b>DDG</b> beats <b>SSN</b>: escort your big ships.<br>
 Troops board ships by RMB on a ship. Capture <b>$</b> sites — merchants haul cash home. Take the enemy <b>HQ</b> to win.`;
 
 function esc(s: string): string {
