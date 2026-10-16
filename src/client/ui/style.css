@@ -1107,3 +1107,14 @@ input[type='range'] {
   background: rgba(255, 179, 107, 0.12);
   color: #fff;
 }
+
+#selpanel .spec {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+#selpanel .spec .sd {
+  font-size: 9px;
+  line-height: 1.5;
+  color: var(--dim);
+}

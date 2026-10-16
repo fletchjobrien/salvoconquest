@@ -23,8 +23,8 @@ function sfxBind(root: HTMLElement) {
 }
 
 const FACTION_DESC: Record<Faction, string> = {
-  coalition: 'Fewer, better ships. Long-range sensors and hard-hitting missiles. Every hull counts.',
-  union: 'Mass and tempo. Hulls cost 35% less and build faster. Swarm them before they see you.',
+  coalition: 'Shield and network. Deep SAM magazines, quiet subs, gunfire support and fast carrier sorties. Win the long fight.',
+  union: 'Swarm and strike. Longer-range missiles, saturation salvos, mines, hypersonics and jamming. Win the opening exchange.',
 };
 
 export function titleScreen(ui: HTMLElement, a: { skirmish(): void; create(): void; join(code: string): void; loadouts(): void; settings(): void }) {

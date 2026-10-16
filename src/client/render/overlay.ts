@@ -1,5 +1,6 @@
 // Crisp 2D tactical overlay drawn over the pixelated world: symbols, contacts, rings, orders.
-import { BUILDINGS, MODULES, UNITS, UNIT_TYPES, UNLOAD_RANGE, UnitType, unitCost } from '../../shared/defs';
+import { BUILDINGS, MODULES, UNITS, UNIT_TYPES, UNLOAD_RANGE, UnitType, unitCost, moduleFor } from '../../shared/defs';
+import { shipDoctrine } from '../../shared/doctrine';
 import { canDeployAt, deployZone, rallySite } from '../../shared/game';
 import { cellOf } from '../../shared/map';
 import { sensorCoverage, unionOutline, COVER_COLORS, Disc } from '../sensors';
@@ -625,6 +626,10 @@ export class Overlay {
     if (u.flags & F_FIRE) out.push(['FIRE', '#ff7a3a']);
     if (d && d[4] > 0) out.push(['FLD', '#6fb8ff']);
     if (u.flags & F_STUN) out.push(['STUN', '#ffe14a']);
+    // Our faction special while it is running.
+    const sr = u.owner === w.me ? w.details.get(u.id)?.[14] : undefined;
+    const sp = sr ? shipDoctrine(w.myFaction, u.type)?.special : undefined;
+    if (sp && sr && (sp.toggle ? sr[2] === 1 : sr[1] > 0)) out.push([sp.tag, '#7dd8ff']);
     return out;
   }
 
@@ -1246,7 +1251,11 @@ export class Overlay {
 export function weaponModsFor(w: World, u: UView) {
   // Own units use our match loadout; others are assumed to carry the defaults.
   const ids = u.owner === w.me ? matchLoadoutOf(u.type) : UNITS[u.type].defaults;
-  return ids.map((id) => MODULES[id]).filter((m) => m && m.proj);
+  const fac = w.faction(u.owner);
+  return ids
+    .map((id) => MODULES[id])
+    .filter((m) => m && m.proj)
+    .map((m) => moduleFor(fac, u.type, m));
 }
 
 export function unitLabel(w: World, u: { id: number; type: UnitType; owner: number }): string {

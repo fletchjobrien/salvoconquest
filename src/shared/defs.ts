@@ -1,6 +1,8 @@
 // Static game data: factions, units, weapon/utility modules, buildings.
 // World units are kilometres and seconds. Speeds are "game speed", not real knots.
 
+import { shipDoctrine } from './doctrine';
+
 export type Faction = 'coalition' | 'union';
 export const FACTIONS: Faction[] = ['coalition', 'union'];
 
@@ -200,7 +202,7 @@ export const UNITS: Record<UnitType, UnitDef> = {
 /** Asymmetry: the Union fields cheaper, faster-built, slightly weaker kit. */
 export const FACTION_MOD: Record<Faction, { cost: number; hp: number; build: number; sensor: number; dmg: number; name: string; tag: string }> = {
   coalition: { cost: 1, hp: 1, build: 1, sensor: 1, dmg: 1, name: 'Atlantic Coalition', tag: 'COALITION' },
-  union: { cost: 0.65, hp: 0.8, build: 0.78, sensor: 0.88, dmg: 0.85, name: 'Pacific Union', tag: 'UNION' },
+  union: { cost: 1, hp: 1, build: 1, sensor: 1, dmg: 1, name: 'Pacific Union', tag: 'UNION' },
 };
 
 /** Every unit costs three times its base price: forces are small and every hull counts. */
@@ -328,6 +330,11 @@ export function deriveStats(type: UnitType, faction: Faction, loadout: string[])
   let fuelMul = 1;
   let entrench = 1;
   let regen = 0;
+  // Faction trait of this ship class (doctrine.ts).
+  const tr = shipDoctrine(faction, type)?.trait;
+  if (tr?.hp) hpMul *= tr.hp;
+  if (tr?.sonar) sonarMul *= tr.sonar;
+  if (tr?.ecm) ecmKeep *= 1 - tr.ecm;
   for (const id of loadout) {
     const md = MODULES[id]?.mods;
     if (!md) continue;
@@ -358,4 +365,15 @@ export function deriveStats(type: UnitType, faction: Faction, loadout: string[])
     entrench,
     regen,
   };
+}
+
+/** A fitted module as this faction's ship class carries it (doctrine overrides: range, magazine). */
+export function moduleFor(faction: Faction, type: UnitType, m: ModuleDef): ModuleDef {
+  const o = shipDoctrine(faction, type)?.trait.mods?.[m.id];
+  return o ? { ...m, ...(o.range !== undefined ? { range: o.range } : {}), ...(o.ammo !== undefined ? { ammo: o.ammo } : {}) } : m;
+}
+
+/** Air flights a carrier of this faction can base. */
+export function deckCap(faction: Faction, type: UnitType): number {
+  return shipDoctrine(faction, type)?.trait.deck ?? UNITS[type].deck ?? 0;
 }

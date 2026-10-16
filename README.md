@@ -18,7 +18,7 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
 | Ctrl + RMB | Move without stopping to fight |
 | WASD / MMB drag / screen edge | Pan · Q/E rotate · wheel zoom |
 | U | Unload troops: a ring shows the landing range, click land inside it (every selected ship with troops lands there) |
-| M / R / T / X | Drop mines · aircraft return to base · toggle auto-retreat · stop |
+| F / M / R / T / X | Ship special · drop mines · aircraft return to base · toggle auto-retreat · stop |
 | Ctrl+1–9 / 1–9 | Save / recall group (press twice to jump the camera) |
 | Tab / V | Show weapon ranges / sensor view (darkens what you cannot see) |
 | Space · Enter · F1 · Esc | Jump to last alert · chat (online) · field manual · menu |
@@ -71,8 +71,15 @@ invisible until a sonar hears them, and they reveal themselves briefly when they
 
 ### Factions
 
-- **Atlantic Coalition** (NATO-like): expensive, tougher hulls, better sensors and damage.
-- **Pacific Union** (PRC-like): hulls cost 35% less and build ~22% faster, but are weaker.
+Both navies are equal in price, build time, hull, sensors and damage. They differ in how their warships
+fight: every class has a faction **trait** (passive) and a **special** (active, key **F**; see `src/shared/doctrine.ts`).
+
+| Ship | Atlantic Coalition — shield and network | Pacific Union — swarm and strike |
+|---|---|---|
+| Destroyer | **Aegis Surge** (15 s): SAMs reload twice as fast, +20% kill chance. Trait: 12 SAMs per launcher | **Saturation Salvo** (12 s): anti-ship missiles ripple-fire. Trait: anti-ship missiles reach 36 km, 6 per launcher |
+| Submarine | **Silent Running** (on/off): half as easy to hear, half speed. Trait: sonar ×1.3 | **Minefield**: lays 4 mines at once. Trait: 4 tube-launched anti-ship missiles |
+| Battleship | **Naval Gunfire Support** (20 s): main guns fire twice as fast, +4 km. Trait: hull ×1.2 | **Hypersonic Strike** (30 s): anti-ship missiles 1.7× faster, 35% harder to stop. Trait: 6 anti-ship missiles per launcher |
+| Carrier | **Surge Sorties** (30 s): its flights rearm and refuel instantly. Trait: 5 flights on deck | **Electronic Screen** (25 s): enemy missiles at ships within 8 km hit 40% less often. Trait: built-in jamming |
 
 ### Loadouts
 

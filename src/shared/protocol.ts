@@ -18,7 +18,9 @@ export type Command =
   // Deployment phase only:
   | { c: 'deploy'; type: UnitType; x: number; y: number }
   | { c: 'undeploy'; ids: number[] }
-  | { c: 'ready'; on: boolean };
+  | { c: 'ready'; on: boolean }
+  // Faction special ability of the selected ships (doctrine.ts), hotkey F:
+  | { c: 'special'; ids: number[] };
 
 export interface LobbySlot {
   slot: number;
@@ -68,7 +70,9 @@ export type SiteRow = [number, number, number, number];
  * then (aircraft) range left before bingo in km, nearest base x, y, (carriers) the deck: ids of
  * flights based on it, and (ships) the damage state.
  */
-export type DetailRow = [number, number[], number[], number, number, number, number, number, number, number, number, number, number[], DamageRow];
+export type DetailRow = [number, number[], number[], number, number, number, number, number, number, number, number, number, number[], DamageRow, SpecialRow];
+/** Faction special: seconds until usable, seconds still active, toggle on (1/0). */
+export type SpecialRow = [number, number, number];
 /** Seconds left on each damaged system: engine, rudder, radar, fire, flood, stun, disabled weapon index (-1 none), weapon. */
 export type DamageRow = [number, number, number, number, number, number, number, number];
 /** Weather cell: kind (0 storm, 1 fog), x, y, radius, intensity 0-100. */
@@ -122,6 +126,7 @@ export type GameEvent =
   | { k: 'defeat'; o: number }
   | { k: 'crit'; id: number; part: CritPart; o: number; m?: string }
   | { k: 'battle' }
+  | { k: 'special'; id: number; s: string; o: number; on: boolean }
   | { k: 'msg'; text: string; o?: number };
 
 export type ServerMsg =

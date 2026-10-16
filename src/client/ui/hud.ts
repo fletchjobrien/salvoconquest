@@ -1,5 +1,6 @@
 // DOM heads-up display: top bar, radio log, build bar, selection panel, tooltips, banners.
-import { BUILDABLE, BUILDINGS, CRIT, MODULES, UNITS, UnitType, unitBuildTime, unitCost, FACTION_MOD } from '../../shared/defs';
+import { BUILDABLE, BUILDINGS, CRIT, MODULES, UNITS, UnitType, unitBuildTime, unitCost, FACTION_MOD, moduleFor } from '../../shared/defs';
+import { shipDoctrine } from '../../shared/doctrine';
 import { ORDER_CODES } from '../../shared/protocol';
 import type { World, UView } from '../state';
 import { FACTION_STYLE, SIDE, unitName } from '../theme';
@@ -15,7 +16,7 @@ export interface HudActions {
   selectOnly(ids: number[]): void;
   unloadMode(ship: number, ids: number[]): void;
   toggleCargo(id: number): void;
-  ability(name: 'mines' | 'rtb' | 'retreat' | 'stop' | 'siteFactory' | 'refund'): void;
+  ability(name: 'mines' | 'rtb' | 'retreat' | 'stop' | 'siteFactory' | 'refund' | 'special'): void;
   ready(on: boolean): void;
 }
 
@@ -175,6 +176,10 @@ export class Hud {
       ${d.fuel ? `<span>FUEL</span><span>${d.fuel}s · ${Math.round((d.fuel * d.speed) / 2)} km radius</span>` : ''}
       ${d.radarAir || d.radarSurf ? `<span>RADAR</span><span>${Math.round(Math.max(d.radarAir, d.radarSurf) * FACTION_MOD[fac].sensor)} km</span>` : ''}
       ${d.sonar ? `<span>SONAR</span><span>${Math.round(d.sonar * FACTION_MOD[fac].sensor)} km</span>` : ''}</div>
+      ${(() => {
+        const doc = shipDoctrine(fac, type);
+        return doc ? `<div class="tt-r" style="margin:6px 0 0;color:var(--accent)">★ ${doc.special.name}: ${doc.special.desc}</div><div class="tt-r" style="margin:2px 0 0">Trait: ${doc.trait.text}</div>` : '';
+      })()}
       <div class="tt-r" style="margin:6px 0 0">LMB: place on the map (Shift: several) · RMB: cancel last</div>`;
   }
 
@@ -452,7 +457,7 @@ export class Hud {
         }
         const out = d[13][6] === wi;
         const ammo = d[1][wi++] ?? -1;
-        const max = m.ammo ?? -1;
+        const max = moduleFor(fac, u.type, m).ammo ?? -1;
         if (out) {
           html += `<div class="wrow${this.hoverMod === m.id ? ' hl' : ''}" data-mod="${m.id}"><span>${m.name}</span><span class="pips" style="color:var(--bad)">KNOCKED OUT ${d[13][7]}s</span></div>`;
           continue;
@@ -465,6 +470,14 @@ export class Hud {
         html += `<div class="wrow${this.hoverMod === m.id ? ' hl' : ''}" data-mod="${m.id}"><span>${m.name}${m.ability ? '<span class="kbd">M</span>' : ''}</span><span class="pips">${pips}</span></div>`;
       }
       if (def.domain === 'sea' || def.domain === 'sub') html += this.damageHtml(d[13]);
+      const doc = shipDoctrine(fac, u.type);
+      if (doc) {
+        const [ready, active, on] = d[14];
+        const sp = doc.special;
+        const state = sp.toggle ? (on ? 'ON' : 'OFF') : active > 0 ? `ACTIVE ${active}s` : ready > 0 ? `READY IN ${ready}s` : 'READY';
+        const col = (sp.toggle ? on : active > 0) ? 'var(--accent)' : ready > 0 ? 'var(--faint)' : 'var(--good)';
+        html += `<div class="spec"><div class="wrow"><span>★ ${sp.name.toUpperCase()}</span><span class="pips" style="color:${col}">${state}</span></div><div class="sd">${sp.desc}</div><div class="sd">Trait: ${doc.trait.text}</div></div>`;
+      }
       if (def.domain === 'air') {
         html += `<div class="wrow"><span>FUEL</span><span>${d[3]}%</span></div><div class="bar"><i style="width:${d[3]}%;background:var(--accent)"></i></div>`;
       }
@@ -530,6 +543,9 @@ export class Hud {
       b.push(`<button class="btn small" data-act="refund">REFUND<span class="kbd">DEL</span></button>`);
       return b.join('');
     }
+    // Faction special (all selected ships that have one).
+    const specs = new Set(sel.map((u) => shipDoctrine(w.myFaction, u.type)?.special.name).filter(Boolean));
+    if (specs.size) b.push(`<button class="btn small on" data-act="special">${specs.size === 1 ? [...specs][0]!.toUpperCase() : 'SPECIALS'}<span class="kbd">F</span></button>`);
     b.push(`<button class="btn small" data-act="stop">STOP<span class="kbd">X</span></button>`);
     return b.join('');
   }
@@ -567,7 +583,7 @@ const HELP = `<b>FIELD MANUAL</b> <span style="float:right;color:var(--faint)">[
 <span class="k">CTRL+RMB</span> force move (no fighting)<br>
 <span class="k">WASD · MMB drag</span> pan · <span class="k">Q/E</span> rotate · <span class="k">wheel</span> zoom<br>
 <span class="k">U</span> unload troops, then click land in the ring<br>
-<span class="k">M</span> mines · <span class="k">R</span> aircraft RTB · <span class="k">X</span> stop<br>
+<span class="k">F</span> ship special · <span class="k">M</span> mines · <span class="k">R</span> aircraft RTB · <span class="k">X</span> stop<br>
 <span class="k">CTRL+1-9</span> group · <span class="k">1-9</span> recall · <span class="k">SPACE</span> last alert<br>
 <span class="k">TAB</span> weapon ranges · <span class="k">V</span> sensor coverage<br>
 <span class="k">ENTER</span> chat · <span class="k">ESC</span> menu<br>
