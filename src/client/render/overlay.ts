@@ -416,44 +416,71 @@ export class Overlay {
       if (!this.proj(v, p.rx, a3, p.ry)) continue;
       const sx = P.x;
       const sy = P.y;
-      // Colour code: hostile anti-ship missiles are red dots with a faint halo; our missiles are
-      // white; interceptors (SAMs, either side) are small grey-blue ticks without a dot.
-      const incoming = p.kind === 'missile' && !p.mine;
-      const col = p.kind === 'sam' ? (p.mine ? '#9fd4ff' : '#c9b8c8') : p.mine ? '#f2f8ff' : '#ff4a3d';
+      // Two families that must never be confused:
+      //   anti-ship (and other surface-attack) missiles: a filled arrowhead with a long trail;
+      //     hostile ones red with a faint halo and an "ASM" tag, ours white.
+      //   anti-air missiles (SAM, AAM, MANPADS): a small hollow ring with a short trail;
+      //     ours cyan, hostile magenta.
+      const asm = p.kind === 'missile';
+      const col = asm ? (p.mine ? '#f2f8ff' : '#ff4a3d') : p.mine ? '#5fe3ff' : '#ff6ad5';
       if (guided) {
         const dx = p.x - p.px;
         const dy = p.y - p.py;
         const dl = Math.hypot(dx, dy);
+        // Screen-space direction of travel (from a point slightly behind the missile).
+        let ux = 1;
+        let uy = 0;
         if (dl > 1e-4 && this.proj(v, p.rx - (dx / dl) * 0.2, a3, p.ry - (dy / dl) * 0.2)) {
-          const ex = P.x - sx;
-          const ey = P.y - sy;
-          const el = Math.hypot(ex, ey) || 1;
-          const L = p.kind === 'missile' ? 10 : 6;
+          const ex = sx - P.x;
+          const ey = sy - P.y;
+          const el = Math.hypot(ex, ey);
+          if (el > 0.01) {
+            ux = ex / el;
+            uy = ey / el;
+          }
+          const L = asm ? 16 : 7;
           ctx.strokeStyle = col;
-          ctx.globalAlpha = p.kind === 'missile' ? 0.55 : 0.45;
-          ctx.lineWidth = 1;
+          ctx.globalAlpha = asm ? 0.6 : 0.5;
+          ctx.lineWidth = asm ? 1.5 : 1;
           ctx.beginPath();
           ctx.moveTo(sx, sy);
-          ctx.lineTo(sx + (ex / el) * L, sy + (ey / el) * L);
+          ctx.lineTo(sx - ux * L, sy - uy * L);
           ctx.stroke();
           ctx.globalAlpha = 1;
         }
-        if (incoming) {
+        if (asm) {
+          if (!p.mine) {
+            ctx.fillStyle = col;
+            ctx.globalAlpha = 0.16;
+            ctx.beginPath();
+            ctx.arc(sx, sy, 6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalAlpha = 1;
+          }
+          // Arrowhead pointing along the flight path.
+          const hx = ux * 6.5;
+          const hy = uy * 6.5;
           ctx.fillStyle = col;
-          ctx.globalAlpha = 0.18;
           ctx.beginPath();
-          ctx.arc(sx, sy, 5, 0, Math.PI * 2);
+          ctx.moveTo(sx + hx, sy + hy);
+          ctx.lineTo(sx - hx * 0.6 - hy * 0.6, sy - hy * 0.6 + hx * 0.6);
+          ctx.lineTo(sx - hx * 0.25, sy - hy * 0.25);
+          ctx.lineTo(sx - hx * 0.6 + hy * 0.6, sy - hy * 0.6 - hx * 0.6);
+          ctx.closePath();
           ctx.fill();
-          ctx.globalAlpha = 1;
-          ctx.beginPath();
-          ctx.arc(sx, sy, 2.2, 0, Math.PI * 2);
-          ctx.fill();
-        } else if (p.kind === 'missile') {
-          ctx.fillStyle = col;
-          ctx.fillRect(sx - 1.25, sy - 1.25, 2.5, 2.5);
+          if (!p.mine) {
+            ctx.font = `600 8px ${FONT}`;
+            ctx.textAlign = 'left';
+            ctx.globalAlpha = 0.9;
+            ctx.fillText('ASM', sx + 7, sy - 5);
+            ctx.globalAlpha = 1;
+          }
         } else {
-          ctx.fillStyle = col;
-          ctx.fillRect(sx - 0.75, sy - 0.75, 1.5, 1.5);
+          ctx.strokeStyle = col;
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.arc(sx, sy, 3, 0, Math.PI * 2);
+          ctx.stroke();
         }
       } else if (p.kind === 'torpedo') {
         ctx.fillStyle = p.mine ? '#f2f8ff' : '#ff4a3d';

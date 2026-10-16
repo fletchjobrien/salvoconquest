@@ -46,6 +46,8 @@ interface P {
   r2: number;
   g2: number;
   b2: number;
+  /** How much the particle fades over its life (1 = fully, 0 = stays bright, e.g. tracer rounds). */
+  fade: number;
 }
 
 class Pool {
@@ -100,6 +102,7 @@ class Pool {
       r2: -1,
       g2: 0,
       b2: 0,
+      fade: 1,
       ...p,
     };
     this.ps.push(q);
@@ -141,7 +144,7 @@ class Pool {
       this.col[i * 4] = r;
       this.col[i * 4 + 1] = g;
       this.col[i * 4 + 2] = b;
-      this.col[i * 4 + 3] = p.a0 * (1 - t) * Math.min(1, p.life * 12);
+      this.col[i * 4 + 3] = p.a0 * (1 - t * p.fade) * Math.min(1, p.life * 12);
       this.size[i] = p.s0 + (p.s1 - p.s0) * t;
     }
     this.geo.setDrawRange(0, w);
@@ -172,7 +175,23 @@ export class Fx {
     for (const p of [this.smoke, this.foam, this.glow, this.rain]) p.mat.uniforms.scale.value = s;
   }
 
+  private clock = 0;
+  private later: { t: number; fn: () => void }[] = [];
+
+  /** Run an emitter a little later (staggered bursts of fire). */
+  private at(delay: number, fn: () => void) {
+    this.later.push({ t: this.clock + delay, fn });
+  }
+
   update(dt: number) {
+    this.clock += dt;
+    if (this.later.length) {
+      const due = this.later.filter((l) => l.t <= this.clock);
+      if (due.length) {
+        this.later = this.later.filter((l) => l.t > this.clock);
+        for (const l of due) l.fn();
+      }
+    }
     this.smoke.update(dt);
     this.foam.update(dt);
     this.glow.update(dt);
@@ -217,13 +236,15 @@ export class Fx {
   }
 
   missileTrail(x: number, alt: number, y: number, hostile: boolean) {
-    this.smoke.add({ x: x + rnd(-0.006, 0.006), y: alt, z: y + rnd(-0.006, 0.006), vy: 0.008, max: rnd(2.5, 4), s0: 0.025, s1: 0.11, r: 0.88, g: 0.89, b: 0.9, a0: 0.42, drag: 1 });
+    this.smoke.add({ x: x + rnd(-0.006, 0.006), y: alt, z: y + rnd(-0.006, 0.006), vy: 0.008, max: rnd(3, 4.5), s0: 0.035, s1: 0.15, r: 0.7, g: 0.7, b: 0.7, a0: 0.5, drag: 1 });
     this.glow.add({ x, y: alt, z: y, max: 0.12, s0: 0.07, s1: 0.03, r: 1, g: hostile ? 0.55 : 0.85, b: hostile ? 0.25 : 0.5, a0: 1 });
   }
 
+  /** Anti-air missiles: a thin, quick-fading white streak and an ice-blue motor, unlike the
+   *  heavy grey smoke and orange flame of an anti-ship missile. */
   samTrail(x: number, alt: number, y: number) {
-    this.smoke.add({ x, y: alt, z: y, vy: 0.005, max: rnd(1.5, 2.5), s0: 0.02, s1: 0.08, r: 0.95, g: 0.95, b: 0.95, a0: 0.4, drag: 1 });
-    this.glow.add({ x, y: alt, z: y, max: 0.1, s0: 0.05, s1: 0.02, r: 1, g: 0.9, b: 0.7, a0: 1 });
+    this.smoke.add({ x, y: alt, z: y, max: rnd(0.7, 1.1), s0: 0.012, s1: 0.035, r: 1, g: 1, b: 1, a0: 0.55, drag: 1 });
+    this.glow.add({ x, y: alt, z: y, max: 0.09, s0: 0.06, s1: 0.02, r: 0.55, g: 0.85, b: 1, a0: 1 });
   }
 
   torpedoTrail(x: number, y: number) {
@@ -281,6 +302,81 @@ export class Fx {
       this.glow.add({ x, y: alt, z: y, vx: rnd(-0.3, 0.3), vy: rnd(-0.1, 0.3), vz: rnd(-0.3, 0.3), max: rnd(0.3, 0.6), s0: 0.04, s1: 0.01, r: 1, g: 0.8, b: 0.4, a0: 1, grav: 0.4 });
     }
     this.smoke.add({ x, y: alt, z: y, max: 4, s0: 0.12, s1: 0.5, r: 0.5, g: 0.5, b: 0.5, a0: 0.4 });
+  }
+
+  /** One visible round: a bright head with a short fading tail, flying from muzzle to target. */
+  private round(x0: number, a0: number, y0: number, x1: number, a1: number, y1: number, speed: number, r: number, g: number, b: number, size: number) {
+    const dx = x1 - x0;
+    const dy = a1 - a0;
+    const dz = y1 - y0;
+    const d = Math.hypot(dx, dy, dz) || 0.001;
+    const life = d / speed;
+    const vx = (dx / d) * speed;
+    const vy = (dy / d) * speed;
+    const vz = (dz / d) * speed;
+    for (let k = 0; k < 3; k++) {
+      const back = k * size * 0.45;
+      this.glow.add({ x: x0 - (dx / d) * back, y: a0 - (dy / d) * back, z: y0 - (dz / d) * back, vx, vy, vz, max: life, s0: size * (1 - k * 0.25), s1: size * (1 - k * 0.25), r, g, b, a0: 1 - k * 0.3, fade: 0.2 });
+    }
+  }
+
+  /** Where a round lands: a spark and a small puff of dust (on land) or spray (on water). */
+  private hit(x: number, alt: number, y: number, water: boolean, air: boolean) {
+    this.glow.add({ x, y: alt + 0.01, z: y, max: 0.12, s0: 0.07, s1: 0.02, r: 1, g: 0.85, b: 0.5, a0: 1 });
+    if (air) return;
+    if (water) this.foam.add({ x, y: 0.01, z: y, vy: 0.08, max: 0.6, s0: 0.02, s1: 0.05, a0: 0.7, grav: 0.3 });
+    else this.smoke.add({ x, y: alt + 0.01, z: y, vy: 0.03, max: rnd(0.8, 1.4), s0: 0.03, s1: 0.11, r: 0.62, g: 0.55, b: 0.45, a0: 0.5, drag: 1 });
+  }
+
+  /**
+   * Small arms (rifles, machine guns): a stream of yellow tracers, flickering muzzle flashes and
+   * dust kicked up around the target.
+   */
+  smallArms(x0: number, a0: number, y0: number, x1: number, a1: number, y1: number, water: boolean) {
+    const n = 4 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < n; i++) {
+      this.at(i * 0.11 + Math.random() * 0.04, () => {
+        const sx = x0 + rnd(-0.06, 0.06);
+        const sy = y0 + rnd(-0.06, 0.06);
+        const tx = x1 + rnd(-0.12, 0.12);
+        const ty = y1 + rnd(-0.12, 0.12);
+        this.glow.add({ x: sx, y: a0 + 0.02, z: sy, max: 0.07, s0: 0.06, s1: 0.03, r: 1, g: 0.8, b: 0.4, a0: 1 });
+        this.round(sx, a0 + 0.02, sy, tx, a1 + 0.01, ty, 3.2, 1, 0.82, 0.35, 0.035);
+        const d = Math.hypot(tx - sx, ty - sy);
+        this.at(d / 3.2, () => this.hit(tx, a1, ty, water, false));
+      });
+    }
+  }
+
+  /** Autocannons and AA guns: fast chains of orange tracers, big flashes, flak puffs at aircraft. */
+  autocannon(x0: number, a0: number, y0: number, x1: number, a1: number, y1: number, water: boolean, air: boolean) {
+    const n = 6 + Math.floor(Math.random() * 4);
+    for (let i = 0; i < n; i++) {
+      this.at(i * 0.07, () => {
+        const tx = x1 + rnd(-0.08, 0.08);
+        const ty = y1 + rnd(-0.08, 0.08);
+        const ta = a1 + rnd(-0.03, 0.05);
+        this.glow.add({ x: x0, y: a0 + 0.03, z: y0, max: 0.06, s0: 0.11, s1: 0.04, r: 1, g: 0.7, b: 0.3, a0: 1 });
+        this.round(x0, a0 + 0.03, y0, tx, ta, ty, 4.5, 1, 0.55, 0.2, 0.045);
+        const d = Math.hypot(tx - x0, ta - a0, ty - y0);
+        this.at(d / 4.5, () => {
+          if (air) this.smoke.add({ x: tx, y: ta, z: ty, max: rnd(1, 1.6), s0: 0.04, s1: 0.13, r: 0.25, g: 0.24, b: 0.24, a0: 0.6, drag: 1 });
+          this.hit(tx, ta, ty, water, air);
+        });
+      });
+    }
+    this.smoke.add({ x: x0, y: a0 + 0.04, z: y0, vy: 0.04, max: 1.2, s0: 0.04, s1: 0.14, r: 0.75, g: 0.75, b: 0.75, a0: 0.35, drag: 1.5 });
+  }
+
+  /** A shell landing on land: a fountain of dirt and stones, then a dust cloud. */
+  dirt(x: number, alt: number, y: number, size: number) {
+    const s = Math.max(0.4, size);
+    for (let i = 0; i < 10 * s; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const v = rnd(0.03, 0.16) * s;
+      this.smoke.add({ x, y: alt + 0.02, z: y, vx: Math.cos(a) * v, vy: rnd(0.15, 0.4) * s, vz: Math.sin(a) * v, max: rnd(0.8, 1.4), s0: 0.03 * s, s1: 0.05 * s, r: 0.36, g: 0.3, b: 0.24, a0: 0.9, grav: 0.6, drag: 0.5 });
+    }
+    this.smoke.add({ x, y: alt + 0.03, z: y, vy: 0.04, max: 3, s0: 0.1 * s, s1: 0.4 * s, r: 0.6, g: 0.53, b: 0.43, a0: 0.4, drag: 0.6 });
   }
 
   tracer(x0: number, a0: number, y0: number, x1: number, a1: number, y1: number) {

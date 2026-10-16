@@ -12,6 +12,8 @@ export type Sfx =
   | 'launch'
   | 'sam'
   | 'ciws'
+  | 'rifle'
+  | 'autocannon'
   | 'torpedo'
   | 'boom_s'
   | 'boom_l'
@@ -271,6 +273,22 @@ export class Audio {
         const o = this.out(0.4 * v, pan, 0.3);
         this.burst(t, 1.1, 1, 'bandpass', 1800, 3200, o, 1.6, false, 0.03);
         this.burst(t, 0.3, 0.6, 'lowpass', 500, 80, o, 0.7, true);
+        break;
+      }
+      case 'rifle': {
+        // A ragged burst of small-arms cracks.
+        const o = this.out(0.22 * v, pan, 0.2);
+        const n = 4 + Math.floor(Math.random() * 3);
+        for (let i = 0; i < n; i++) this.burst(t + i * 0.11 + Math.random() * 0.04, 0.05, 0.9, 'bandpass', 2600, 900, o, 1.2);
+        break;
+      }
+      case 'autocannon': {
+        // Heavy, evenly spaced thumps.
+        const o = this.out(0.3 * v, pan, 0.25);
+        for (let i = 0; i < 7; i++) {
+          this.burst(t + i * 0.07, 0.08, 0.9, 'lowpass', 1400, 200, o, 0.8);
+          this.tone('sine', 110, 50, t + i * 0.07, 0.08, 0.6, o);
+        }
         break;
       }
       case 'ciws': {

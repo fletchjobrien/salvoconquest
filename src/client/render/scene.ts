@@ -369,13 +369,23 @@ export class GameScene {
         } else if (m.proj === 'shell') {
           const big = m.id === 'gun406' ? 2.2 : m.id === 'railgun' ? 1.6 : m.id === 'mortar' ? 0.6 : 1;
           this.fx.muzzle(e.x, alt, e.y, big);
-          this.onSound(big > 1.5 ? 'bigGun' : 'gun', e.x, e.y);
+          this.onSound(big > 1.5 ? 'bigGun' : 'gun', e.x, e.y, m.id === 'mortar' ? 0.5 : 1);
         } else if (m.proj === 'bullet') {
-          // CIWS at a missile: missile height frame; at an aircraft: aircraft frame.
+          // The event carries the target's height, so take the shooter's own height from the unit.
+          const su = w.units.get(e.id);
+          const sa = su ? visAlt(map, su.type, su.x, su.y, su.alt) : groundY(map, e.x, e.y);
+          // At a missile: missile height frame; at an aircraft: aircraft frame; else the ground.
           const atMissile = [...w.projs.values()].some((q) => q.kind === 'missile' && Math.abs(q.rx - e.tx) < 0.4 && Math.abs(q.ry - e.ty) < 0.4);
-          const ta = atMissile ? Math.max(groundY(map, e.tx, e.ty) + 0.03, (e.a ?? 0) * VSCALE) : airY(map, e.tx, e.ty, e.a ?? 0);
-          this.fx.tracer(e.x, alt + 0.05, e.y, e.tx, ta, e.ty);
-          this.onSound('ciws', e.x, e.y, 0.5);
+          const air = atMissile || (e.a ?? 0) > 0.3;
+          const ta = atMissile ? Math.max(groundY(map, e.tx, e.ty) + 0.03, (e.a ?? 0) * VSCALE) : air ? airY(map, e.tx, e.ty, e.a ?? 0) : groundY(map, e.tx, e.ty);
+          const water = heightAt(map, e.tx, e.ty) < 0;
+          if (m.id === 'rifles') {
+            this.fx.smallArms(e.x, sa, e.y, e.tx, ta, e.ty, water);
+            this.onSound('rifle', e.x, e.y);
+          } else {
+            this.fx.autocannon(e.x, sa, e.y, e.tx, ta, e.ty, water, air);
+            this.onSound(m.id === 'ciws' ? 'ciws' : 'autocannon', e.x, e.y, 0.6);
+          }
         } else if (m.proj === 'torpedo') {
           this.onSound('torpedo', e.x, e.y);
           this.fx.splash(e.x, e.y, 0.3);
@@ -388,6 +398,8 @@ export class GameScene {
         const water = heightAt(map, e.x, e.y) < 0;
         const alt = e.a && e.a > 0.1 ? airY(map, e.x, e.y, e.a) : groundY(map, e.x, e.y);
         this.fx.explosion(e.x, alt, e.y, e.s, water && alt < 0.1);
+        // Hits on land throw up dirt.
+        if (!water && !(e.a && e.a > 0.1)) this.fx.dirt(e.x, alt, e.y, e.s);
         this.onSound(e.s > 0.8 ? 'boom_l' : 'boom_s', e.x, e.y);
         if (e.s > 0.6) this.overlay?.shock(e.x, e.y, alt, 0.5 + e.s * 0.5, '#ffb070', 0.7);
         break;
