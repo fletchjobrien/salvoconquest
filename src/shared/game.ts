@@ -180,8 +180,6 @@ export interface Projectile {
   hostileSeen: boolean;
   /** Closest approach so far (SAMs). */
   best?: number;
-  /** SAMs fired at this missile so far (shoot-look-shoot, at most two). */
-  sams?: number;
   /** Expected damage reserved on a unit (anti-overkill); released when the projectile ends. */
   resv?: { id: number; dmg: number };
 }
@@ -1776,8 +1774,8 @@ export class Game {
       const tgt = this.units.get(p.target);
       const threat = tgt ? tgt.team === sh.team : Math.hypot(p.tx - sh.x, p.ty - sh.y) < 12;
       if (!threat) continue;
-      // Never more than two SAMs at one missile (in flight or in total).
-      if (w.mod.proj === 'sam' && ((p.sams ?? 0) >= 2 || this.samsAt(-2 - p.id) >= 2)) continue;
+      // Never more than two SAMs in flight at one missile; if both miss, fire again.
+      if (w.mod.proj === 'sam' && this.samsAt(-2 - p.id) >= 2) continue;
       // Most urgent first: the missile closest to hitting its target (not merely closest to
       // this launcher, which may be passing by on its way to another ship).
       const urgency = tgt ? Math.hypot(tgt.x - p.x, tgt.y - p.y) : Math.hypot(p.tx - p.x, p.ty - p.y);
@@ -1801,7 +1799,6 @@ export class Game {
       }
       return;
     }
-    m.sams = (m.sams ?? 0) + 1;
     this.launchProj(sh, w, -2 - m.id, m.x, m.y);
   }
 
