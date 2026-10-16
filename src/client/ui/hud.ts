@@ -50,6 +50,14 @@ export class Hud {
   private lastHud = 0;
   private lastCash = '';
   cargoSel = new Set<number>();
+  /** Module id of the weapon row under the mouse (its range ring is highlighted). */
+  hoverMod: string | null = null;
+
+  private setHoverMod(id: string | null) {
+    if (id === this.hoverMod) return;
+    this.hoverMod = id;
+    this.selEl.querySelectorAll<HTMLElement>('[data-mod]').forEach((r) => r.classList.toggle('hl', r.dataset.mod === id));
+  }
   siteSel: number | null = null;
 
   constructor(
@@ -79,6 +87,12 @@ export class Hud {
     this.buildEl.id = 'buildbar';
     this.selEl = h('div', 'panel hp empty');
     this.selEl.id = 'selpanel';
+    // Hovering a weapon row highlights that weapon's range ring on the map.
+    this.selEl.addEventListener('mouseover', (e) => {
+      const row = (e.target as HTMLElement).closest('[data-mod]') as HTMLElement | null;
+      this.setHoverMod(row?.dataset.mod ?? null);
+    });
+    this.selEl.addEventListener('mouseleave', () => this.setHoverMod(null));
     this.tipEl = h('div', 'panel hidden');
     this.tipEl.id = 'tooltip';
     this.bannerEl = h('div');
@@ -440,7 +454,7 @@ export class Hud {
         const ammo = d[1][wi++] ?? -1;
         const max = m.ammo ?? -1;
         if (out) {
-          html += `<div class="wrow"><span>${m.name}</span><span class="pips" style="color:var(--bad)">KNOCKED OUT ${d[13][7]}s</span></div>`;
+          html += `<div class="wrow${this.hoverMod === m.id ? ' hl' : ''}" data-mod="${m.id}"><span>${m.name}</span><span class="pips" style="color:var(--bad)">KNOCKED OUT ${d[13][7]}s</span></div>`;
           continue;
         }
         let pips = '∞';
@@ -448,7 +462,7 @@ export class Hud {
           const n = Math.max(0, ammo);
           pips = '▮'.repeat(Math.min(n, 16)) + `<span class="e">${'▮'.repeat(Math.max(0, Math.min(max, 16) - Math.min(n, 16)))}</span>`;
         }
-        html += `<div class="wrow"><span>${m.name}${m.ability ? '<span class="kbd">M</span>' : ''}</span><span class="pips">${pips}</span></div>`;
+        html += `<div class="wrow${this.hoverMod === m.id ? ' hl' : ''}" data-mod="${m.id}"><span>${m.name}${m.ability ? '<span class="kbd">M</span>' : ''}</span><span class="pips">${pips}</span></div>`;
       }
       if (def.domain === 'sea' || def.domain === 'sub') html += this.damageHtml(d[13]);
       if (def.domain === 'air') {

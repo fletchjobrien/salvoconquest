@@ -68,6 +68,7 @@ export class Match {
       mouse: { x: 0, y: 0, wx: 0, wy: 0, valid: false },
       showRanges: false,
       showSensors: false,
+      hoverWeapon: null,
       rain: 0,
       pings: [],
     };
@@ -177,6 +178,7 @@ export class Match {
     this.updateMouseWorld();
     this.scene.update(dt, this.rig);
     this.r.render(w.clock);
+    this.view.hoverWeapon = this.hud.hoverMod;
     this.overlay.draw(this.view, dt);
     this.updateHover();
     this.hud.update(this.selectedUnits(), w.clock);

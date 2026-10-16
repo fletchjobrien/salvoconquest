@@ -28,6 +28,8 @@ export interface OverlayView {
   mouse: { x: number; y: number; wx: number; wy: number; valid: boolean };
   showRanges: boolean;
   showSensors: boolean;
+  /** Weapon (module id) hovered in the unit panel: its range ring is highlighted. */
+  hoverWeapon: string | null;
   /** Storm intensity at the camera, 0..1. */
   rain: number;
   pings: { x: number; y: number; t: number; color: string; kind: 'move' | 'attack' | 'unload' }[];
@@ -841,6 +843,7 @@ export class Overlay {
     const w = v.world;
     const ctx = this.ctx;
     const groups = new Map<string, { x: number; y: number; r: number; y3: number }[]>();
+    const groupMods = new Map<string, Map<string, string>>();
     for (const u of units) {
       if (!w.details.get(u.id)) continue;
       const y3 = UNITS[u.type].domain === 'land' ? groundY(w.map, u.x, u.y) * 0.2 : 0;
@@ -851,6 +854,9 @@ export class Overlay {
         const cls = m.dmg?.air && !m.dmg.sea && !m.dmg.land ? 'air' : m.dmg?.sub && !m.dmg.sea ? 'sub' : 'surf';
         const color = cls === 'air' ? '#7fd8ff' : cls === 'sub' ? '#9a8cff' : '#ffb36b';
         const key = color + ':' + r;
+        let gm = groupMods.get(key);
+        if (!gm) groupMods.set(key, (gm = new Map()));
+        gm.set(m.id, m.name);
         if (seen.has(key)) continue;
         seen.add(key);
         let g = groups.get(key);
@@ -858,12 +864,18 @@ export class Overlay {
         g.push({ x: u.x, y: u.y, r, y3 });
       }
     }
+    const hovered = v.hoverWeapon;
     for (const [key, circles] of groups) {
       const color = key.split(':')[0];
+      const mods = groupMods.get(key)!;
+      const hl = !!hovered && mods.has(hovered);
       ctx.strokeStyle = color;
-      ctx.globalAlpha = 0.3 * alpha;
-      ctx.lineWidth = 1;
-      ctx.setLineDash([6, 6]);
+      // The hovered weapon's ring: solid, bright and glowing; the others step back.
+      ctx.globalAlpha = hl ? 0.95 : hovered ? 0.1 * alpha : 0.3 * alpha;
+      ctx.lineWidth = hl ? 2 : 1;
+      ctx.setLineDash(hl ? [] : [6, 6]);
+      ctx.shadowColor = color;
+      ctx.shadowBlur = hl ? 8 : 0;
       // Label once per kind, at the southmost point of the outline.
       let lab: { x: number; y: number; r: number; y3: number } | null = null;
       for (const c of circles) {
@@ -901,12 +913,13 @@ export class Overlay {
         ctx.stroke();
       }
       ctx.setLineDash([]);
-      if (lab && alpha >= 1 && this.proj(v, lab.x, 0, lab.y + lab.r)) {
+      ctx.shadowBlur = 0;
+      if (lab && (alpha >= 1 || hl) && this.proj(v, lab.x, 0, lab.y + lab.r)) {
         ctx.fillStyle = color;
-        ctx.globalAlpha = 0.5;
-        ctx.font = `500 8px ${FONT}`;
+        ctx.globalAlpha = hl ? 1 : hovered ? 0.15 : 0.5;
+        ctx.font = hl ? `600 10px ${FONT}` : `500 8px ${FONT}`;
         ctx.textAlign = 'center';
-        ctx.fillText(`${lab.r}km`, P.x, P.y + 10);
+        ctx.fillText(hl ? `${mods.get(hovered!)!.toUpperCase()} · ${lab.r} KM` : `${lab.r}km`, P.x, P.y + (hl ? 13 : 10));
       }
     }
     ctx.globalAlpha = 1;

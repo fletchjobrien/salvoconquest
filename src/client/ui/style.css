@@ -1096,3 +1096,14 @@ input[type='range'] {
   color: #6fd0ff;
   border-color: #6fd0ff;
 }
+
+#selpanel .wrow[data-mod] {
+  cursor: default;
+  margin: 0 -6px;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+#selpanel .wrow.hl {
+  background: rgba(255, 179, 107, 0.12);
+  color: #fff;
+}
