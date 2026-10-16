@@ -31,6 +31,10 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
   island, aircraft anywhere in the zone). Right-click moves placed units, troops can embark on ships, Del refunds.
   Money you don't spend carries into the battle. The battle starts when every player presses **Launch battle**
   (or the timer runs out).
+- **Building:** pick a unit in the build bar, then click the map where it should go (Shift: place several). A ghost
+  shows which building will make it (the nearest one that can reach the spot) and stays there until the unit is
+  built; then the unit moves out to that spot. Ships can only go to water connected to one of your naval bases or
+  dockyards, troops only to an island with one of your barracks; aircraft can be sent anywhere.
 - Units are expensive (prices ×3): forces are small and every hull counts. Ships carry few missiles
   (destroyer: 4 anti-ship, 8 SAM) and rearm at a naval base or dockyard, but only while not under attack (no hit in
   the last 15 s and nothing homing on them). Missile batteries (buildings and trucks) fire at half their old rate.

@@ -1,6 +1,7 @@
 // Crisp 2D tactical overlay drawn over the pixelated world: symbols, contacts, rings, orders.
 import { BUILDINGS, MODULES, UNITS, UNIT_TYPES, UNLOAD_RANGE, UnitType, unitCost } from '../../shared/defs';
-import { canDeployAt, deployZone } from '../../shared/game';
+import { canDeployAt, deployZone, rallySite } from '../../shared/game';
+import { cellOf } from '../../shared/map';
 import { sensorCoverage, unionOutline, COVER_COLORS, Disc } from '../sensors';
 import { ORDER_CODES, F_RETREAT, F_LANDED, F_FIRE, F_STOPPED, F_STUN } from '../../shared/protocol';
 import type { Renderer, CameraRig } from './renderer';
@@ -24,7 +25,7 @@ export interface OverlayView {
   selected: Set<number>;
   hover: Hover | null;
   dragRect: { x0: number; y0: number; x1: number; y1: number } | null;
-  mode: { k: 'unload'; ships: { ship: number; ids: number[] }[] } | { k: 'deploy'; type: UnitType } | null;
+  mode: { k: 'unload'; ships: { ship: number; ids: number[] }[] } | { k: 'deploy'; type: UnitType } | { k: 'build'; type: UnitType } | null;
   mouse: { x: number; y: number; wx: number; wy: number; valid: boolean };
   showRanges: boolean;
   showSensors: boolean;
@@ -169,6 +170,7 @@ export class Overlay {
     if (selUnits.length && (v.showRanges || selUnits.length <= 12)) this.drawRanges(v, selUnits, selUnits.length > 6 ? 0.6 : 1);
     if (v.mode?.k === 'unload') this.drawUnloadMode(v);
     if (w.setup) this.drawDeployZone(v);
+    else this.drawBuildGhosts(v);
 
     // ---- sites ----
     for (const s of w.map.sites) {
@@ -1052,6 +1054,102 @@ export class Overlay {
       ctx.arc(P.x, P.y, 3, 0, Math.PI * 2);
       ctx.stroke();
     }
+  }
+
+  /**
+   * Placed builds: every queued unit with a destination shows as a faint ghost there, joined by
+   * a dashed line to the building that makes it (the front of each queue shows its progress).
+   * In build mode the cursor carries a ghost: green with its source, or red with the reason.
+   */
+  private drawBuildGhosts(v: OverlayView) {
+    const w = v.world;
+    const ctx = this.ctx;
+    const symSize = 11;
+    const col = sideColor('own');
+    const at = (x: number, y: number, type: UnitType) => (UNITS[type].domain === 'land' ? groundY(w.map, x, y) : 0);
+    const line = (sx: number, sy: number, tx: number, ty: number, alpha: number) => {
+      if (!this.proj(v, sx, 0, sy)) return;
+      const ax = P.x;
+      const ay = P.y;
+      if (!this.proj(v, tx, 0, ty)) return;
+      ctx.strokeStyle = col;
+      ctx.globalAlpha = alpha;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 4]);
+      ctx.beginPath();
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(P.x, P.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+    };
+    for (const cat of ['naval', 'ground', 'air'] as const) {
+      w.queues[cat].forEach((it, i) => {
+        if (it.x === undefined || it.y === undefined) return;
+        const src = it.s !== undefined ? w.map.sites[it.s] : undefined;
+        if (src) {
+          const from = cat === 'naval' && src.dock ? src.dock : src;
+          line(from.x, from.y, it.x, it.y, 0.22);
+        }
+        if (!this.proj(v, it.x, at(it.x, it.y, it.type), it.y)) return;
+        ctx.globalAlpha = 0.45;
+        this.blit(symbolCanvas('own', UNITS[it.type].domain as SymDomain, glyphFor(it.type), symSize, false), P.x, P.y);
+        ctx.globalAlpha = 1;
+        if (i === 0) {
+          // Build progress as a thin arc around the front ghost.
+          ctx.strokeStyle = col;
+          ctx.globalAlpha = 0.8;
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.arc(P.x, P.y, symSize * 1.45, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * it.progress);
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+        }
+      });
+    }
+    const m = v.mode;
+    if (m?.k !== 'build' || !v.mouse.valid) return;
+    const x = v.mouse.wx;
+    const y = v.mouse.wy;
+    const ours = (id: number) => w.sites[id]?.owner === w.me;
+    const src = rallySite(w.map, w.map.sites, ours, m.type, x, y);
+    const cat = UNITS[m.type].category as 'naval' | 'ground' | 'air';
+    const afford = w.cash >= unitCost(m.type, w.myFaction);
+    const full = w.queues[cat].length >= 8;
+    const ok = src >= 0 && afford && !full;
+    if (src >= 0) {
+      const s = w.map.sites[src];
+      const from = cat === 'naval' && s.dock ? s.dock : s;
+      line(from.x, from.y, x, y, ok ? 0.6 : 0.3);
+    }
+    if (!this.proj(v, x, at(x, y, m.type), y)) return;
+    ctx.globalAlpha = ok ? 0.85 : 0.5;
+    this.blit(symbolCanvas('own', UNITS[m.type].domain as SymDomain, glyphFor(m.type), symSize + 1, false), P.x, P.y);
+    ctx.strokeStyle = ok ? '#7dff9a' : '#ff5a4a';
+    ctx.globalAlpha = 0.9;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(P.x, P.y, (symSize + 1) * 1.6, 0, Math.PI * 2);
+    ctx.stroke();
+    let why: string;
+    if (!afford) why = 'NOT ENOUGH FUNDS';
+    else if (full) why = 'BUILD QUEUE FULL';
+    else if (src < 0) {
+      const c = w.map.nav[cellOf(w.map, x, y)];
+      if (cat === 'naval') why = c !== 0 ? 'SHIPS: OPEN WATER ONLY' : 'NO NAVAL BASE CAN REACH THIS WATER';
+      else if (cat === 'ground') why = c !== 1 ? 'TROOPS: LAND ONLY' : 'NO BARRACKS ON THIS ISLAND';
+      else why = 'NO AIRBASE';
+    } else {
+      const s = w.map.sites[src];
+      const isl = w.map.islands[s.island];
+      const place = isl.home >= 0 ? (w.players.some((p) => p.slot === isl.home) ? 'HOME' : 'UNCLAIMED') : isl.name.toUpperCase();
+      why = `${UNITS[m.type].short} · FROM ${BUILDINGS[s.type].name.toUpperCase()}, ${place}`;
+    }
+    ctx.fillStyle = ok ? '#7dff9a' : '#ff5a4a';
+    ctx.font = `600 9px ${FONT}`;
+    ctx.textAlign = 'left';
+    ctx.fillText(why, P.x + (symSize + 1) * 1.9, P.y + 3);
+    ctx.globalAlpha = 1;
   }
 
   /** Deployment phase: our zone, and a placement ghost (green ring = legal spot, red = not). */

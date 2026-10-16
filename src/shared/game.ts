@@ -42,6 +42,7 @@ import {
   islandAt,
   nearestCell,
   lineClear,
+  seaRegions,
 } from './map';
 import {
   Command,
@@ -270,7 +271,7 @@ export interface Player {
   cash: number;
   earned: number;
   income: number;
-  queues: Record<Cat, { type: UnitType; t: number; total: number }[]>;
+  queues: Record<Cat, { type: UnitType; t: number; total: number; rally?: { x: number; y: number }; site?: number }[]>;
   factory: Record<Cat, { site: number } | { unit: number } | null>;
   loadouts: Record<string, string[]>;
   defeated: boolean;
@@ -595,9 +596,20 @@ export class Game {
         if (!def || def.category !== cmd.cat) return;
         const cost = unitCost(cmd.type, p.faction);
         if (p.cash < cost || p.queues[cmd.cat].length >= 8) return;
+        // A placed build must be reachable from one of our factories; it is built at the nearest.
+        const rx = num(cmd.x);
+        const ry = num(cmd.y);
+        let rally: { x: number; y: number } | undefined;
+        let site: number | undefined;
+        if (!Number.isNaN(rx) && !Number.isNaN(ry)) {
+          const s = rallySite(this.map, this.sites, (id) => this.sites[id].owner === pid, cmd.type, rx, ry);
+          if (s < 0) return;
+          rally = { x: rx, y: ry };
+          site = s;
+        }
         p.cash -= cost;
         const total = unitBuildTime(cmd.type, p.faction);
-        p.queues[cmd.cat].push({ type: cmd.type, t: 0, total });
+        p.queues[cmd.cat].push({ type: cmd.type, t: 0, total, rally, site });
         break;
       }
       case 'cancel': {
@@ -961,10 +973,12 @@ export class Game {
       for (const cat of CATS) {
         const q = p.queues[cat];
         if (!q.length) continue;
-        const site = this.factorySite(p, cat);
+        const it = q[0];
+        // A placed build comes from its own site (while we still hold it), else the factory.
+        const own = it.site !== undefined ? this.sites[it.site] : undefined;
+        const site = own && own.owner === p.id && BUILDINGS[own.type].produces === cat ? own : this.factorySite(p, cat);
         // Aircraft are built at airbases only; carriers take them aboard afterwards.
         if (!site) continue;
-        const it = q[0];
         it.t += dt;
         if (it.t < it.total) continue;
         q.shift();
@@ -987,6 +1001,13 @@ export class Game {
           if (cat === 'air') {
             u.base = { site: site.id };
             u.order = { k: 'patrol', x: site.x, y: site.y };
+          }
+          // Head for the spot the player placed it on.
+          if (it.rally) {
+            if (cat === 'air') {
+              u.order = { k: 'patrol', x: it.rally.x, y: it.rally.y };
+              u.mission = { k: 'patrol', x: it.rally.x, y: it.rally.y };
+            } else u.order = { k: 'move', x: it.rally.x, y: it.rally.y, attack: true };
           }
         }
         this.emit({ k: 'built', id: u.id, ty: UNIT_TYPES.indexOf(u.type), o: p.id }, u.x, u.y, p.team);
@@ -2806,10 +2827,19 @@ export class Game {
         dom: Math.round(pp.dom),
       }));
     }
+    const qrow = (i: { type: UnitType; t: number; total: number; rally?: { x: number; y: number }; site?: number }): QueueItem => {
+      const r: QueueItem = { type: i.type, progress: Math.min(1, i.t / i.total) };
+      if (i.rally) {
+        r.x = r2(i.rally.x);
+        r.y = r2(i.rally.y);
+        r.s = i.site;
+      }
+      return r;
+    };
     snap.q = {
-      naval: p.queues.naval.map((i) => ({ type: i.type, progress: Math.min(1, i.t / i.total) }) as QueueItem),
-      ground: p.queues.ground.map((i) => ({ type: i.type, progress: Math.min(1, i.t / i.total) }) as QueueItem),
-      air: p.queues.air.map((i) => ({ type: i.type, progress: Math.min(1, i.t / i.total) }) as QueueItem),
+      naval: p.queues.naval.map(qrow),
+      ground: p.queues.ground.map(qrow),
+      air: p.queues.air.map(qrow),
     };
     const fac = (cat: Cat) => {
       const s = this.factorySite(p, cat);
@@ -2833,6 +2863,42 @@ export class Game {
 function mkWeapon(m: ModuleDef): Weapon {
   const ammo = m.ammo ?? -1;
   return { mod: m, ammo, max: ammo, cd: Math.random() * 0.5 };
+}
+
+const seaCache = new WeakMap<GameMap, Int32Array>();
+
+/**
+ * Which of our factories can deliver a unit of this type to (x, y), or -1: ships need open water
+ * in the same sea as a naval base or dockyard dock, troops need land on an island with one of our
+ * barracks, aircraft can go anywhere (from the nearest airbase). The nearest such site wins.
+ */
+export function rallySite(map: GameMap, sites: { id: number; type: BuildingType; x: number; y: number; island: number; dock: { x: number; y: number } | null }[], ours: (id: number) => boolean, type: UnitType, x: number, y: number): number {
+  if (x < 0.5 || y < 0.5 || x > map.size - 0.5 || y > map.size - 0.5) return -1;
+  const cat = UNITS[type].category;
+  const c = cellOf(map, x, y);
+  let region = -1;
+  if (cat === 'naval') {
+    if (map.nav[c] !== 0) return -1;
+    let lab = seaCache.get(map);
+    if (!lab) seaCache.set(map, (lab = seaRegions(map).label));
+    region = lab[c];
+  }
+  if (cat === 'ground' && map.nav[c] !== 1) return -1;
+  let best = -1;
+  let bd = 1e9;
+  for (const s of sites) {
+    if (BUILDINGS[s.type].produces !== cat || !ours(s.id)) continue;
+    if (cat === 'naval') {
+      if (!s.dock || seaCache.get(map)![cellOf(map, s.dock.x, s.dock.y)] !== region) continue;
+    } else if (cat === 'ground' && s.island !== map.islandOf[c]) continue;
+    const from = cat === 'naval' && s.dock ? s.dock : s;
+    const d = Math.hypot(from.x - x, from.y - y);
+    if (d < bd) {
+      bd = d;
+      best = s.id;
+    }
+  }
+  return best;
 }
 
 /** A player's deployment zone: a circle around their home island. */

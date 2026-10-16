@@ -12,7 +12,7 @@ export type Command =
   | { c: 'mines'; ids: number[] }
   | { c: 'rtb'; ids: number[] }
   | { c: 'autoretreat'; ids: number[]; on: boolean }
-  | { c: 'build'; cat: 'naval' | 'ground' | 'air'; type: UnitType }
+  | { c: 'build'; cat: 'naval' | 'ground' | 'air'; type: UnitType; x?: number; y?: number }
   | { c: 'cancel'; cat: 'naval' | 'ground' | 'air'; index: number }
   | { c: 'factory'; cat: 'naval' | 'ground' | 'air'; site?: number; unit?: number }
   // Deployment phase only:
@@ -79,6 +79,10 @@ export type WeatherWire = [number, number, number, number, number, number, numbe
 export interface QueueItem {
   type: UnitType;
   progress: number; // 0..1
+  /** Placed build: where the unit goes once built, and the site that builds it. */
+  x?: number;
+  y?: number;
+  s?: number;
 }
 
 export interface Snapshot {

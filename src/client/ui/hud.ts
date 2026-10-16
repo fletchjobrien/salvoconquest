@@ -175,7 +175,7 @@ export class Hud {
       ${d.fuel ? `<span>FUEL</span><span>${d.fuel}s · ${Math.round((d.fuel * d.speed) / 2)} km radius</span>` : ''}
       ${d.radarAir || d.radarSurf ? `<span>RADAR</span><span>${Math.round(Math.max(d.radarAir, d.radarSurf) * FACTION_MOD[fac].sensor)} km</span>` : ''}
       ${d.sonar ? `<span>SONAR</span><span>${Math.round(d.sonar * FACTION_MOD[fac].sensor)} km</span>` : ''}</div>
-      <div class="tt-r" style="margin:6px 0 0">LMB build · RMB cancel</div>`;
+      <div class="tt-r" style="margin:6px 0 0">LMB: place on the map (Shift: several) · RMB: cancel last</div>`;
   }
 
   showTip(anchor: HTMLElement | { x: number; y: number }, html: string) {

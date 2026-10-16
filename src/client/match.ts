@@ -1,6 +1,6 @@
 // A running match: wires world state, rendering, overlay, HUD, input, audio and the connection.
 import { UNITS, UNIT_TYPES, UnitType, MODULES, UNLOAD_RANGE, unitCost } from '../shared/defs';
-import { canDeployAt } from '../shared/game';
+import { canDeployAt, rallySite } from '../shared/game';
 import { islandAt } from '../shared/map';
 import { weatherStrength } from '../shared/weather';
 import type { Command, GameEvent, ServerMsg, StartInfo } from '../shared/protocol';
@@ -73,14 +73,16 @@ export class Match {
       pings: [],
     };
     this.hud = new Hud(this.world, {
-      build: (cat, type) => {
+      build: (_cat, type) => {
         // Deployment phase: the build bar picks what to place on the map instead.
         if (this.world.setup) {
           this.view.mode = { k: 'deploy', type };
           audio.play('click');
           return;
         }
-        this.send({ c: 'build', cat, type }, true);
+        // In battle the build bar also picks a unit to place: click the map where it should go.
+        this.view.mode = { k: 'build', type };
+        audio.play('click');
       },
       ready: (on) => {
         this.send({ c: 'ready', on });
@@ -640,7 +642,7 @@ export class Match {
         if (e.button === 2) {
           const m = this.view.mouse;
           if (!m.valid) return;
-          if (this.view.mode?.k === 'deploy') {
+          if (this.view.mode?.k === 'deploy' || this.view.mode?.k === 'build') {
             this.view.mode = null;
             return;
           }
@@ -661,6 +663,22 @@ export class Match {
         const w = this.world;
         if (m.valid && w.setup && canDeployAt(w.map, w.players[w.me].slot, mode.type, m.wx, m.wy) && w.cash >= unitCost(mode.type, w.myFaction)) {
           this.send({ c: 'deploy', type: mode.type, x: m.wx, y: m.wy });
+          audio.play('order');
+          if (!e.shiftKey) this.view.mode = null;
+        } else audio.play('deny');
+        return;
+      }
+      if (mode?.k === 'build' && !d.moved) {
+        const m = this.view.mouse;
+        const w = this.world;
+        const cat = UNITS[mode.type].category as Cat;
+        const ok =
+          m.valid &&
+          rallySite(w.map, w.map.sites, (id) => w.sites[id]?.owner === w.me, mode.type, m.wx, m.wy) >= 0 &&
+          w.cash >= unitCost(mode.type, w.myFaction) &&
+          w.queues[cat].length < 8;
+        if (ok) {
+          this.send({ c: 'build', cat, type: mode.type, x: m.wx, y: m.wy });
           audio.play('order');
           if (!e.shiftKey) this.view.mode = null;
         } else audio.play('deny');
