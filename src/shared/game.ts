@@ -176,8 +176,12 @@ export interface Unit {
   stillFor: number;
   /** Critical damage to ship systems (seconds left); see CRIT in defs.ts. */
   sys: ShipSystems;
-  /** Last enemy to hurt this unit (credited if fire or flooding sinks it). */
+  /** Last enemy to hurt this unit (credited if fire or flooding sinks it), and when. */
   lastHitBy: number;
+  lastHitAt: number;
+  /** In port: 1 = repairing and rearming, 2 = repairs held because the ship is under attack (until portUntil). */
+  portState: number;
+  portUntil: number;
   /** Seconds spent close to (but not at) the move point; groups can't all reach the exact spot. */
   nearGoalFor?: number;
   pendingDmg: number;
@@ -452,6 +456,9 @@ export class Game {
       pendingDmg: 0,
       sys: newSystems(),
       lastHitBy: -1,
+      lastHitAt: -1e9,
+      portState: 0,
+      portUntil: 0,
       dead: false,
       lastThink: this.rng.next(),
     };
@@ -1081,6 +1088,13 @@ export class Game {
       const naval = s.type === 'navalbase' || s.type === 'dockyard';
       if ((dom === 'sea' || dom === 'sub') && naval && s.dock) {
         if (Math.hypot(s.dock.x - u.x, s.dock.y - u.y) < 3) {
+          u.portUntil = this.time + 0.6;
+          // No repairs or reloading under fire: hit in the last 15 s, or a weapon is homing on it.
+          if (this.underAttack(u)) {
+            u.portState = 2;
+            return;
+          }
+          u.portState = 1;
           u.sys.dockedUntil = this.time + 0.6;
           u.hp = Math.min(u.maxHp, u.hp + 3 * dt);
           for (const w of u.weapons) if (w.max > 0) w.ammo = Math.min(w.max, w.ammo + dt * 0.5);
@@ -1093,6 +1107,13 @@ export class Game {
         return;
       }
     }
+  }
+
+  /** Hit in the last 15 seconds, or an enemy missile or torpedo is homing on it. */
+  underAttack(u: Unit): boolean {
+    if (this.time - u.lastHitAt < 15) return true;
+    for (const p of this.projs) if (!p.dead && p.target === u.id && p.team !== u.team) return true;
+    return false;
   }
 
   private localPower(x: number, y: number, team: number, r: number, enemies: boolean): number {
@@ -1905,7 +1926,7 @@ export class Game {
     }
     for (const s of this.sites) {
       if (s.owner < 0 || !s.weapons.length) continue;
-      for (const w of s.weapons) if (w.mod.regen && w.ammo < w.max) w.ammo = Math.min(w.max, w.ammo + w.mod.regen * dt * 2);
+      for (const w of s.weapons) if (w.mod.regen && w.ammo < w.max) w.ammo = Math.min(w.max, w.ammo + w.mod.regen * dt);
       shooters.push({ x: s.x, y: s.y, alt: 0.05, team: this.team(s.owner), owner: s.owner, weapons: s.weapons, unit: null, dmgMul: 1 });
     }
     for (const sh of shooters) {
@@ -2296,6 +2317,7 @@ export class Game {
     let d = dmg;
     if (UNITS[t.type].domain === 'land' && t.stillFor > 4) d *= t.entrench;
     t.hp -= d;
+    t.lastHitAt = this.time;
     if (by >= 0) t.lastHitBy = by;
     if (t.hp <= 0) {
       this.kill(t, by);
@@ -2715,7 +2737,7 @@ export class Game {
             oc,
             ox,
             oy,
-            (x.autoRetreat ? 1 : 0) | (x.inside >= 0 ? 2 : 0),
+            (x.autoRetreat ? 1 : 0) | (x.inside >= 0 ? 2 : 0) | (x.portUntil > this.time ? (x.portState === 2 ? 8 : 4) : 0),
             UNIT_TYPES.indexOf(x.type),
             ...this.airDetail(x),
             UNITS[x.type].deck ? this.deckIds(x) : [],

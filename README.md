@@ -32,7 +32,8 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
   Money you don't spend carries into the battle. The battle starts when every player presses **Launch battle**
   (or the timer runs out).
 - Units are expensive (prices ×3): forces are small and every hull counts. Ships carry few missiles
-  (destroyer: 4 anti-ship, 8 SAM) and rearm at a naval base or dockyard.
+  (destroyer: 4 anti-ship, 8 SAM) and rearm at a naval base or dockyard, but only while not under attack (no hit in
+  the last 15 s and nothing homing on them). Missile batteries (buildings and trucks) fire at half their old rate.
 - Ground units capture buildings by standing next to them. Captured **resource sites** spawn merchant
   ships that sail cargo home and turn it into cash. Enemy subs love merchants.
 - Other buildings give bonuses: radar stations (huge radar bubble), airbases, barracks and dockyards (forward production, repair, rearm),

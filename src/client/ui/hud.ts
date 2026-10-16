@@ -423,7 +423,9 @@ export class Hud {
       lander: 'FERRYING',
     };
     let html = `<div class="sp-head"><img src="${symbolDataUrl('own', def.domain as SymDomain, glyphFor(u.type), 13)}"><div><div class="nm">${esc(unitName(fac, u.type, u.id))}</div><div class="ty">${def.names[fac]}</div></div></div>`;
-    html += `<div class="status">${statusTxt[order] ?? order.toUpperCase()}${u.flags & 8 ? ' · REARMING' : ''}</div>`;
+    const portFlags = d ? d[7] : 0;
+    const port = portFlags & 8 ? ' · <span style="color:var(--bad)">IN PORT · UNDER ATTACK, REPAIRS HELD</span>' : portFlags & 4 ? ' · <span style="color:var(--good)">IN PORT · REPAIRING &amp; REARMING</span>' : '';
+    html += `<div class="status">${statusTxt[order] ?? order.toUpperCase()}${u.flags & 8 ? ' · REARMING' : ''}${port}</div>`;
     html += `<div class="bar"><i style="width:${u.hp}%;background:${col}"></i></div>`;
     if (d) {
       let wi = 0;
