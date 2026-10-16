@@ -4,7 +4,7 @@ import { shipDoctrine } from '../../shared/doctrine';
 import { canDeployAt, deployZone, rallySite } from '../../shared/game';
 import { cellOf } from '../../shared/map';
 import { sensorCoverage, unionOutline, COVER_COLORS, Disc } from '../sensors';
-import { ORDER_CODES, F_RETREAT, F_LANDED, F_FIRE, F_STOPPED, F_STUN } from '../../shared/protocol';
+import { ORDER_CODES, F_RETREAT, F_LANDED, F_FIRE, F_STOPPED, F_STUN, F_PAINTED, F_DARK } from '../../shared/protocol';
 import type { Renderer, CameraRig } from './renderer';
 import type { World, UView } from '../state';
 import { DOMAINS } from '../state';
@@ -343,6 +343,19 @@ export class Overlay {
         }
       }
       const sz = small ? symSize - 4 : symSize;
+      // Radar warning: an enemy radar is tracking this unit. A soft amber glow that breathes
+      // behind the marker (it never covers the symbol itself).
+      if (u.flags & F_PAINTED && u.owner === w.me) {
+        const k = 0.5 + 0.5 * Math.sin(w.clock * 5.5 + u.id);
+        const R = sz * (1.55 + 0.25 * k);
+        const g = ctx.createRadialGradient(sx, sy, sz * 0.6, sx, sy, R);
+        g.addColorStop(0, `rgba(255, 176, 64, ${0.32 + 0.22 * k})`);
+        g.addColorStop(1, 'rgba(255, 176, 64, 0)');
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(sx, sy, R, 0, Math.PI * 2);
+        ctx.fill();
+      }
       const img = symbolCanvas(affil, dom as SymDomain, glyphFor(u.type), sz, sel || hov);
       const born = Math.min(1, (w.clock - u.born) / 0.4);
       ctx.globalAlpha = (small ? 0.75 : 1) * born;
@@ -645,6 +658,7 @@ export class Overlay {
     if (u.flags & F_FIRE) out.push(['FIRE', '#ff7a3a']);
     if (d && d[4] > 0) out.push(['FLD', '#6fb8ff']);
     if (u.flags & F_STUN) out.push(['STUN', '#ffe14a']);
+    if (u.flags & F_DARK && w.teamOf(u.owner) === w.myTeam) out.push(['DARK', '#9fb0bd']);
     // Our faction special while it is running.
     const sr = u.owner === w.me ? w.details.get(u.id)?.[14] : undefined;
     const sp = sr ? shipDoctrine(w.myFaction, u.type)?.special : undefined;

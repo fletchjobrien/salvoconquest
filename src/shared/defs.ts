@@ -231,6 +231,20 @@ export const COUNTER = {
   smokeTrail: 12,
 };
 
+/**
+ * Emission control. A radar that is switched on can be heard by enemy electronic support measures (ESM)
+ * further away than the radar itself can see: the signal only travels one way. ESM gives a rough,
+ * unidentified position. Switched off, the unit sees only by eye and sonar, but cannot be heard.
+ */
+export const ESM = {
+  /** ESM hears an emitter out to this multiple of the emitter's own radar range. */
+  range: 1.5,
+  /** Best contact quality from ESM alone (below the 0.4 needed to identify, so not targetable). */
+  q: 0.38,
+  /** Largest position error of an ESM-only contact (km). */
+  err: 7,
+};
+
 export type CounterKind = 'chaff' | 'smoke';
 
 export function counterOf(type: UnitType): CounterKind | null {

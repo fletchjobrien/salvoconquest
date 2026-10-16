@@ -1,7 +1,7 @@
 // DOM heads-up display: top bar, radio log, build bar, selection panel, tooltips, banners.
 import { BUILDABLE, BUILDINGS, CRIT, MODULES, UNITS, UnitType, unitBuildTime, unitCost, FACTION_MOD, moduleFor, counterOf } from '../../shared/defs';
 import { shipDoctrine } from '../../shared/doctrine';
-import { ORDER_CODES } from '../../shared/protocol';
+import { ORDER_CODES, F_DARK, F_PAINTED } from '../../shared/protocol';
 import type { World, UView } from '../state';
 import { FACTION_STYLE, SIDE, unitName } from '../theme';
 import { SymDomain, glyphFor, symbolDataUrl, SITE_GLYPH } from '../render/symbols';
@@ -16,7 +16,7 @@ export interface HudActions {
   selectOnly(ids: number[]): void;
   unloadMode(ship: number, ids: number[]): void;
   toggleCargo(id: number): void;
-  ability(name: 'mines' | 'rtb' | 'retreat' | 'stop' | 'siteFactory' | 'refund' | 'special' | 'counter'): void;
+  ability(name: 'mines' | 'rtb' | 'retreat' | 'stop' | 'siteFactory' | 'refund' | 'special' | 'counter' | 'radar'): void;
   ready(on: boolean): void;
 }
 
@@ -372,7 +372,7 @@ export class Hud {
     if (sel.length === 1) {
       const u = sel[0];
       const d = w.details.get(u.id);
-      const key = `u:${u.id}:${u.hp}:${JSON.stringify(d)}:${[...this.cargoSel].join(',')}`;
+      const key = `u:${u.id}:${u.hp}:${u.flags & (F_DARK | F_PAINTED)}:${JSON.stringify(d)}:${[...this.cargoSel].join(',')}`;
       if (key === this.selKey) return;
       this.selKey = key;
       el.innerHTML = this.unitHtml(u);
@@ -385,7 +385,7 @@ export class Hud {
       a.push(u);
       groups.set(u.type, a);
     }
-    const key = 'm:' + [...groups.entries()].map(([t, a]) => `${t}${a.length}`).join(',') + sel.map((u) => u.hp).join(',');
+    const key = 'm:' + [...groups.entries()].map(([t, a]) => `${t}${a.length}`).join(',') + sel.map((u) => `${u.hp}/${u.flags & F_DARK}`).join(',');
     if (key === this.selKey) return;
     this.selKey = key;
     const avg = sel.reduce((s, u) => s + u.hp, 0) / sel.length;
@@ -478,6 +478,12 @@ export class Hud {
         const col = (sp.toggle ? on : active > 0) ? 'var(--accent)' : ready > 0 ? 'var(--faint)' : 'var(--good)';
         html += `<div class="spec"><div class="wrow"><span>★ ${sp.name.toUpperCase()}</span><span class="pips" style="color:${col}">${state}</span></div><div class="sd">${sp.desc}</div><div class="sd">Trait: ${doc.trait.text}</div></div>`;
       }
+      if (this.hasRadar(u.type)) {
+        const dark = (u.flags & F_DARK) !== 0;
+        const painted = (u.flags & F_PAINTED) !== 0;
+        html += `<div class="wrow"><span>RADAR<span class="kbd">G</span></span><span class="pips" style="color:${dark ? 'var(--faint)' : 'var(--good)'}">${dark ? 'OFF · SILENT' : 'ACTIVE · EMITTING'}</span></div>`;
+        if (painted) html += `<div class="wrow"><span style="color:#ffb040">⚠ ENEMY RADAR LOCK</span><span></span></div>`;
+      } else if (u.flags & F_PAINTED) html += `<div class="wrow"><span style="color:#ffb040">⚠ ENEMY RADAR LOCK</span><span></span></div>`;
       const cmk = counterOf(u.type);
       if (cmk) {
         const left = d[15] ?? 0;
@@ -551,6 +557,12 @@ export class Hud {
     // Faction special (all selected ships that have one).
     const specs = new Set(sel.map((u) => shipDoctrine(w.myFaction, u.type)?.special.name).filter(Boolean));
     if (specs.size) b.push(`<button class="btn small on" data-act="special">${specs.size === 1 ? [...specs][0]!.toUpperCase() : 'SPECIALS'}<span class="kbd">F</span></button>`);
+    // Radar on/off (only units that have a radar of their own).
+    const radars = sel.filter((u) => this.hasRadar(u.type));
+    if (radars.length) {
+      const anyOn = radars.some((u) => !(u.flags & F_DARK));
+      b.push(`<button class="btn small ${anyOn ? '' : 'on'}" data-act="radar">${anyOn ? 'RADAR OFF' : 'RADAR ON'}<span class="kbd">G</span></button>`);
+    }
     // Countermeasures: chaff (warships, aircraft), smoke (ground units).
     const cms = new Set(sel.map((u) => counterOf(u.type)).filter(Boolean));
     if (cms.size) b.push(`<button class="btn small" data-act="counter">${cms.size === 1 ? [...cms][0]!.toUpperCase() : 'CHAFF / SMOKE'}<span class="kbd">C</span></button>`);
@@ -580,6 +592,12 @@ export class Hud {
     );
   }
 
+  /** Does this unit type carry a radar of its own (hull radar, radar pod or radar truck)? */
+  private hasRadar(type: UnitType): boolean {
+    if (UNITS[type].radarAir > 0 || UNITS[type].radarSurf > 0) return true;
+    return matchLoadoutOf(type).some((id) => !!(MODULES[id]?.mods?.radarAir || MODULES[id]?.mods?.radarSurf));
+  }
+
   invalidate() {
     this.selKey = '#';
   }
@@ -591,7 +609,7 @@ const HELP = `<b>FIELD MANUAL</b> <span style="float:right;color:var(--faint)">[
 <span class="k">CTRL+RMB</span> force move (no fighting)<br>
 <span class="k">WASD · MMB drag</span> pan · <span class="k">Q/E</span> rotate · <span class="k">wheel</span> zoom<br>
 <span class="k">U</span> unload troops, then click land in the ring<br>
-<span class="k">F</span> ship special · <span class="k">C</span> chaff / smoke · <span class="k">M</span> mines · <span class="k">R</span> aircraft RTB · <span class="k">X</span> stop<br>
+<span class="k">F</span> ship special · <span class="k">C</span> chaff / smoke · <span class="k">G</span> radar on/off · <span class="k">M</span> mines · <span class="k">R</span> aircraft RTB · <span class="k">X</span> stop<br>
 <span class="k">CTRL+1-9</span> group · <span class="k">1-9</span> recall · <span class="k">SPACE</span> last alert<br>
 <span class="k">TAB</span> weapon ranges · <span class="k">V</span> sensor coverage<br>
 <span class="k">ENTER</span> chat · <span class="k">ESC</span> menu<br>

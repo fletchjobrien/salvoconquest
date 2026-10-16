@@ -5,7 +5,7 @@ import { shipDoctrine } from '../shared/doctrine';
 import { islandAt } from '../shared/map';
 import { weatherStrength } from '../shared/weather';
 import type { Command, GameEvent, ServerMsg, StartInfo } from '../shared/protocol';
-import { F_LANDED } from '../shared/protocol';
+import { F_DARK, F_LANDED } from '../shared/protocol';
 import { Conn } from './net';
 import { World, UView } from './state';
 import { Renderer, CameraRig } from './render/renderer';
@@ -418,7 +418,7 @@ export class Match {
     this.hud.log('ORDERS', `Pick a landing point${ships.length > 1 ? ` for ${ships.length} ships` : ''} within ${UNLOAD_RANGE} km — ships close in if needed.`, 'good');
   }
 
-  private ability(a: 'mines' | 'rtb' | 'retreat' | 'stop' | 'siteFactory' | 'refund' | 'special' | 'counter') {
+  private ability(a: 'mines' | 'rtb' | 'retreat' | 'stop' | 'siteFactory' | 'refund' | 'special' | 'counter' | 'radar') {
     const ids = this.ownSelectedIds();
     const w = this.world;
     switch (a) {
@@ -433,6 +433,19 @@ export class Match {
           break;
         }
         this.send({ c: 'special', ids: ready });
+        break;
+      }
+      case 'radar': {
+        // Toggle as a group: if any selected radar is on, switch them all off; otherwise all on.
+        const radars = ids.map((id) => w.units.get(id)).filter((u) => !!u && (UNITS[u.type].radarAir > 0 || UNITS[u.type].radarSurf > 0 || matchLoadoutOf(u.type).some((m) => !!(MODULES[m]?.mods?.radarAir || MODULES[m]?.mods?.radarSurf))));
+        if (!radars.length) {
+          audio.play('deny');
+          break;
+        }
+        const on = !radars.some((u) => !(u!.flags & F_DARK));
+        this.send({ c: 'radar', ids: radars.map((u) => u!.id), on });
+        audio.play('order');
+        this.hud.log('EMCON', on ? `Radar on (${radars.length}). Emitting: enemy ESM can hear us.` : `Radar off (${radars.length}). Running silent: eyes and sonar only.`, on ? '' : 'good');
         break;
       }
       case 'counter': {
@@ -812,6 +825,7 @@ export class Match {
       if (e.code === 'KeyX') this.ability('stop');
       if (e.code === 'KeyF') this.ability('special');
       if (e.code === 'KeyC') this.ability('counter');
+      if (e.code === 'KeyG') this.ability('radar');
       if (e.code === 'KeyU') this.enterUnload();
       if (e.code === 'KeyM') this.ability('mines');
       if (e.code === 'KeyR') this.ability('rtb');

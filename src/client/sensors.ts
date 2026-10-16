@@ -2,7 +2,7 @@
 // Mirrors the simulation's sensor ranges: eyes and surface radar, air-search radar, sonar.
 // A ship with a knocked-out radar shows its reduced (35 %) range.
 import { BUILDINGS, UNITS, deriveStats } from '../shared/defs';
-import { F_LANDED } from '../shared/protocol';
+import { F_DARK, F_LANDED } from '../shared/protocol';
 import type { World } from './state';
 import { matchLoadoutOf } from './loadouts';
 
@@ -24,7 +24,7 @@ export function sensorCoverage(w: World): Coverage {
     const def = UNITS[u.type];
     const lo = u.owner === w.me ? matchLoadoutOf(u.type) : def.defaults;
     const st = deriveStats(u.type, w.players[u.owner]?.faction ?? w.myFaction, lo);
-    const radarDown = u.owner === w.me && (w.details.get(u.id)?.[13]?.[2] ?? 0) > 0 ? 0.35 : 1;
+    const radarDown = u.flags & F_DARK ? 0 : u.owner === w.me && (w.details.get(u.id)?.[13]?.[2] ?? 0) > 0 ? 0.35 : 1;
     const near = Math.max(st.radarSurf * radarDown, def.visual);
     if (near > 0) out.surf.push([u.x, u.y, near]);
     if (st.radarAir * radarDown > near) out.air.push([u.x, u.y, st.radarAir * radarDown]);

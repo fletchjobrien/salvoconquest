@@ -22,7 +22,9 @@ export type Command =
   // Faction special ability of the selected ships (doctrine.ts), hotkey F:
   | { c: 'special'; ids: number[] }
   // Countermeasure of the selected units (chaff or smoke), hotkey C:
-  | { c: 'counter'; ids: number[] };
+  | { c: 'counter'; ids: number[] }
+  // Active radar on/off (emission control), hotkey G:
+  | { c: 'radar'; ids: number[]; on: boolean };
 
 export interface LobbySlot {
   slot: number;
@@ -158,6 +160,8 @@ export const F_LOADING = 64;
 export const F_FIRE = 128; // on fire
 export const F_STOPPED = 256; // engine knocked out: dead in the water
 export const F_STUN = 512; // crew stunned: cannot fire
+export const F_PAINTED = 1024; // an enemy radar is tracking this unit right now
+export const F_DARK = 2048; // own radar switched off (emission control)
 
 /** Ship systems that a hit can knock out (WARNO-style critical damage). */
 export type CritPart = 'engine' | 'rudder' | 'radar' | 'weapon' | 'fire' | 'flood' | 'stun';

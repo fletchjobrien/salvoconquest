@@ -18,7 +18,7 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
 | Ctrl + RMB | Move without stopping to fight |
 | WASD / MMB drag / screen edge | Pan · Q/E rotate · wheel zoom |
 | U | Unload troops: a ring shows the landing range, click land inside it (every selected ship with troops lands there) |
-| F / C / M / R / T / X | Ship special · chaff or smoke · drop mines · aircraft return to base · toggle auto-retreat · stop |
+| F / C / G / M / R / T / X | Ship special · chaff or smoke · radar on/off · drop mines · aircraft return to base · toggle auto-retreat · stop |
 | Ctrl+1–9 / 1–9 | Save / recall group (press twice to jump the camera) |
 | Tab / V | Show weapon ranges / sensor view (darkens what you cannot see) |
 | Space · Enter · F1 · Esc | Jump to last alert · chat (online) · field manual · menu |
@@ -86,6 +86,13 @@ The minimap outlines your sensor coverage (surface radar and eyes, air radar, so
 outside your surface picture are always shaded with a light, hatched veil, with a thin line where coverage ends. Press
 **V** (or the SENSORS button above the minimap) for the full sensor view: everything your sensors cannot see goes dark. At most two weather systems are on the map at once. Storms cut radar range and eyesight; fog banks cut eyesight. Submarines are
 invisible until a sonar hears them, and they reveal themselves briefly when they fire.
+
+**Radar on/off (G).** Every unit with a radar (warships, AEW, radar trucks) can switch it off. Radar on: you see
+far, but enemy electronic support measures (ESM) hear your radar out to 1.5× its range and get a rough,
+unidentified position for you (marker only, cannot be targeted). Radar off (tag **DARK**): your unit sees only by
+eye (about 6 km) and sonar, and cannot be heard; your team's other sensors still feed it targets. When an enemy
+radar is tracking one of your units, a soft amber glow breathes behind its marker and the selection panel shows
+**ENEMY RADAR LOCK**.
 
 ![Storm cell and fog bank](docs/weather.png)
 

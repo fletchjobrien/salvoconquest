@@ -33,6 +33,7 @@ import {
   PASSIVE_SUB,
   COUNTER,
   counterOf,
+  ESM,
   PASSIVE_SHIP,
   TORPEDO_VS,
 } from './defs';
@@ -66,6 +67,8 @@ import {
   F_FIRE,
   F_STOPPED,
   F_STUN,
+  F_PAINTED,
+  F_DARK,
   CritPart,
   DamageRow,
   GameEvent,
@@ -191,6 +194,10 @@ export interface Unit {
   cm: number;
   /** When the last countermeasure was used (no refill until it has cleared). */
   cmAt: number;
+  /** Active radar on (default) or switched off for emission control. */
+  radarOn: boolean;
+  /** Last time an enemy radar held this unit in track. */
+  paintedAt: number;
   /** Last enemy to hurt this unit (credited if fire or flooding sinks it), and when. */
   lastHitBy: number;
   lastHitAt: number;
@@ -485,6 +492,8 @@ export class Game {
       spec: { ready: 0, until: 0, on: false },
       cm: counterOf(type) ? 1 : 0,
       cmAt: -999,
+      radarOn: true,
+      paintedAt: -999,
       lastHitBy: -1,
       lastHitAt: -1e9,
       portState: 0,
@@ -612,6 +621,9 @@ export class Game {
         break;
       case 'counter':
         for (const u of own(cmd.ids)) this.useCounter(u);
+        break;
+      case 'radar':
+        for (const u of own(cmd.ids)) if (u.radarAir > 0 || u.radarSurf > 0) u.radarOn = !!cmd.on;
         break;
       case 'rtb':
         // A player RTB ends the mission: land and stay down until given a new order.
@@ -2632,7 +2644,14 @@ export class Game {
 
   private sysFlags(u: Unit): number {
     const s = u.sys;
-    return (s.fire > 0 ? F_FIRE : 0) | (this.speedFactor(u) === 0 ? F_STOPPED : 0) | (s.stun > 0 ? F_STUN : 0);
+    const hasRadar = u.radarAir > 0 || u.radarSurf > 0;
+    return (
+      (s.fire > 0 ? F_FIRE : 0) |
+      (this.speedFactor(u) === 0 ? F_STOPPED : 0) |
+      (s.stun > 0 ? F_STUN : 0) |
+      (this.time - u.paintedAt < 1.2 ? F_PAINTED : 0) |
+      (hasRadar && !u.radarOn ? F_DARK : 0)
+    );
   }
 
   damageRow(u: Unit): DamageRow {
@@ -2778,8 +2797,8 @@ export class Game {
         sensors.push({
           x: u.x,
           y: u.y,
-          air: u.landed ? 0 : u.radarAir * (u.sys.radar > 0 ? 0.35 : 1),
-          surf: u.landed ? 0 : u.radarSurf * (u.sys.radar > 0 ? 0.35 : 1),
+          air: u.landed || !u.radarOn ? 0 : u.radarAir * (u.sys.radar > 0 ? 0.35 : 1),
+          surf: u.landed || !u.radarOn ? 0 : u.radarSurf * (u.sys.radar > 0 ? 0.35 : 1),
           sonar: dom === 'sea' || dom === 'sub' || dom === 'air' ? u.sonar : 0,
           vis: u.visual,
           isUnit: true,
@@ -2815,8 +2834,20 @@ export class Game {
         let q = 0;
         let exact = false;
         let viaSonar = false;
+        let viaEsm = false;
         // Ground units inside a smoke screen are seen only from point-blank range.
         const smoked = dom === 'land' && this.inSmoke(e.x, e.y);
+        // Is an active enemy radar holding this unit? (Its radar warning receiver lights up.)
+        if (dom !== 'sub' && !smoked) {
+          const sig = dom === 'air' ? 1 : dom === 'land' ? 0.45 : Math.sqrt(UNITS[e.type].signature);
+          for (const s of sensors) {
+            const r = (dom === 'air' ? s.air : s.surf * sig) * radMul;
+            if (r > 0 && Math.hypot(s.x - e.x, s.y - e.y) < r) {
+              e.paintedAt = this.time;
+              break;
+            }
+          }
+        }
         for (const s of sensors) {
           const d = Math.hypot(s.x - e.x, s.y - e.y);
           if (d > 70) continue;
@@ -2865,6 +2896,23 @@ export class Game {
             }
           }
         }
+        // ESM: a radar that is switched on gives its unit away well beyond the radar's own range,
+        // as a rough, unidentified position.
+        if (!exact && !smoked && e.radarOn && !e.landed) {
+          const emit = Math.max(e.radarAir, e.radarSurf) * (e.sys.radar > 0 ? 0.35 : 1) * ESM.range;
+          if (emit > 0) {
+            for (const s of sensors) {
+              const d = Math.hypot(s.x - e.x, s.y - e.y);
+              if (d >= emit) continue;
+              const qq = ESM.q * (1 - d / emit);
+              if (qq > q) {
+                q = qq;
+                viaEsm = true;
+                viaSonar = false;
+              }
+            }
+          }
+        }
         if (!exact && q <= 0) continue;
         seen.add(e.id);
         let rec = know.get(e.id);
@@ -2883,7 +2931,7 @@ export class Game {
           rec.ident = 2;
           continue;
         }
-        const maxErr = viaSonar ? 3 : dom === 'air' ? 4 : 5;
+        const maxErr = viaEsm ? ESM.err : viaSonar ? 3 : dom === 'air' ? 4 : 5;
         const err = maxErr * Math.pow(1 - q, 1.4) * (1 + w.storm * 1.2);
         // The error radius eases toward the new value; the marker keeps its offset, so it glides.
         rec.r = rec.r > 50 || force ? err : rec.r + (err - rec.r) * 0.35;
