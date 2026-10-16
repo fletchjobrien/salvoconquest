@@ -23,8 +23,8 @@ function sfxBind(root: HTMLElement) {
 }
 
 const FACTION_DESC: Record<Faction, string> = {
-  coalition: 'Shield and network. Deep SAM magazines, quiet subs, gunfire support and fast carrier sorties. Win the long fight.',
-  union: 'Swarm and strike. Longer-range missiles, saturation salvos, mines, hypersonics and jamming. Win the opening exchange.',
+  coalition: 'US-pattern fleet. Stealthier hulls and aircraft, better radar and sonar, long-reach SM-6 and stealthy NSM missiles, a 16-inch gun battleship, a 5-flight carrier.',
+  union: 'PLAN-pattern fleet. Tougher, faster hulls, supersonic YJ-18 and YJ-12 missiles that outrange the enemy, deep HQ-9 magazines, a missile strike cruiser.',
 };
 
 export function titleScreen(ui: HTMLElement, a: { skirmish(): void; create(): void; join(code: string): void; loadouts(): void; settings(): void }) {

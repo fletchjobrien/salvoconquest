@@ -1,7 +1,6 @@
 // A running match: wires world state, rendering, overlay, HUD, input, audio and the connection.
 import { UNITS, UNIT_TYPES, UnitType, MODULES, UNLOAD_RANGE, unitCost, counterOf } from '../shared/defs';
 import { canDeployAt, rallySite } from '../shared/game';
-import { shipDoctrine } from '../shared/doctrine';
 import { islandAt } from '../shared/map';
 import { weatherStrength } from '../shared/weather';
 import type { Command, GameEvent, ServerMsg, StartInfo } from '../shared/protocol';
@@ -51,7 +50,7 @@ export class Match {
     info: StartInfo,
     readonly ui: HTMLElement,
   ) {
-    freezeForMatch();
+    freezeForMatch(info.players.find((p) => p.id === info.you)?.faction ?? 'coalition');
     this.world = new World(info);
     this.rig = new CameraRig(r.camera);
     this.overlay = new Overlay(document.getElementById('ov') as HTMLCanvasElement);
@@ -418,23 +417,10 @@ export class Match {
     this.hud.log('ORDERS', `Pick a landing point${ships.length > 1 ? ` for ${ships.length} ships` : ''} within ${UNLOAD_RANGE} km — ships close in if needed.`, 'good');
   }
 
-  private ability(a: 'mines' | 'rtb' | 'retreat' | 'stop' | 'siteFactory' | 'refund' | 'special' | 'counter' | 'radar') {
+  private ability(a: 'mines' | 'rtb' | 'retreat' | 'stop' | 'siteFactory' | 'refund' | 'counter' | 'radar') {
     const ids = this.ownSelectedIds();
     const w = this.world;
     switch (a) {
-      case 'special': {
-        const ready = ids.filter((id) => {
-          const u = w.units.get(id);
-          const r = w.details.get(id)?.[14];
-          return u && shipDoctrine(w.myFaction, u.type) && r && r[0] <= 0;
-        });
-        if (!ready.length || w.setup) {
-          audio.play('deny');
-          break;
-        }
-        this.send({ c: 'special', ids: ready });
-        break;
-      }
       case 'radar': {
         // Toggle as a group: if any selected radar is on, switch them all off; otherwise all on.
         const radars = ids.map((id) => w.units.get(id)).filter((u) => !!u && (UNITS[u.type].radarAir > 0 || UNITS[u.type].radarSurf > 0 || matchLoadoutOf(u.type).some((m) => !!(MODULES[m]?.mods?.radarAir || MODULES[m]?.mods?.radarSurf))));
@@ -452,7 +438,7 @@ export class Match {
         // Every selected unit that still has its chaff or smoke fires it.
         const ready = ids.filter((id) => {
           const u = w.units.get(id);
-          return u && counterOf(u.type) && (w.details.get(id)?.[15] ?? 0) > 0 && !(u.flags & F_LANDED);
+          return u && counterOf(u.type) && (w.details.get(id)?.[14] ?? 0) > 0 && !(u.flags & F_LANDED);
         });
         if (!ready.length || w.setup) {
           audio.play('deny');
@@ -563,19 +549,6 @@ export class Match {
         else this.hud.log('CIC', 'Vampire! Missiles inbound!', 'warn');
         this.lastAlert = { x: e.x, y: e.y };
         this.hud.alert();
-        break;
-      }
-      case 'special': {
-        const u = w.units.get(e.id);
-        const sp = u ? shipDoctrine(w.faction(e.o), u.type)?.special : undefined;
-        if (!u || !sp) break;
-        const txt = sp.toggle ? `${sp.name.toUpperCase()} ${e.on ? 'ON' : 'OFF'}` : sp.name.toUpperCase();
-        this.overlay.floater(u.x, u.y, 0.1, txt, e.o === w.me ? '#7dd8ff' : '#ffb36b');
-        this.overlay.shock(u.x, u.y, 0.05, 1.2, e.o === w.me ? '#7dd8ff' : '#ffb36b', 0.9);
-        if (e.o === w.me) {
-          audio.play('order');
-          this.hud.log(unitName(fac, u.type, u.id), `${txt}.`, 'good');
-        } else if (w.teamOf(e.o) !== w.myTeam) this.hud.log('INTEL', `Enemy ${sp.name}!`, 'warn');
         break;
       }
       case 'chaff':
@@ -823,7 +796,6 @@ export class Match {
       if (!ids.length) return;
       if ((e.code === 'Delete' || e.code === 'Backspace') && this.world.setup) this.ability('refund');
       if (e.code === 'KeyX') this.ability('stop');
-      if (e.code === 'KeyF') this.ability('special');
       if (e.code === 'KeyC') this.ability('counter');
       if (e.code === 'KeyG') this.ability('radar');
       if (e.code === 'KeyU') this.enterUnload();

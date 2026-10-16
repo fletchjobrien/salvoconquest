@@ -1,6 +1,6 @@
 // Loadout editor: rotating pixelated 3D preview, drag modules into slots. Defaults are recommended.
 import * as THREE from 'three';
-import { BUILDABLE, MODULES, ModuleDef, SLOT_LABEL, UNITS, UnitType, deriveStats, moduleFits, modulesFor, Faction } from '../../shared/defs';
+import { BUILDABLE, MODULES, ModuleDef, SLOT_LABEL, UNITS, UnitType, deriveStats, moduleFits, modulesFor, unitDef, Faction } from '../../shared/defs';
 import { loadoutOf, setLoadout } from '../loadouts';
 import { makeUnitModel } from '../render/models';
 import { PALETTES } from '../theme';
@@ -40,8 +40,8 @@ export class LoadoutEditor {
         <div class="lo-stats" id="stats"></div>
         <div class="lo-slots" id="slots"></div>
       </div>
-      <div class="lo-mods"><div class="lo-note">★ DEFAULT FITS ARE THE RECOMMENDED SETUP</div><div id="mods"></div>
-        <div class="menu-row" style="margin-top:12px"><button class="btn small" id="reset">Reset unit</button><button class="btn small" id="fac">View: ${this.faction.toUpperCase()}</button><button class="btn small primary" id="close" style="margin-left:auto">Done</button></div></div>
+      <div class="lo-mods"><div class="lo-note">★ DEFAULT FITS ARE THE RECOMMENDED SETUP · EACH FACTION HAS ITS OWN WEAPONS</div><div id="mods"></div>
+        <div class="menu-row" style="margin-top:12px"><button class="btn small" id="reset">Reset unit</button><button class="btn small" id="fac">Faction: ${this.faction.toUpperCase()}</button><button class="btn small primary" id="close" style="margin-left:auto">Done</button></div></div>
     </div></div>`);
     ui.appendChild(this.el);
     const canvas = this.el.querySelector('#pv') as HTMLCanvasElement;
@@ -59,13 +59,13 @@ export class LoadoutEditor {
     this.scene.add(water);
     this.el.querySelector('#close')!.addEventListener('click', () => this.close());
     this.el.querySelector('#reset')!.addEventListener('click', () => {
-      setLoadout(this.type, null);
+      setLoadout(this.type, this.faction, null);
       audio.play('click');
       this.refresh();
     });
     this.el.querySelector('#fac')!.addEventListener('click', (e) => {
       this.faction = this.faction === 'coalition' ? 'union' : 'coalition';
-      (e.target as HTMLElement).textContent = `View: ${this.faction.toUpperCase()}`;
+      (e.target as HTMLElement).textContent = `Faction: ${this.faction.toUpperCase()}`;
       this.select(this.type);
     });
     this.buildList();
@@ -83,7 +83,7 @@ export class LoadoutEditor {
     for (const cat of ['naval', 'ground', 'air'] as const) {
       list.appendChild(h(`<div class="cat">${cat.toUpperCase()}</div>`));
       for (const t of BUILDABLE[cat]) {
-        const changed = loadoutOf(t).join() !== UNITS[t].defaults.join();
+        const changed = loadoutOf(t, this.faction).join() !== unitDef(t, this.faction).defaults.join();
         const it = h(`<div class="it ${t === this.type ? 'sel' : ''}" data-t="${t}"><img src="${symbolDataUrl('own', UNITS[t].domain as SymDomain, glyphFor(t), 9)}">${UNITS[t].short}${changed ? '<span class="mod">CUSTOM</span>' : ''}</div>`);
         it.addEventListener('click', () => {
           audio.play('click');
@@ -113,8 +113,8 @@ export class LoadoutEditor {
 
   private refresh() {
     const t = this.type;
-    const def = UNITS[t];
-    const lo = loadoutOf(t);
+    const def = unitDef(t, this.faction);
+    const lo = loadoutOf(t, this.faction);
     this.el.querySelector('#nm')!.textContent = def.names[this.faction].toUpperCase();
     this.el.querySelector('#ro')!.textContent = def.role;
     const st = deriveStats(t, this.faction, lo);
@@ -144,7 +144,7 @@ export class LoadoutEditor {
       });
       el.addEventListener('dragover', (e) => {
         const id = (e.dataTransfer?.types.includes('text/mod') && this.dragging) || '';
-        if (id && moduleFits(id, kind)) {
+        if (id && moduleFits(id, kind, this.faction)) {
           e.preventDefault();
           el.classList.add('drop');
         }
@@ -165,13 +165,14 @@ export class LoadoutEditor {
 
   private renderMods() {
     const t = this.type;
-    const kind = UNITS[t].slots[this.slot];
+    const def = unitDef(t, this.faction);
+    const kind = def.slots[this.slot];
     const box = this.el.querySelector('#mods')!;
     box.innerHTML = `<div class="label">${kind ? SLOT_LABEL[kind] : ''} — click or drag</div>`;
-    const mods = modulesFor(t).sort((a, b) => Number(moduleFits(b.id, kind)) - Number(moduleFits(a.id, kind)));
+    const mods = modulesFor(t, this.faction).sort((a, b) => Number(moduleFits(b.id, kind, this.faction)) - Number(moduleFits(a.id, kind, this.faction)));
     for (const m of mods) {
-      const fits = moduleFits(m.id, kind);
-      const isDefault = UNITS[t].defaults[this.slot] === m.id;
+      const fits = moduleFits(m.id, kind, this.faction);
+      const isDefault = def.defaults[this.slot] === m.id;
       const el = h(`<div class="lo-mod ${fits ? '' : 'na'}" draggable="true"><div class="h">${m.name}<span>${isDefault ? '★ DEFAULT' : m.slots.map((s) => SLOT_LABEL[s]).join(' / ')}</span></div><div class="d">${m.desc}</div>${statLine(m)}</div>`);
       el.addEventListener('click', () => {
         if (fits) this.assign(this.slot, m.id);
@@ -188,14 +189,14 @@ export class LoadoutEditor {
   }
 
   private assign(i: number, id: string) {
-    const kind = UNITS[this.type].slots[i];
-    if (!moduleFits(id, kind)) {
+    const kind = unitDef(this.type, this.faction).slots[i];
+    if (!moduleFits(id, kind, this.faction)) {
       audio.play('deny');
       return;
     }
-    const lo = loadoutOf(this.type);
+    const lo = loadoutOf(this.type, this.faction);
     lo[i] = id;
-    setLoadout(this.type, lo);
+    setLoadout(this.type, this.faction, lo);
     audio.play('order');
     this.slot = i;
     this.buildList();
@@ -234,6 +235,6 @@ function statLine(m: ModuleDef): string {
     .filter(([, v]) => (v ?? 0) > 1)
     .map(([k, v]) => `${k.toUpperCase()} ${v}`)
     .join(' · ');
-  const parts = [`${m.range ?? 0} km`, dmg, m.ammo && m.ammo > 0 ? `${m.ammo} rds` : '∞', m.intercept ? `intercept ${Math.round(m.intercept * 100)}%` : ''].filter(Boolean);
+  const parts = [`${m.range ?? 0} km`, dmg, m.ammo && m.ammo > 0 ? `${m.ammo} rds` : '∞', m.intercept ? `intercept ${Math.round(m.intercept * 100)}%` : '', m.evade ? `${Math.round((1 - m.evade) * 100)}% harder to intercept` : ''].filter(Boolean);
   return `<div class="st">${parts.join(' · ')}</div>`;
 }

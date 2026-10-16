@@ -1,7 +1,7 @@
 // Our side's sensor coverage, for the minimap outlines and the sensor view (V).
 // Mirrors the simulation's sensor ranges: eyes and surface radar, air-search radar, sonar.
 // A ship with a knocked-out radar shows its reduced (35 %) range.
-import { BUILDINGS, UNITS, deriveStats } from '../shared/defs';
+import { BUILDINGS, UNITS, deriveStats, unitDef } from '../shared/defs';
 import { F_DARK, F_LANDED } from '../shared/protocol';
 import type { World } from './state';
 import { matchLoadoutOf } from './loadouts';
@@ -22,10 +22,11 @@ export function sensorCoverage(w: World): Coverage {
   for (const u of w.units.values()) {
     if (w.teamOf(u.owner) !== w.myTeam || u.flags & F_LANDED) continue;
     const def = UNITS[u.type];
-    const lo = u.owner === w.me ? matchLoadoutOf(u.type) : def.defaults;
-    const st = deriveStats(u.type, w.players[u.owner]?.faction ?? w.myFaction, lo);
+    const fac = w.players[u.owner]?.faction ?? w.myFaction;
+    const lo = u.owner === w.me ? matchLoadoutOf(u.type) : unitDef(u.type, fac).defaults;
+    const st = deriveStats(u.type, fac, lo);
     const radarDown = u.flags & F_DARK ? 0 : u.owner === w.me && (w.details.get(u.id)?.[13]?.[2] ?? 0) > 0 ? 0.35 : 1;
-    const near = Math.max(st.radarSurf * radarDown, def.visual);
+    const near = Math.max(st.radarSurf * radarDown, st.visual);
     if (near > 0) out.surf.push([u.x, u.y, near]);
     if (st.radarAir * radarDown > near) out.air.push([u.x, u.y, st.radarAir * radarDown]);
     if (st.sonar > 0 && def.domain !== 'land') out.sonar.push([u.x, u.y, st.sonar]);

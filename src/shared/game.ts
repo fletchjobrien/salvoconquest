@@ -28,7 +28,7 @@ import {
   unitBuildTime,
   unitCost,
   ProjKind,
-  moduleFor,
+  unitDef,
   deckCap,
   PASSIVE_SUB,
   COUNTER,
@@ -37,7 +37,6 @@ import {
   PASSIVE_SHIP,
   TORPEDO_VS,
 } from './defs';
-import { shipDoctrine, SpecialDef, SpecialId } from './doctrine';
 import {
   GameMap,
   Site,
@@ -188,8 +187,9 @@ export interface Unit {
   stillFor: number;
   /** Critical damage to ship systems (seconds left); see CRIT in defs.ts. */
   sys: ShipSystems;
-  /** Faction special ability (doctrine.ts): usable again at `ready`, active until `until`, toggle state. */
-  spec: { ready: number; until: number; on: boolean };
+  /** Hull handling and radar signature of this faction's version of the type. */
+  turnRate: number;
+  sig: number;
   /** Countermeasure charges left (chaff for warships and aircraft, smoke for ground units). */
   cm: number;
   /** When the last countermeasure was used (no refill until it has cleared). */
@@ -245,9 +245,8 @@ export interface Projectile {
   hostileSeen: boolean;
   /** Closest approach so far (SAMs). */
   best?: number;
-  /** Interceptor bonus kill chance (Aegis Surge); hypersonic missiles are half as easy to stop. */
-  bonus?: number;
-  hard?: boolean;
+  /** Interceptors kill it this much less often (from the missile's module). */
+  evade?: number;
   /** Missile arc: launch altitude, apex height above the launch-to-target line, distance flown. */
   arc?: { a0: number; apex: number; flown: number; f: number };
   /** Expected damage reserved on a unit (anti-overkill); released when the projectile ends. */
@@ -325,6 +324,11 @@ export interface Weather {
 
 const DOMAIN_IDX = { sea: 0, sub: 1, air: 2, land: 3 } as const;
 
+/** Radar range factor against an aircraft: stealth fighters are seen late, big AEW planes early. */
+function airSig(sig: number): number {
+  return Math.max(0.6, Math.min(1.4, Math.sqrt(sig / 0.5)));
+}
+
 export class Game {
   map: GameMap;
   theme: Theme;
@@ -367,7 +371,7 @@ export class Game {
     }
     players.forEach((p, i) => {
       const loadouts: Record<string, string[]> = {};
-      for (const t of UNIT_TYPES) loadouts[t] = sanitizeLoadout(t, p.loadouts?.[t]);
+      for (const t of UNIT_TYPES) loadouts[t] = sanitizeLoadout(t, p.loadouts?.[t], p.faction);
       this.players.push({
         id: i,
         name: p.name,
@@ -437,14 +441,14 @@ export class Game {
   }
 
   spawn(owner: number, type: UnitType, x: number, y: number): Unit {
-    const def = UNITS[type];
     const p = this.players[owner];
+    const def = unitDef(type, p.faction);
     const lo = type === 'merchant' || type === 'lander' ? [] : p.loadouts[type] ?? def.defaults;
     const st = deriveStats(type, p.faction, lo);
     const weapons: Weapon[] = [];
     for (const id of lo) {
       const m = MODULES[id];
-      if (m?.proj) weapons.push(mkWeapon(moduleFor(p.faction, type, m)));
+      if (m?.proj) weapons.push(mkWeapon(m));
     }
     const maxHp = st.hp;
     const u: Unit = {
@@ -464,7 +468,9 @@ export class Game {
       radarAir: st.radarAir,
       radarSurf: st.radarSurf,
       sonar: st.sonar,
-      visual: def.visual,
+      visual: st.visual,
+      turnRate: st.turn,
+      sig: st.signature,
       ecm: st.ecm,
       quiet: st.quiet,
       holdCap: st.hold,
@@ -489,7 +495,6 @@ export class Game {
       stillFor: 0,
       pendingDmg: 0,
       sys: newSystems(),
-      spec: { ready: 0, until: 0, on: false },
       cm: counterOf(type) ? 1 : 0,
       cmAt: -999,
       radarOn: true,
@@ -616,9 +621,6 @@ export class Game {
       case 'mines':
         for (const u of own(cmd.ids)) this.dropMines(u);
         break;
-      case 'special':
-        for (const u of own(cmd.ids)) this.useSpecial(u);
-        break;
       case 'counter':
         for (const u of own(cmd.ids)) this.useCounter(u);
         break;
@@ -744,19 +746,6 @@ export class Game {
     }
   }
 
-  // ------------------------------------------------------------------ faction specials
-
-  specialOf(u: Unit): SpecialDef | null {
-    return shipDoctrine(this.players[u.owner].faction, u.type)?.special ?? null;
-  }
-
-  specialActive(u: Unit, id: SpecialId): boolean {
-    const sp = this.specialOf(u);
-    if (!sp || sp.id !== id) return false;
-    return sp.toggle ? u.spec.on : u.spec.until > this.time;
-  }
-
-  /** Activate (or toggle) a ship's faction special if it is ready. */
   /** Fire the unit's countermeasure: chaff (warships, aircraft) or smoke (ground units). One charge. */
   useCounter(u: Unit) {
     const kind = counterOf(u.type);
@@ -791,7 +780,7 @@ export class Game {
           if (p.dead || p.chaffed || p.target !== c.unit || (p.kind !== 'missile' && p.kind !== 'sam')) continue;
           if (Math.hypot(p.x - c.x, p.y - c.y) > COUNTER.chaffRange) continue;
           p.chaffed = true;
-          if (this.rng.next() < (p.hard ? COUNTER.chaffHard : COUNTER.chaffChance)) {
+          if (this.rng.next() < ((p.evade ?? 1) < 0.75 ? COUNTER.chaffHard : COUNTER.chaffChance)) {
             p.target = -1;
             p.seeking = false;
             p.tx = c.x;
@@ -813,42 +802,6 @@ export class Game {
       }
     }
     if (this.smokes.length) this.smokes = this.smokes.filter((m) => m.until > this.time);
-  }
-
-  useSpecial(u: Unit) {
-    const sp = this.specialOf(u);
-    if (!sp || u.dead || u.inside >= 0 || this.time < u.spec.ready) return;
-    u.spec.ready = this.time + sp.cooldown;
-    if (sp.toggle) u.spec.on = !u.spec.on;
-    else u.spec.until = this.time + sp.duration;
-    if (sp.id === 'minefield') {
-      for (let i = 0; i < 4; i++) {
-        const a = u.heading + Math.PI + (i - 1.5) * 0.7;
-        const r = 0.45 + this.rng.range(0, 0.3);
-        this.mines.push({ id: this.nextId++, owner: u.owner, team: u.team, x: u.x + Math.cos(a) * r, y: u.y + Math.sin(a) * r, armAt: this.time + 4 });
-      }
-      this.emit({ k: 'mine', x: u.x, y: u.y }, u.x, u.y, u.team);
-    }
-    if (sp.id === 'surge') {
-      // Every flight on this deck is turned around at once; those aloft are topped up.
-      for (const a of this.units.values()) {
-        if (a.dead || !a.base || !('unit' in a.base) || a.base.unit !== u.id) continue;
-        a.fuel = a.fuelMax;
-        a.cm = 1;
-        for (const w of a.weapons) w.ammo = w.max;
-        if (a.landed) a.rearm = 0;
-      }
-    }
-    this.emit({ k: 'special', id: u.id, s: sp.id, o: u.owner, on: sp.toggle ? u.spec.on : true }, u.x, u.y);
-  }
-
-  /** Is a ship covered by one of its side's Electronic Screen carriers (8 km)? */
-  private screened(t: Unit): boolean {
-    for (const c of this.units.values()) {
-      if (c.dead || c.team !== t.team || c.type !== 'carrier') continue;
-      if (Math.hypot(c.x - t.x, c.y - t.y) < 8 && this.specialActive(c, 'screen')) return true;
-    }
-    return false;
   }
 
   private dropMines(u: Unit) {
@@ -1743,10 +1696,6 @@ export class Game {
       u.speed = 0;
       u.alt = 0;
       u.rearm -= dt;
-      if (u.base && 'unit' in u.base) {
-        const c = this.units.get(u.base.unit);
-        if (c && this.specialActive(c, 'surge')) u.rearm = 0;
-      }
       u.hp = Math.min(u.maxHp, u.hp + 2 * dt);
       if (u.rearm <= 0) {
         for (const w of u.weapons) w.ammo = w.max;
@@ -1875,9 +1824,8 @@ export class Game {
   }
 
   private flyToward(u: Unit, x: number, y: number, dt: number) {
-    const def = UNITS[u.type];
     const want = Math.atan2(y - u.y, x - u.x);
-    u.heading = turnToward(u.heading, want, def.turn * dt);
+    u.heading = turnToward(u.heading, want, u.turnRate * dt);
     u.speed += (u.maxSpeed - u.speed) * Math.min(1, dt * 0.8);
   }
 
@@ -1961,13 +1909,13 @@ export class Game {
       const want = Math.atan2(target.y - u.y, target.x - u.x);
       const diff = Math.abs(angDiff(u.heading, want));
       if (dom === 'land') {
-        u.heading = turnToward(u.heading, want, def.turn * dt);
+        u.heading = turnToward(u.heading, want, u.turnRate * dt);
         u.speed = u.maxSpeed;
       } else {
         // Jammed steering turns at a quarter rate; engine and flooding damage cut speed.
-        u.heading = turnToward(u.heading, want, def.turn * (u.sys.rudder > 0 ? 0.25 : 1) * dt);
+        u.heading = turnToward(u.heading, want, u.turnRate * (u.sys.rudder > 0 ? 0.25 : 1) * dt);
         const dEnd = Math.hypot(target.x - u.x, target.y - u.y) + (path!.length > 1 ? 5 : 0);
-        let vmax = u.maxSpeed * this.speedFactor(u) * wMul * (diff > 1 ? 0.45 : 1) * (this.specialActive(u, 'silent') ? 0.5 : 1);
+        let vmax = u.maxSpeed * this.speedFactor(u) * wMul * (diff > 1 ? 0.45 : 1);
         vmax = Math.min(vmax, Math.max(0.05, dEnd * 0.35));
         if (this.speedFactor(u) === 0) vmax = 0;
         const acc = u.maxSpeed * 0.35;
@@ -2114,14 +2062,9 @@ export class Game {
     }
     for (const sh of shooters) {
       const sys = sh.unit?.sys;
-      const su = sh.unit;
-      const aegis = !!su && this.specialActive(su, 'aegis');
-      const gunfire = !!su && this.specialActive(su, 'gunfire');
       for (let wi = 0; wi < sh.weapons.length; wi++) {
         const w = sh.weapons[wi];
-        // Specials speed up reloading: Aegis for SAMs, gunfire support for the main guns.
-        const fast = (aegis && w.mod.proj === 'sam') || (gunfire && w.mod.proj === 'shell' && w.mod.slots.includes('heavy'));
-        if (w.cd > 0) w.cd -= dt * (fast ? 2 : 1);
+        if (w.cd > 0) w.cd -= dt;
         if (w.cd > 0 || w.mod.ability) continue;
         // Stunned crews hold fire; a knocked-out mount is silent until repaired.
         if (sys && (sys.stun > 0 || sys.weaponOut === wi)) continue;
@@ -2178,20 +2121,17 @@ export class Game {
     if (sh.unit) sh.unit.firingUntil = this.time + 1;
     if (w.mod.proj === 'bullet') {
       this.emit({ k: 'fire', id: sh.unit?.id ?? 0, m: w.mod.id, x: sh.x, y: sh.y, tx: m.x, ty: m.y, a: m.alt }, sh.x, sh.y);
-      if (this.rng.next() < (w.mod.intercept ?? 0) * (m.hard ? 0.65 : 1)) {
+      if (this.rng.next() < (w.mod.intercept ?? 0) * (m.evade ?? 1)) {
         m.dead = true;
         this.emit({ k: 'intercept', x: m.x, y: m.y, a: m.alt }, m.x, m.y);
       }
       return;
     }
-    const q = this.launchProj(sh, w, -2 - m.id, m.x, m.y);
-    if (sh.unit && this.specialActive(sh.unit, 'aegis')) q.bonus = 0.2;
+    this.launchProj(sh, w, -2 - m.id, m.x, m.y);
   }
 
-  /** Weapon range, including Naval Gunfire Support (+4 km for the main guns). */
-  private rangeOf(u: Unit | null, w: Weapon): number {
-    const r = w.mod.range ?? 0;
-    return u && w.mod.proj === 'shell' && w.mod.slots.includes('heavy') && this.specialActive(u, 'gunfire') ? r + 4 : r;
+  private rangeOf(_u: Unit | null, w: Weapon): number {
+    return w.mod.range ?? 0;
   }
 
   private pickTarget(sh: { x: number; y: number; team: number; unit: Unit | null }, w: Weapon): { unit: Unit; x: number; y: number; exact: boolean } | null {
@@ -2200,7 +2140,6 @@ export class Game {
     const range = this.rangeOf(sh.unit, w);
     const dmg = w.mod.dmg ?? {};
     const forced = sh.unit?.order.k === 'attack' ? sh.unit.order.target : -1;
-    const salvo = !!sh.unit && this.specialActive(sh.unit, 'saturation');
     let best: { unit: Unit; x: number; y: number; exact: boolean } | null = null;
     let bs = 1e9;
     for (const [id, k] of know) {
@@ -2225,7 +2164,7 @@ export class Game {
       if (w.mod.proj === 'sam' && this.samsAt(id) >= 2) continue;
       // Don't waste limited, slow munitions on a target that is already as good as dead.
       // Guns are not held back: their rounds are free and arrive in seconds.
-      if (OVERKILL_CHECK.has(w.mod.proj!) && t.pendingDmg >= t.hp * 1.2 && !(salvo && w.mod.proj === 'missile')) continue;
+      if (OVERKILL_CHECK.has(w.mod.proj!) && t.pendingDmg >= t.hp * 1.2) continue;
       // Ground small arms only fight on the same island.
       if (sh.unit && UNITS[sh.unit.type].domain === 'land' && cls === 'land' && islandAt(this.map, t.x, t.y) !== islandAt(this.map, sh.x, sh.y)) continue;
       let score = d / range;
@@ -2243,8 +2182,6 @@ export class Game {
 
   private fire(sh: { x: number; y: number; alt: number; team: number; owner: number; unit: Unit | null; dmgMul: number }, w: Weapon, t: Unit, tx: number, ty: number, exact: boolean) {
     w.cd = (w.mod.cooldown ?? 1) * (0.9 + this.rng.next() * 0.2);
-    // Saturation Salvo: anti-ship launchers ripple-fire.
-    if (sh.unit && w.mod.proj === 'missile' && this.specialActive(sh.unit, 'saturation')) w.cd = Math.min(w.cd, 0.6);
     if (w.max >= 0) w.ammo--;
     const u = sh.unit;
     if (u) {
@@ -2270,12 +2207,8 @@ export class Game {
     }
     const p = this.launchProj(sh, w, exact ? t.id : -1, ax, ay);
     if (exact || w.mod.proj === 'missile' || w.mod.proj === 'sam') p.target = t.id;
-    // Hypersonic Strike: 1.7 times as fast, 35% harder to intercept.
-    if (u && w.mod.proj === 'missile' && this.specialActive(u, 'hypersonic')) {
-      p.speed *= 1.7;
-      p.hard = true;
-      p.life = p.life / 1.7 + 2;
-    }
+    // Stealthy or supersonic missiles are harder to intercept.
+    if (w.mod.evade) p.evade = w.mod.evade;
     p.seeking = !exact;
     p.dmgMul = sh.dmgMul;
     if (OVERKILL_CHECK.has(w.mod.proj!)) {
@@ -2478,7 +2411,7 @@ export class Game {
     p.dead = true;
     if (p.target <= -2) {
       const m = this.projs.find((q) => q.id === -2 - p.target);
-      if (m && !m.dead && this.rng.next() < ((p.mod.intercept ?? 0.5) + (p.bonus ?? 0)) * (m.hard ? 0.65 : 1)) {
+      if (m && !m.dead && this.rng.next() < (p.mod.intercept ?? 0.5) * (m.evade ?? 1)) {
         m.dead = true;
         this.emit({ k: 'intercept', x: m.x, y: m.y, a: m.alt }, m.x, m.y);
       } else this.emit({ k: 'boom', x: p.x, y: p.y, s: 0.2, w: false, a: p.alt }, p.x, p.y);
@@ -2513,7 +2446,7 @@ export class Game {
       mul = TORPEDO_VS[t.type]?.dmg ?? 1;
       chance *= TORPEDO_VS[t.type]?.hit ?? 1;
     }
-    if (p.kind === 'missile') chance *= (1 - t.ecm) * (this.screened(t) ? 0.6 : 1);
+    if (p.kind === 'missile') chance *= (1 - t.ecm);
     if (UNITS[t.type].domain === 'land' && this.inSmoke(t.x, t.y)) chance *= COUNTER.smokeHit;
     if (p.kind === 'sam' && cls === 'air') chance *= 1 - t.ecm * 0.5;
     const w = this.weatherAt(t.x, t.y);
@@ -2839,7 +2772,7 @@ export class Game {
         const smoked = dom === 'land' && this.inSmoke(e.x, e.y);
         // Is an active enemy radar holding this unit? (Its radar warning receiver lights up.)
         if (dom !== 'sub' && !smoked) {
-          const sig = dom === 'air' ? 1 : dom === 'land' ? 0.45 : Math.sqrt(UNITS[e.type].signature);
+          const sig = dom === 'air' ? airSig(e.sig) : dom === 'land' ? 0.45 : Math.sqrt(e.sig);
           for (const s of sensors) {
             const r = (dom === 'air' ? s.air : s.surf * sig) * radMul;
             if (r > 0 && Math.hypot(s.x - e.x, s.y - e.y) < r) {
@@ -2857,12 +2790,12 @@ export class Game {
             break;
           }
           let R = 0;
-          if (dom === 'air') R = s.air * radMul;
+          if (dom === 'air') R = s.air * radMul * airSig(e.sig);
           else if (dom === 'sea') {
-            R = s.surf * radMul * Math.sqrt(UNITS[e.type].signature);
+            R = s.surf * radMul * Math.sqrt(e.sig);
             // Passive sonar hears ship propellers. A quiet submarine hears far; a surface ship's
             // own noise limits its hull sonar. This is how a submarine finds its prey.
-            const hear = s.sonar * (s.sub ? PASSIVE_SUB : PASSIVE_SHIP) * Math.sqrt(UNITS[e.type].signature) * (e.speed > e.maxSpeed * 0.7 ? 1.25 : 1);
+            const hear = s.sonar * (s.sub ? PASSIVE_SUB : PASSIVE_SHIP) * Math.sqrt(e.sig) * (e.speed > e.maxSpeed * 0.7 ? 1.25 : 1);
             if (hear > R && d < hear) {
               const qq = 1 - d / hear;
               if (qq > q) {
@@ -2873,7 +2806,7 @@ export class Game {
             }
           } else if (dom === 'land') R = s.surf * radMul * 0.45;
           else if (dom === 'sub') {
-            R = s.sonar * e.quiet * (e.speed > e.maxSpeed * 0.7 ? 1.4 : 1) * (this.specialActive(e, 'silent') ? 0.5 : 1);
+            R = s.sonar * e.quiet * (e.speed > e.maxSpeed * 0.7 ? 1.4 : 1);
             if (d < R * 0.35) {
               exact = true;
               break;
@@ -3011,7 +2944,6 @@ export class Game {
             ...this.airDetail(x),
             UNITS[x.type].deck ? this.deckIds(x) : [],
             this.damageRow(x),
-            [Math.max(0, Math.ceil(x.spec.ready - this.time)), Math.max(0, Math.ceil(x.spec.until - this.time)), x.spec.on ? 1 : 0],
             x.cm,
           ]);
         }

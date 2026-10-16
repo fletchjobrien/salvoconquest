@@ -105,7 +105,7 @@ function showSkirmish() {
         const f = settings.teams === '2v2' && i === 1 ? settings.faction : i % 2 === 0 ? other : FACTIONS[Math.floor(Math.random() * 2)];
         bots.push({ faction: f });
       }
-      const lc = new LocalConn({ name: settings.name, faction: settings.faction, theme: settings.theme, bots, teams: settings.teams, loadouts: getLoadouts() });
+      const lc = new LocalConn({ name: settings.name, faction: settings.faction, theme: settings.theme, bots, teams: settings.teams, loadouts: getLoadouts(settings.faction) });
       conn = lc;
       lc.onMessage = onServer;
       lc.start();
@@ -142,7 +142,7 @@ function joinRoom(code: string) {
       if (err) err.textContent = reason;
     }
   };
-  oc.send({ t: 'hello', name: settings.name, faction: settings.faction, loadouts: getLoadouts() });
+  oc.send({ t: 'hello', name: settings.name, faction: settings.faction, loadouts: getLoadouts(settings.faction) });
   clearUi();
   lobby = new LobbyScreen(ui, {
     send: (m) => oc.send(m),

@@ -19,8 +19,6 @@ export type Command =
   | { c: 'deploy'; type: UnitType; x: number; y: number }
   | { c: 'undeploy'; ids: number[] }
   | { c: 'ready'; on: boolean }
-  // Faction special ability of the selected ships (doctrine.ts), hotkey F:
-  | { c: 'special'; ids: number[] }
   // Countermeasure of the selected units (chaff or smoke), hotkey C:
   | { c: 'counter'; ids: number[] }
   // Active radar on/off (emission control), hotkey G:
@@ -72,11 +70,9 @@ export type SiteRow = [number, number, number, number];
 /**
  * Own-unit details: id, ammo, cargo ids, fuel %, order code, order x, order y, flags, type index,
  * then (aircraft) range left before bingo in km, nearest base x, y, (carriers) the deck: ids of
- * flights based on it, (ships) the damage state, the faction special, and countermeasure charges left.
+ * flights based on it, (ships) the damage state, and countermeasure charges left.
  */
-export type DetailRow = [number, number[], number[], number, number, number, number, number, number, number, number, number, number[], DamageRow, SpecialRow, number];
-/** Faction special: seconds until usable, seconds still active, toggle on (1/0). */
-export type SpecialRow = [number, number, number];
+export type DetailRow = [number, number[], number[], number, number, number, number, number, number, number, number, number, number[], DamageRow, number];
 /** Seconds left on each damaged system: engine, rudder, radar, fire, flood, stun, disabled weapon index (-1 none), weapon. */
 export type DamageRow = [number, number, number, number, number, number, number, number];
 /** Weather cell: kind (0 storm, 1 fog), x, y, radius, intensity 0-100. */
@@ -132,7 +128,6 @@ export type GameEvent =
   | { k: 'defeat'; o: number }
   | { k: 'crit'; id: number; part: CritPart; o: number; m?: string }
   | { k: 'battle' }
-  | { k: 'special'; id: number; s: string; o: number; on: boolean }
   | { k: 'chaff'; id: number; x: number; y: number; a: number }
   | { k: 'smoke'; id: number; x: number; y: number; r: number }
   | { k: 'msg'; text: string; o?: number };

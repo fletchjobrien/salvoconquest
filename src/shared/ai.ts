@@ -48,59 +48,6 @@ export class Bot {
     this.fleet();
     this.air();
     this.groundIdle();
-    this.specials();
-  }
-
-  /** Use faction specials when the situation calls for them (see doctrine.ts). */
-  private specials() {
-    const g = this.game;
-    const team = g.players[this.pid].team;
-    const know = g.knowledge.get(team);
-    if (!know) return;
-    // Closest identified enemy ship to a point.
-    const nearestShip = (x: number, y: number) => {
-      let bd = 1e9;
-      for (const [id, k] of know) {
-        const t = g.units.get(id);
-        if (!t || t.dead || k.ident < 1) continue;
-        const dom = UNITS[t.type].domain;
-        if (dom !== 'sea' && dom !== 'sub') continue;
-        bd = Math.min(bd, Math.hypot(k.x - x, k.y - y));
-      }
-      return bd;
-    };
-    const missileInbound = (x: number, y: number, r: number) => g.projs.some((p) => !p.dead && p.kind === 'missile' && p.team !== team && Math.hypot(p.x - x, p.y - y) < r);
-    for (const u of this.mine()) {
-      const sp = g.specialOf(u);
-      if (!sp || u.inside >= 0 || g.time < u.spec.ready) continue;
-      let use = false;
-      switch (sp.id) {
-        case 'aegis':
-        case 'screen':
-          use = missileInbound(u.x, u.y, 20);
-          break;
-        case 'silent':
-          // Go quiet near the enemy, speak up again when clear.
-          use = u.spec.on ? nearestShip(u.x, u.y) > 25 : nearestShip(u.x, u.y) < 20;
-          break;
-        case 'gunfire':
-          use = nearestShip(u.x, u.y) < 18 || g.units.get((u.order as { target?: number }).target ?? -1) !== undefined;
-          break;
-        case 'surge':
-          use = [...g.units.values()].some((a) => !a.dead && a.landed && a.base && 'unit' in a.base && a.base.unit === u.id);
-          break;
-        case 'saturation':
-          use = nearestShip(u.x, u.y) < 34;
-          break;
-        case 'hypersonic':
-          use = nearestShip(u.x, u.y) < 28;
-          break;
-        case 'minefield':
-          use = nearestShip(u.x, u.y) < 12;
-          break;
-      }
-      if (use) g.command(this.pid, { c: 'special', ids: [u.id] });
-    }
   }
 
   /** Deployment phase: buy a balanced opening force (keeping a reserve), place it, ready up. */

@@ -18,7 +18,7 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
 | Ctrl + RMB | Move without stopping to fight |
 | WASD / MMB drag / screen edge | Pan · Q/E rotate · wheel zoom |
 | U | Unload troops: a ring shows the landing range, click land inside it (every selected ship with troops lands there) |
-| F / C / G / M / R / T / X | Ship special · chaff or smoke · radar on/off · drop mines · aircraft return to base · toggle auto-retreat · stop |
+| C / G / M / R / T / X | Chaff or smoke · radar on/off · drop mines · aircraft return to base · toggle auto-retreat · stop |
 | Ctrl+1–9 / 1–9 | Save / recall group (press twice to jump the camera) |
 | Tab / V | Show weapon ranges / sensor view (darkens what you cannot see) |
 | Space · Enter · F1 · Esc | Jump to last alert · chat (online) · field manual · menu |
@@ -67,7 +67,7 @@ duels per pair, both factions):
 | Ship | Beats | Loses to | Why |
 |---|---|---|---|
 | Submarine ($1,140) | Battleship, carrier | Destroyer | Passive sonar hears ships at 1.3× its sonar range, so it finds them first and stays hidden. Heavy torpedoes explode under the keel: ×1.6 damage to battleships and carriers. Those two ships are nearly deaf to subs (sonar 2 km) and have no anti-sub weapons. |
-| Destroyer ($1,200) | Submarine | Battleship | Bow and towed sonar (18 km) and ASW rockets that reach 12 km, further than a sub's 9 km torpedoes. Towed torpedo decoys halve torpedo hits. |
+| Destroyer ($1,200) | Submarine | Battleship | Bow and towed sonar (15–18 km) and ASW rockets that reach 11–12 km, further than a sub's 9.5–10 km torpedoes. Towed torpedo decoys halve torpedo hits. |
 | Battleship ($2,700) | Destroyer | Submarine | 16 km main guns, a thick hull and its own air defence. Two destroyers (about the same price) are an even fight. |
 
 Escort battleships and carriers with destroyers. Hunt destroyers with battleships and aircraft.
@@ -98,15 +98,22 @@ radar is tracking one of your units, a soft amber glow breathes behind its marke
 
 ### Factions
 
-Both navies are equal in price, build time, hull, sensors and damage. They differ in how their warships
-fight: every class has a faction **trait** (passive) and a **special** (active, key **F**; see `src/shared/doctrine.ts`).
+Both sides pay the same price and build time for each unit. There are no special abilities: the factions differ
+in **hull stats** and in **which weapons they can fit** (each side has its own missiles, SAMs, guns and torpedoes;
+utility kit such as CIWS, ECM, mines, sonar and armour is shared). See `HULLS` and `MODULES` in `src/shared/defs.ts`.
 
-| Ship | Atlantic Coalition — shield and network | Pacific Union — swarm and strike |
+| Unit | Atlantic Coalition (US pattern) | Pacific Union (PLAN / Russian pattern) |
 |---|---|---|
-| Destroyer | **Aegis Surge** (15 s): SAMs reload twice as fast, +20% kill chance. Trait: 12 SAMs per launcher | **Saturation Salvo** (12 s): anti-ship missiles ripple-fire. Trait: anti-ship missiles reach 36 km, 6 per launcher |
-| Submarine | **Silent Running** (on/off): half as easy to hear, half speed. Trait: sonar ×1.3 | **Minefield**: lays 4 mines at once. Trait: 4 tube-launched anti-ship missiles |
-| Battleship | **Naval Gunfire Support** (20 s): main guns fire twice as fast, +4 km. Trait: hull ×1.2 | **Hypersonic Strike** (30 s): anti-ship missiles 1.7× faster, 35% harder to stop. Trait: 6 anti-ship missiles per launcher |
-| Carrier | **Surge Sorties** (30 s): its flights rearm and refuel instantly. Trait: 5 flights on deck | **Electronic Screen** (25 s): enemy missiles at ships within 8 km hit 40% less often. Trait: built-in jamming |
+| Destroyer | Hull 100, sonar 18 km, air radar 24 km, radar signature 1.0. Mk 45 5-inch (10 km), **NSM** (30 km, stealthy: 30% harder to intercept), **SM-6** (24 km, best interceptor), VL-ASROC (12 km) | Hull 102, sonar 15 km, air radar 22 km, signature 1.15. 130mm gun (12 km), **YJ-18** (31 km, supersonic sprint: 25% harder to intercept), **HQ-9B** (20 km, 10 rounds), CY-5 ASW (11 km) |
+| Submarine | Hull 70, quieter hull (noise 80%), sonar 12 km. Mk 48 ADCAP (10 km, wide seeker), Sub Harpoon (24 km) | Hull 75, faster (0.28), sonar 10 km. Yu-6 (9.5 km, bigger warhead), sub-launched YJ-18 (26 km, supersonic) |
+| Battleship | Iowa: hull 265, two **16-inch triple turrets** (17 km, never run dry), NSM, SM-6 | Kirov-type: hull 230, faster, better radar. **Heavy anti-ship missiles** (36 km, 55 damage, 3 rounds, hard to stop), AK-130 twin gun (13 km), YJ-18, HQ-9B |
+| Carrier | Ford: hull 210, **5 flights** on deck, SM-6 | Hull 200, 4 flights, bigger radar (32 km), HQ-9B |
+| Infantry | ACV: hull 60, faster, Javelin (stronger) | ZBD-05: hull 70, slower, HJ-12 (longer reach) |
+| Coastal / SAM | NMESIS (NSM, 28 km, stealthy), Patriot PAC-3 (16 km, best vs missiles) | YJ-12 (32 km, supersonic, bigger warhead), HQ-9 (20 km) |
+| Fighter | F-22: stealthiest (signature 0.3), faster, AIM-120D (16 km, accurate) | J-20: signature 0.4, PL-15 (20 km, less accurate) |
+| Strike | F-35: stealthy (0.35), JSM (12 km, stealthy), guided bombs | J-15: tougher (36), less stealthy (0.7), shorter range, two YJ-83K (24 km) and KD-88 |
+
+Aircraft stealth is real in the sim: radar sees a stealthy jet at down to 0.6× its normal range.
 
 Each side has its own models, after real equipment of the type:
 
@@ -125,7 +132,7 @@ Each side has its own models, after real equipment of the type:
 ![Loadout editor](docs/loadout.png)
 
 Every unit has slots (deck mount, VLS, torpedo room, auxiliary, hardpoints, pods, arms, kit). Open **Loadouts** from the
-menu and drag modules into slots: e.g. give destroyers **Mine Rails**, swap a VLS for land-attack missiles, add a Troop Bay,
+menu, pick the faction, and drag modules into slots: e.g. give destroyers **Mine Rails**, swap a VLS for land-attack missiles, add a Troop Bay,
 or put sonobuoys on the AEW. The defaults are the recommended fit.
 
 ### Theatres
