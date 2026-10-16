@@ -4,6 +4,7 @@ import { WEATHER_AXES, WIND_ANGLE } from '../../shared/weather';
 import type { World } from '../state';
 import { SIDE } from '../theme';
 import { BUILDINGS, UNITS, deriveStats } from '../../shared/defs';
+import { deployZone } from '../../shared/game';
 import { F_LANDED } from '../../shared/protocol';
 import { matchLoadoutOf } from '../loadouts';
 
@@ -193,6 +194,20 @@ export class Minimap {
     ctx.imageSmoothingEnabled = true;
     ctx.drawImage(this.fog, 0, 0, S, S);
     ctx.imageSmoothingEnabled = false;
+    // deployment zone (setup phase only)
+    if (w.setup) {
+      const z = deployZone(w.map, w.players[w.me].slot);
+      if (z) {
+        ctx.strokeStyle = SIDE.own;
+        ctx.globalAlpha = 0.8;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.arc(z.x * k, z.y * k, z.r * k, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 1;
+      }
+    }
     // sites
     for (const s of w.map.sites) {
       const sv = w.sites[s.id];

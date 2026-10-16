@@ -1,5 +1,5 @@
 // DOM heads-up display: top bar, radio log, build bar, selection panel, tooltips, banners.
-import { BUILDABLE, BUILDINGS, MODULES, UNITS, UnitType, unitBuildTime, unitCost, FACTION_MOD } from '../../shared/defs';
+import { BUILDABLE, BUILDINGS, CRIT, MODULES, UNITS, UnitType, unitBuildTime, unitCost, FACTION_MOD } from '../../shared/defs';
 import { ORDER_CODES } from '../../shared/protocol';
 import type { World, UView } from '../state';
 import { FACTION_STYLE, SIDE, unitName } from '../theme';
@@ -15,7 +15,8 @@ export interface HudActions {
   selectOnly(ids: number[]): void;
   unloadMode(ship: number, ids: number[]): void;
   toggleCargo(id: number): void;
-  ability(name: 'mines' | 'rtb' | 'retreat' | 'stop' | 'siteFactory'): void;
+  ability(name: 'mines' | 'rtb' | 'retreat' | 'stop' | 'siteFactory' | 'refund'): void;
+  ready(on: boolean): void;
 }
 
 const h = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', html = ''): HTMLElementTagNameMap[K] => {
@@ -41,6 +42,8 @@ export class Hud {
   private tipEl: HTMLDivElement;
   private bannerEl: HTMLDivElement;
   private helpEl: HTMLDivElement;
+  private setupEl: HTMLDivElement;
+  private setupKey = '';
   private buttons = new Map<UnitType, HTMLDivElement>();
   private factoryLabels = new Map<Cat, HTMLSpanElement>();
   private selKey = '';
@@ -83,7 +86,14 @@ export class Hud {
     this.helpEl = h('div', 'panel hp');
     this.helpEl.id = 'help';
     this.helpEl.innerHTML = HELP;
-    this.root.append(top, this.logEl, this.buildEl, this.selEl, this.tipEl, this.bannerEl, this.helpEl);
+    this.setupEl = h('div', 'panel hp hidden');
+    this.setupEl.id = 'setup';
+    this.setupEl.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      const b = (e.target as HTMLElement).closest('[data-ready]') as HTMLElement | null;
+      if (b) this.act.ready(b.dataset.ready === '1');
+    });
+    this.root.append(top, this.logEl, this.buildEl, this.selEl, this.tipEl, this.bannerEl, this.helpEl, this.setupEl);
     this.buildBuildBar();
     this.helpEl.addEventListener('click', () => this.helpEl.classList.add('hidden'));
   }
@@ -213,8 +223,41 @@ export class Hud {
     this.clockEl.textContent = `T+${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
     this.updateWeatherLabel();
     this.updatePlayers();
+    this.updateSetup();
     this.updateBuild();
     this.updateSelection(selected);
+  }
+
+  /** Deployment banner: timer, budget, how to place, and the launch button (built once, then only its text changes). */
+  private setupParts: { timer: HTMLElement; cash: HTMLElement; btn: HTMLButtonElement } | null = null;
+  private updateSetup() {
+    const w = this.world;
+    const s = w.setup;
+    this.setupEl.classList.toggle('hidden', !s);
+    if (!s) return;
+    if (!this.setupParts) {
+      this.setupEl.innerHTML = `<div class="st">DEPLOYMENT PHASE <b></b></div>
+        <div class="sh">Pick a unit below, then click inside your zone to place it (hold Shift to place several).
+        Right-click moves placed units · troops right-click a ship to embark · Del refunds.
+        Unspent <span class="cs"></span> carries into the battle.</div>
+        <button class="btn"></button>`;
+      this.setupParts = {
+        timer: this.setupEl.querySelector('.st b')!,
+        cash: this.setupEl.querySelector('.cs')!,
+        btn: this.setupEl.querySelector('button')!,
+      };
+    }
+    const ready = s.ready.includes(w.me);
+    const waiting = w.players.filter((p) => p.id !== w.me && !p.bot && !s.ready.includes(p.id)).length;
+    const key = `${s.left}|${ready}|${waiting}|${Math.floor(w.cash)}`;
+    if (key === this.setupKey) return;
+    this.setupKey = key;
+    const { timer, cash, btn } = this.setupParts;
+    timer.textContent = `${Math.floor(s.left / 60)}:${String(s.left % 60).padStart(2, '0')}`;
+    cash.textContent = fmtMoney(w.cash);
+    btn.dataset.ready = ready ? '0' : '1';
+    btn.classList.toggle('on', ready);
+    btn.textContent = ready ? `READY ✓${waiting ? ` · WAITING FOR ${waiting}` : ''} · CLICK TO EDIT` : 'LAUNCH BATTLE ▸';
   }
 
   private updateWeatherLabel() {
@@ -255,13 +298,13 @@ export class Hud {
         const isl = w.map.islands[s.island];
         label = isl.home >= 0 ? 'HOME' : isl.name;
       }
-      this.factoryLabels.get(cat)!.textContent = '@ ' + label;
+      this.factoryLabels.get(cat)!.textContent = w.setup ? 'DEPLOY' : '@ ' + label;
       const q = w.queues[cat];
       for (const type of BUILDABLE[cat]) {
         const b = this.buttons.get(type)!;
         const n = q.filter((i) => i.type === type).length;
         const cost = unitCost(type, fac);
-        b.classList.toggle('poor', w.cash < cost || f === -1);
+        b.classList.toggle('poor', w.cash < cost || (f === -1 && !w.setup));
         let qe = b.querySelector('.q') as HTMLElement | null;
         if (n) {
           if (!qe) {
@@ -391,8 +434,13 @@ export class Hud {
           html += `<div class="wrow"><span>${m.name}</span><span class="pips" style="color:var(--faint)">PASSIVE</span></div>`;
           continue;
         }
+        const out = d[13][6] === wi;
         const ammo = d[1][wi++] ?? -1;
         const max = m.ammo ?? -1;
+        if (out) {
+          html += `<div class="wrow"><span>${m.name}</span><span class="pips" style="color:var(--bad)">KNOCKED OUT ${d[13][7]}s</span></div>`;
+          continue;
+        }
         let pips = '∞';
         if (max > 0) {
           const n = Math.max(0, ammo);
@@ -400,6 +448,7 @@ export class Hud {
         }
         html += `<div class="wrow"><span>${m.name}${m.ability ? '<span class="kbd">M</span>' : ''}</span><span class="pips">${pips}</span></div>`;
       }
+      if (def.domain === 'sea' || def.domain === 'sub') html += this.damageHtml(d[13]);
       if (def.domain === 'air') {
         html += `<div class="wrow"><span>FUEL</span><span>${d[3]}%</span></div><div class="bar"><i style="width:${d[3]}%;background:var(--accent)"></i></div>`;
       }
@@ -431,6 +480,20 @@ export class Hud {
     return html;
   }
 
+  /** Ship systems panel: every knocked-out system with the seconds until it is repaired. */
+  private damageHtml(s: number[]): string {
+    const rows: [string, string, string][] = [];
+    if (s[0] > CRIT.engineSlow) rows.push(['ENGINE', `DEAD IN THE WATER ${s[0] - CRIT.engineSlow}s`, 'var(--bad)']);
+    else if (s[0] > 0) rows.push(['ENGINE', `DAMAGED · 55% SPEED ${s[0]}s`, 'var(--warn)']);
+    if (s[1] > 0) rows.push(['STEERING', `JAMMED ${s[1]}s`, 'var(--warn)']);
+    if (s[2] > 0) rows.push(['RADAR', `DOWN · 35% RANGE ${s[2]}s`, 'var(--warn)']);
+    if (s[3] > 0) rows.push(['FIRE', `BURNING ${s[3]}s`, 'var(--bad)']);
+    if (s[4] > 0) rows.push(['HULL', `FLOODING ${s[4]}s`, 'var(--bad)']);
+    if (s[5] > 0) rows.push(['CREW', `STUNNED ${s[5]}s`, 'var(--warn)']);
+    if (!rows.length) return `<div class="wrow"><span>SYSTEMS</span><span class="pips" style="color:var(--good)">NOMINAL</span></div>`;
+    return rows.map(([a, b, c]) => `<div class="wrow"><span>${a}</span><span class="pips" style="color:${c}">${b}</span></div>`).join('');
+  }
+
   private cargoType(id: number): UnitType {
     return this.world.cargoTypes.get(id) ?? 'infantry';
   }
@@ -446,6 +509,10 @@ export class Hud {
     if (any((u) => UNITS[u.type].category === 'naval' || UNITS[u.type].category === 'ground')) {
       const on = sel.every((u) => ((w.details.get(u.id)?.[7] ?? 1) & 1) === 1);
       b.push(`<button class="btn small ${on ? 'on' : ''}" data-act="retreat">AUTO-RETREAT<span class="kbd">T</span></button>`);
+    }
+    if (w.setup) {
+      b.push(`<button class="btn small" data-act="refund">REFUND<span class="kbd">DEL</span></button>`);
+      return b.join('');
     }
     b.push(`<button class="btn small" data-act="stop">STOP<span class="kbd">S</span></button>`);
     return b.join('');

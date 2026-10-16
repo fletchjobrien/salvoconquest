@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { UNITS, UNIT_TYPES, UnitType, MODULES } from '../../shared/defs';
 import { heightAt } from '../../shared/map';
 import type { GameEvent } from '../../shared/protocol';
-import { F_LANDED } from '../../shared/protocol';
+import { F_LANDED, F_FIRE } from '../../shared/protocol';
 import type { World } from '../state';
 import { PALETTES, Palette } from '../theme';
 import { Renderer, CameraRig } from './renderer';
@@ -185,7 +185,10 @@ export class GameScene {
             this.fx.contrail(u.x - c * len * 0.95 - s * len * 0.75, y3, u.y - s * len * 0.95 + c * len * 0.75);
           }
         }
-        if (u.hp < 50) {
+        if (u.flags & F_FIRE) {
+          // A fire on board: steady flames and a thick smoke column, whatever the hull state.
+          if (Math.random() < 0.8) this.fx.fire(u.x + (Math.random() - 0.5) * 0.08, y3 + 0.05, u.y + (Math.random() - 0.5) * 0.08, 1.5);
+        } else if (u.hp < 50) {
           const s = dom === 'air' ? 0.5 : dom === 'land' ? 0.7 : 1.2;
           if (Math.random() < (1 - u.hp / 50) * 0.9 + 0.1) this.fx.fire(u.x, y3 + (dom === 'sea' ? 0.04 : 0), u.y, s);
         }

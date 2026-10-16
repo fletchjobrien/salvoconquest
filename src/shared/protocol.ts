@@ -14,7 +14,11 @@ export type Command =
   | { c: 'autoretreat'; ids: number[]; on: boolean }
   | { c: 'build'; cat: 'naval' | 'ground' | 'air'; type: UnitType }
   | { c: 'cancel'; cat: 'naval' | 'ground' | 'air'; index: number }
-  | { c: 'factory'; cat: 'naval' | 'ground' | 'air'; site?: number; unit?: number };
+  | { c: 'factory'; cat: 'naval' | 'ground' | 'air'; site?: number; unit?: number }
+  // Deployment phase only:
+  | { c: 'deploy'; type: UnitType; x: number; y: number }
+  | { c: 'undeploy'; ids: number[] }
+  | { c: 'ready'; on: boolean };
 
 export interface LobbySlot {
   slot: number;
@@ -61,10 +65,12 @@ export type SiteRow = [number, number, number, number];
 /** Own unit detail: id, ammo[], cargo ids[], fuel 0-100, order code, order x, order y, flags (1 auto-retreat, 2 embarked), type index. */
 /**
  * Own-unit details: id, ammo, cargo ids, fuel %, order code, order x, order y, flags, type index,
- * then (aircraft) range left before bingo in km, nearest base x, y, and (carriers) the deck: ids of
- * flights based on it.
+ * then (aircraft) range left before bingo in km, nearest base x, y, (carriers) the deck: ids of
+ * flights based on it, and (ships) the damage state.
  */
-export type DetailRow = [number, number[], number[], number, number, number, number, number, number, number, number, number, number[]];
+export type DetailRow = [number, number[], number[], number, number, number, number, number, number, number, number, number, number[], DamageRow];
+/** Seconds left on each damaged system: engine, rudder, radar, fire, flood, stun, disabled weapon index (-1 none), weapon. */
+export type DamageRow = [number, number, number, number, number, number, number, number];
 /** Weather cell: kind (0 storm, 1 fog), x, y, radius, intensity 0-100. */
 export type WeatherRow = [number, number, number, number, number];
 /** On the wire: kind, x, y, radius, intensity, vx, vy (km/s), id. */
@@ -90,6 +96,8 @@ export interface Snapshot {
   q?: Record<'naval' | 'ground' | 'air', QueueItem[]>;
   f?: Record<'naval' | 'ground' | 'air', number>; // factory site (>=0) or carrier unit (encoded -1-id)
   pl?: { id: number; res: number; units: number; defeated: boolean; dom: number }[];
+  /** Present while the deployment phase runs: seconds left and the players who are ready. */
+  ph?: { left: number; ready: number[] };
 }
 
 export type GameEvent =
@@ -108,6 +116,8 @@ export type GameEvent =
   | { k: 'lightning'; x: number; y: number }
   | { k: 'mine'; x: number; y: number }
   | { k: 'defeat'; o: number }
+  | { k: 'crit'; id: number; part: CritPart; o: number; m?: string }
+  | { k: 'battle' }
   | { k: 'msg'; text: string; o?: number };
 
 export type ServerMsg =
@@ -130,6 +140,12 @@ export const F_LANDED = 8;
 export const F_CARGO = 16; // carrying troops
 export const F_DAMAGED = 32;
 export const F_LOADING = 64;
+export const F_FIRE = 128; // on fire
+export const F_STOPPED = 256; // engine knocked out: dead in the water
+export const F_STUN = 512; // crew stunned: cannot fire
+
+/** Ship systems that a hit can knock out (WARNO-style critical damage). */
+export type CritPart = 'engine' | 'rudder' | 'radar' | 'weapon' | 'fire' | 'flood' | 'stun';
 
 // Order codes for DetailRow
 export const ORDER_CODES = ['idle', 'move', 'attack', 'board', 'patrol', 'rtb', 'retreat', 'unload', 'merchant', 'lander'] as const;

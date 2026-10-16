@@ -25,13 +25,26 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
 
 **Goal:** capture the enemy **HQ**, or hold 75% of all resource sites for 3 minutes.
 
-- Each player starts on a home island with an HQ, a naval base, an airbase and barracks.
+- Each player starts on a home island with an HQ, a naval base, an airbase and barracks, and no units.
+- **Deployment phase** (like WARNO): the clock stands still for up to 2 minutes while you buy your opening
+  force from the build bar and place it inside your deployment zone (ships on open water, troops on the home
+  island, aircraft anywhere in the zone). Right-click moves placed units, troops can embark on ships, Del refunds.
+  Money you don't spend carries into the battle. The battle starts when every player presses **Launch battle**
+  (or the timer runs out).
+- Units are expensive (prices ×3): forces are small and every hull counts. Ships carry few missiles
+  (destroyer: 4 anti-ship, 8 SAM) and rearm at a naval base or dockyard.
 - Ground units capture buildings by standing next to them. Captured **resource sites** spawn merchant
   ships that sail cargo home and turn it into cash. Enemy subs love merchants.
 - Other buildings give bonuses: radar stations (huge radar bubble), airbases, barracks and dockyards (forward production, repair, rearm),
   missile batteries (fire for whoever owns them).
 - Ships carry troops (destroyer 2, battleship 3; a Troop Bay module adds 2). Carriers carry up to 4 air flights instead: right-click a carrier with aircraft selected to base them there. Aircraft are built at airbases only.
   RMB a ship with troops selected and they walk to the shore and ride landing craft out to it.
+- **Ship damage** (like WARNO tank combat): hits can knock out systems, not just hull points. An **engine** hit
+  stops the ship dead for 8 s, then leaves it at 55% speed; **steering** jams (quarter turn rate), **radar** drops
+  to 35% range, a **weapon** mount goes silent, **fires** and **flooding** keep hurting, and heavy hits **stun** the
+  crew (no firing for a few seconds). Torpedoes and mines flood and wreck engines; shells hit mounts; missiles start
+  fires. Systems repair over time, three times faster at a friendly naval base. Damaged systems show as tags under
+  the unit (DIW, RUD, RAD, WPN, FIRE, FLD, STUN) and in the selection panel with the seconds left.
 - **Automation:** ground units attack-move by default, idle troops engage enemies on their island, damaged units
   retreat to friendly buildings and come back when repaired, aircraft fly their mission, return to rearm and
   go back on station. Ships close the distance on their own when you order an unload out of range.
@@ -41,9 +54,9 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
 ![Strategic view with radar contacts, storms and fog](docs/strategic.png)
 
 Radar (surface and air), sonar (submarines only) and eyesight. Far-away or poor-quality detections show as a
-**radar contact**: a marker at a *random point* within the error radius of the true position, with a dashed ring
-showing where the real unit could be. Each new radar sweep picks a new point; as you close in, the ring shrinks until
-the contact becomes an identified track. Storms cut radar range and eyesight; fog banks cut eyesight. Submarines are
+**radar contact**: one calm marker per track, placed somewhere within the error radius of the true position (the
+error shows on hover). As you close in, the estimate glides toward the truth until the contact becomes an identified
+track. Weapons only fire at classified tracks their seeker can find. The minimap shows your fog of war. Storms cut radar range and eyesight; fog banks cut eyesight. Submarines are
 invisible until a sonar hears them, and they reveal themselves briefly when they fire.
 
 ![Storm cell and fog bank](docs/weather.png)

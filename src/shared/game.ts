@@ -12,6 +12,10 @@ import {
   MODULES,
   ModuleDef,
   START_CASH,
+  SETUP_TIME,
+  DEPLOY_MARGIN,
+  BUILDABLE,
+  CRIT,
   TICK,
   TargetClass,
   UNITS,
@@ -50,6 +54,11 @@ import {
   F_LOADING,
   F_MOVING,
   F_RETREAT,
+  F_FIRE,
+  F_STOPPED,
+  F_STUN,
+  CritPart,
+  DamageRow,
   GameEvent,
   PROJ_KINDS,
   ProjRow,
@@ -93,6 +102,32 @@ export type Order =
   | { k: 'unload'; x: number; y: number; ids: number[] };
 
 const OVERKILL_CHECK = new Set<string>(['missile', 'torpedo', 'bomb']);
+
+export interface ShipSystems {
+  engine: number;
+  rudder: number;
+  radar: number;
+  fire: number;
+  flood: number;
+  stun: number;
+  /** Index of the knocked-out weapon (-1 none) and seconds until it works again. */
+  weaponOut: number;
+  weaponT: number;
+  /** Repairs run faster while alongside a friendly naval base (game time until which this holds). */
+  dockedUntil: number;
+}
+
+const newSystems = (): ShipSystems => ({ engine: 0, rudder: 0, radar: 0, fire: 0, flood: 0, stun: 0, weaponOut: -1, weaponT: 0, dockedUntil: 0 });
+
+/** Which system a hit tends to knock out, by what hit it (relative weights). */
+const CRIT_TABLE: Record<string, [CritPart, number][]> = {
+  shell: [['weapon', 3], ['fire', 2], ['engine', 1.5], ['radar', 1.5], ['rudder', 1], ['stun', 1]],
+  missile: [['fire', 3], ['radar', 2], ['engine', 1.5], ['weapon', 1.5], ['stun', 1.5], ['rudder', 0.5]],
+  torpedo: [['flood', 3], ['engine', 3], ['rudder', 2]],
+  mine: [['flood', 3], ['engine', 2.5], ['rudder', 2]],
+  bomb: [['fire', 3], ['weapon', 2], ['radar', 1.5], ['engine', 1]],
+  bullet: [['radar', 1], ['weapon', 1], ['fire', 0.5]],
+};
 
 export interface Unit {
   id: number;
@@ -139,6 +174,10 @@ export interface Unit {
   revealUntil: number;
   firingUntil: number;
   stillFor: number;
+  /** Critical damage to ship systems (seconds left); see CRIT in defs.ts. */
+  sys: ShipSystems;
+  /** Last enemy to hurt this unit (credited if fire or flooding sinks it). */
+  lastHitBy: number;
   /** Seconds spent close to (but not at) the move point; groups can't all reach the exact spot. */
   nearGoalFor?: number;
   pendingDmg: number;
@@ -259,6 +298,10 @@ export class Game {
   seed: number;
   time = 0;
   tickN = 0;
+  /** Deployment phase first (place the starting force), then the battle. */
+  phase: 'setup' | 'battle' = 'setup';
+  setupLeft = SETUP_TIME;
+  readySet = new Set<number>();
   rng: Rng;
   players: Player[] = [];
   units = new Map<number, Unit>();
@@ -318,19 +361,7 @@ export class Game {
           if (s.type === 'barracks') p.factory.ground = { site: s.id };
         }
       }
-      // Starting forces.
-      const nb = this.factorySite(p, 'naval');
-      const bk = this.factorySite(p, 'ground');
-      const ab = this.factorySite(p, 'air');
-      if (nb?.dock) this.spawn(p.id, 'destroyer', nb.dock.x, nb.dock.y);
-      if (bk) {
-        this.spawn(p.id, 'infantry', bk.x + 0.4, bk.y);
-        this.spawn(p.id, 'infantry', bk.x - 0.4, bk.y + 0.2);
-      }
-      if (ab) {
-        const f = this.spawn(p.id, 'fighter', ab.x, ab.y);
-        f.order = { k: 'patrol', x: ab.x, y: ab.y };
-      }
+      // No free starting forces: everyone buys and places theirs in the deployment phase.
     }
     // Everyone knows the neutral map and their own bases; other homes start unknown.
     for (const p of this.players) {
@@ -419,6 +450,8 @@ export class Game {
       firingUntil: 0,
       stillFor: 0,
       pendingDmg: 0,
+      sys: newSystems(),
+      lastHitBy: -1,
       dead: false,
       lastThink: this.rng.next(),
     };
@@ -462,6 +495,10 @@ export class Game {
       return out;
     };
     const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : NaN);
+    if (this.phase === 'setup') {
+      this.setupCommand(pid, cmd, own, num);
+      return;
+    }
     switch (cmd.c) {
       case 'move': {
         const x = num(cmd.x);
@@ -655,6 +692,14 @@ export class Game {
 
   step() {
     if (this.over) return;
+    if (this.phase === 'setup') {
+      // Deployment: the clock and the world stand still; only the setup timer runs.
+      this.tickN++;
+      this.setupLeft -= TICK;
+      const humans = this.players.filter((p) => !p.bot && !p.defeated);
+      if (this.setupLeft <= 0 || (humans.length > 0 && humans.every((p) => this.readySet.has(p.id))) || (humans.length === 0 && this.players.every((p) => this.readySet.has(p.id)))) this.startBattle();
+      return;
+    }
     const dt = TICK;
     this.time += dt;
     this.tickN++;
@@ -664,6 +709,11 @@ export class Game {
     for (const u of this.units.values()) {
       if (u.dead) continue;
       if (u.inside >= 0) continue;
+      const dom = UNITS[u.type].domain;
+      if (dom === 'sea' || dom === 'sub') {
+        this.updateSystems(u, dt);
+        if (u.dead) continue;
+      }
       this.think(u, dt);
       this.move(u, dt);
     }
@@ -686,6 +736,102 @@ export class Game {
       return false;
     });
     if (this.tickN % 10 === 0) this.checkVictory();
+  }
+
+  private startBattle() {
+    this.phase = 'battle';
+    this.setupLeft = 0;
+    this.emit({ k: 'battle' }, 0, 0);
+    this.updateDetection(true);
+  }
+
+  /** Setup-phase commands: buy and place, refund, reposition, embark troops, ready up. */
+  private setupCommand(pid: number, cmd: Command, own: (ids: unknown) => Unit[], num: (v: unknown) => number) {
+    const p = this.players[pid];
+    switch (cmd.c) {
+      case 'deploy': {
+        const type = cmd.type as UnitType;
+        const x = num(cmd.x);
+        const y = num(cmd.y);
+        if (!UNITS[type] || Number.isNaN(x) || Number.isNaN(y)) return;
+        if (!Object.values(BUILDABLE).some((l) => l.includes(type))) return;
+        const cost = unitCost(type, p.faction);
+        if (p.cash < cost || !canDeployAt(this.map, p.slot, type, x, y)) return;
+        p.cash -= cost;
+        const u = this.spawn(pid, type, x, y);
+        u.heading = Math.atan2(this.map.size / 2 - y, this.map.size / 2 - x);
+        if (UNITS[type].domain === 'air') {
+          const ab = this.factorySite(p, 'air');
+          if (ab) u.base = { site: ab.id };
+          u.alt = 0.9;
+          u.speed = u.maxSpeed * 0.6;
+          u.order = { k: 'patrol', x, y };
+          u.mission = { k: 'patrol', x, y };
+        }
+        break;
+      }
+      case 'undeploy':
+        for (const u of own(cmd.ids)) {
+          for (const cid of u.cargo) {
+            const c = this.units.get(cid);
+            if (c) {
+              p.cash += unitCost(c.type, p.faction);
+              this.units.delete(cid);
+            }
+          }
+          if (u.inside >= 0) {
+            const ship = this.units.get(u.inside);
+            if (ship) ship.cargo = ship.cargo.filter((id) => id !== u.id);
+          }
+          p.cash += unitCost(u.type, p.faction);
+          this.units.delete(u.id);
+        }
+        break;
+      case 'move': {
+        // Repositioning is instant: keep the group's shape, skip spots outside the zone.
+        const x = num(cmd.x);
+        const y = num(cmd.y);
+        if (Number.isNaN(x) || Number.isNaN(y)) return;
+        const us = own(cmd.ids).filter((u) => u.inside < 0);
+        if (!us.length) return;
+        let cx = 0;
+        let cy = 0;
+        for (const u of us) {
+          cx += u.x / us.length;
+          cy += u.y / us.length;
+        }
+        for (const u of us) {
+          const tries: [number, number][] = [[x + (u.x - cx), y + (u.y - cy)], [x, y]];
+          for (let k = 0; k < 8; k++) tries.push([x + Math.cos(k + u.id) * (0.4 + k * 0.15), y + Math.sin(k + u.id) * (0.4 + k * 0.15)]);
+          const ok = tries.find(([tx, ty]) => canDeployAt(this.map, p.slot, u.type, tx, ty));
+          if (!ok) continue;
+          u.x = ok[0];
+          u.y = ok[1];
+          u.path = null;
+          if (UNITS[u.type].domain === 'air') {
+            u.order = { k: 'patrol', x: ok[0], y: ok[1] };
+            u.mission = { k: 'patrol', x: ok[0], y: ok[1] };
+          } else u.order = { k: 'idle' };
+        }
+        break;
+      }
+      case 'board': {
+        // Embark at once: troops start the battle aboard.
+        const ship = this.units.get(Number(cmd.ship));
+        if (!ship || ship.dead || ship.owner !== pid || ship.holdCap <= 0) return;
+        for (const u of own(cmd.ids)) {
+          if (UNITS[u.type].domain !== 'land' || u.inside >= 0 || ship.cargo.length >= ship.holdCap) continue;
+          u.inside = ship.id;
+          ship.cargo.push(u.id);
+          u.order = { k: 'idle' };
+        }
+        break;
+      }
+      case 'ready':
+        if (cmd.on) this.readySet.add(pid);
+        else this.readySet.delete(pid);
+        break;
+    }
   }
 
   // ------------------------------------------------------------------ weather
@@ -932,6 +1078,7 @@ export class Game {
       const naval = s.type === 'navalbase' || s.type === 'dockyard';
       if ((dom === 'sea' || dom === 'sub') && naval && s.dock) {
         if (Math.hypot(s.dock.x - u.x, s.dock.y - u.y) < 3) {
+          u.sys.dockedUntil = this.time + 0.6;
           u.hp = Math.min(u.maxHp, u.hp + 3 * dt);
           for (const w of u.weapons) if (w.max > 0) w.ammo = Math.min(w.max, w.ammo + dt * 0.5);
           return;
@@ -1610,15 +1757,18 @@ export class Game {
         u.heading = turnToward(u.heading, want, def.turn * dt);
         u.speed = u.maxSpeed;
       } else {
-        u.heading = turnToward(u.heading, want, def.turn * dt);
+        // Jammed steering turns at a quarter rate; engine and flooding damage cut speed.
+        u.heading = turnToward(u.heading, want, def.turn * (u.sys.rudder > 0 ? 0.25 : 1) * dt);
         const dEnd = Math.hypot(target.x - u.x, target.y - u.y) + (path!.length > 1 ? 5 : 0);
-        let vmax = u.maxSpeed * wMul * (diff > 1 ? 0.45 : 1);
+        let vmax = u.maxSpeed * this.speedFactor(u) * wMul * (diff > 1 ? 0.45 : 1);
         vmax = Math.min(vmax, Math.max(0.05, dEnd * 0.35));
+        if (this.speedFactor(u) === 0) vmax = 0;
         const acc = u.maxSpeed * 0.35;
         u.speed += Math.max(-acc * dt * 2, Math.min(acc * dt, vmax - u.speed));
       }
       u.stillFor = 0;
     }
+    if (dom !== 'land' && this.speedFactor(u) === 0) u.speed = Math.max(0, u.speed - dt * u.maxSpeed * 0.5);
     if (u.speed <= 0) return;
     const nx = u.x + Math.cos(u.heading) * u.speed * dt;
     const ny = u.y + Math.sin(u.heading) * u.speed * dt;
@@ -1756,9 +1906,13 @@ export class Game {
       shooters.push({ x: s.x, y: s.y, alt: 0.05, team: this.team(s.owner), owner: s.owner, weapons: s.weapons, unit: null, dmgMul: 1 });
     }
     for (const sh of shooters) {
-      for (const w of sh.weapons) {
+      const sys = sh.unit?.sys;
+      for (let wi = 0; wi < sh.weapons.length; wi++) {
+        const w = sh.weapons[wi];
         if (w.cd > 0) w.cd -= dt;
         if (w.cd > 0 || w.mod.ability) continue;
+        // Stunned crews hold fire; a knocked-out mount is silent until repaired.
+        if (sys && (sys.stun > 0 || sys.weaponOut === wi)) continue;
         if (w.max >= 0 && w.ammo < 1) continue;
         // Interceptors first.
         if (w.mod.intercept) {
@@ -1880,7 +2034,7 @@ export class Game {
     if (w.mod.proj === 'bullet') {
       this.emit({ k: 'fire', id: u?.id ?? 0, m: w.mod.id, x: sh.x, y: sh.y, tx: t.x, ty: t.y, a: t.alt }, sh.x, sh.y);
       const acc = (w.mod.accuracy ?? 0.5) * (cls === 'air' ? 0.6 : 1);
-      if (this.rng.next() < acc) this.damage(t, dmg, sh.owner);
+      if (this.rng.next() < acc) this.damage(t, dmg, sh.owner, 'bullet');
       return;
     }
     // Lead the target for shells.
@@ -2124,7 +2278,7 @@ export class Game {
     const w = this.weatherAt(t.x, t.y);
     chance *= 1 - 0.25 * w.storm;
     if (this.rng.next() < chance) {
-      this.damage(t, dmg, p.owner);
+      this.damage(t, dmg, p.owner, p.kind);
       this.emit({ k: 'boom', x: t.x, y: t.y, s: Math.min(1.5, dmg / 30), w: false, a: t.alt }, t.x, t.y);
     } else {
       const [ox, oy] = this.rng.inDisc(0.25);
@@ -2134,12 +2288,127 @@ export class Game {
     }
   }
 
-  damage(t: Unit, dmg: number, by: number) {
+  damage(t: Unit, dmg: number, by: number, src?: string) {
     if (t.dead) return;
     let d = dmg;
     if (UNITS[t.type].domain === 'land' && t.stillFor > 4) d *= t.entrench;
     t.hp -= d;
-    if (t.hp <= 0) this.kill(t, by);
+    if (by >= 0) t.lastHitBy = by;
+    if (t.hp <= 0) {
+      this.kill(t, by);
+      return;
+    }
+    const dom = UNITS[t.type].domain;
+    if (src && (dom === 'sea' || dom === 'sub') && t.type !== 'lander') this.rollCrits(t, d, src);
+  }
+
+  /**
+   * WARNO-style critical hits on ships. Any heavy hit stuns the crew for a moment; beyond that a
+   * hit may knock out one system (two for a really big hit), chosen by what struck the ship.
+   */
+  private rollCrits(t: Unit, d: number, src: string) {
+    const f = d / t.maxHp;
+    const s = t.sys;
+    if (f >= 0.1) {
+      const stun = Math.min(CRIT.stunMax, 1.5 + f * 25);
+      if (stun > s.stun + 1) this.crit(t, 'stun');
+      s.stun = Math.max(s.stun, stun);
+    }
+    const table = CRIT_TABLE[src] ?? CRIT_TABLE.bullet;
+    const rolls = f > 0.35 ? 2 : 1;
+    for (let r = 0; r < rolls; r++) {
+      if (this.rng.next() > Math.min(0.75, 0.1 + f * 1.8)) continue;
+      let sum = 0;
+      for (const [, w] of table) sum += w;
+      let pick = this.rng.next() * sum;
+      let part: CritPart = table[0][0];
+      for (const [p, w] of table) {
+        pick -= w;
+        if (pick <= 0) {
+          part = p;
+          break;
+        }
+      }
+      this.applyCrit(t, part);
+    }
+  }
+
+  private applyCrit(t: Unit, part: CritPart) {
+    const s = t.sys;
+    switch (part) {
+      case 'engine':
+        s.engine = CRIT.engineStop + CRIT.engineSlow;
+        break;
+      case 'rudder':
+        s.rudder = CRIT.rudder;
+        break;
+      case 'radar':
+        s.radar = CRIT.radar;
+        break;
+      case 'fire':
+        s.fire = Math.max(s.fire, CRIT.fire);
+        break;
+      case 'flood':
+        s.flood = Math.max(s.flood, CRIT.flood);
+        break;
+      case 'stun':
+        s.stun = Math.max(s.stun, 3 + this.rng.next() * 2);
+        break;
+      case 'weapon': {
+        const usable = t.weapons.map((w, i) => (w.mod.ability ? -1 : i)).filter((i) => i >= 0);
+        if (!usable.length) return;
+        s.weaponOut = usable[Math.floor(this.rng.next() * usable.length)];
+        s.weaponT = CRIT.weapon;
+        this.crit(t, part, t.weapons[s.weaponOut].mod.name);
+        return;
+      }
+    }
+    this.crit(t, part);
+  }
+
+  private crit(t: Unit, part: CritPart, m?: string) {
+    this.emit({ k: 'crit', id: t.id, part, o: t.owner, ...(m ? { m } : {}) }, t.x, t.y);
+  }
+
+  /** System timers tick down (3x faster alongside a friendly naval base); fire and flooding hurt. */
+  private updateSystems(u: Unit, dt: number) {
+    const s = u.sys;
+    const k = s.dockedUntil > this.time ? 3 : 1;
+    const down = (v: number) => Math.max(0, v - dt * k);
+    s.engine = down(s.engine);
+    s.rudder = down(s.rudder);
+    s.radar = down(s.radar);
+    s.stun = Math.max(0, s.stun - dt);
+    s.weaponT = down(s.weaponT);
+    if (s.weaponT <= 0) s.weaponOut = -1;
+    if (s.fire > 0) {
+      s.fire = down(s.fire);
+      u.hp -= CRIT.fireDps * dt;
+    }
+    if (s.flood > 0) {
+      s.flood = down(s.flood);
+      u.hp -= CRIT.floodDps * dt;
+    }
+    if (u.hp <= 0) this.kill(u, u.lastHitBy);
+  }
+
+  /** Speed multiplier from engine and flooding damage (0 = dead in the water). */
+  speedFactor(u: Unit): number {
+    const s = u.sys;
+    let f = s.engine > CRIT.engineSlow ? 0 : s.engine > 0 ? 0.55 : 1;
+    if (s.flood > 0) f *= 0.7;
+    return f;
+  }
+
+  private sysFlags(u: Unit): number {
+    const s = u.sys;
+    return (s.fire > 0 ? F_FIRE : 0) | (this.speedFactor(u) === 0 ? F_STOPPED : 0) | (s.stun > 0 ? F_STUN : 0);
+  }
+
+  damageRow(u: Unit): DamageRow {
+    const s = u.sys;
+    const r = (v: number) => Math.ceil(v);
+    return [r(s.engine), r(s.rudder), r(s.radar), r(s.fire), r(s.flood), r(s.stun), s.weaponOut, r(s.weaponT)];
   }
 
   kill(t: Unit, by: number) {
@@ -2171,7 +2440,7 @@ export class Game {
         if (Math.hypot(u.x - m.x, u.y - m.y) < 0.45) {
           m.armAt = Infinity;
           const dmg = dom === 'sub' ? 40 : 50;
-          this.damage(u, dmg, m.owner);
+          this.damage(u, dmg, m.owner, 'mine');
           this.emit({ k: 'boom', x: m.x, y: m.y, s: 1.2, w: true }, m.x, m.y);
           break;
         }
@@ -2279,8 +2548,8 @@ export class Game {
         sensors.push({
           x: u.x,
           y: u.y,
-          air: u.landed ? 0 : u.radarAir,
-          surf: u.landed ? 0 : u.radarSurf,
+          air: u.landed ? 0 : u.radarAir * (u.sys.radar > 0 ? 0.35 : 1),
+          surf: u.landed ? 0 : u.radarSurf * (u.sys.radar > 0 ? 0.35 : 1),
           sonar: dom === 'sea' || dom === 'sub' || dom === 'air' ? u.sonar : 0,
           vis: u.visual,
           isUnit: true,
@@ -2428,6 +2697,7 @@ export class Game {
         if (x.cargo.length) flags |= F_CARGO;
         if (x.hp < x.maxHp * 0.5) flags |= F_DAMAGED;
         if (x.type === 'merchant' && x.mstate === 'back') flags |= F_LOADING;
+        flags |= this.sysFlags(x);
         if (x.inside < 0) u.push([x.id, UNIT_TYPES.indexOf(x.type), x.owner, r2(x.x), r2(x.y), r2(x.alt), r2(x.heading), Math.ceil((x.hp / x.maxHp) * 100), flags]);
         if (x.owner === pid) {
           const o = x.order;
@@ -2446,6 +2716,7 @@ export class Game {
             UNIT_TYPES.indexOf(x.type),
             ...this.airDetail(x),
             UNITS[x.type].deck ? this.deckIds(x) : [],
+            this.damageRow(x),
           ]);
         }
         continue;
@@ -2457,6 +2728,7 @@ export class Game {
       if (x.speed > 0.01) flags |= F_MOVING;
       if (x.firingUntil > this.time) flags |= F_FIRING;
       if (x.landed) flags |= F_LANDED;
+      flags |= this.sysFlags(x);
       if (k.ident === 2) {
         u.push([x.id, UNIT_TYPES.indexOf(x.type), x.owner, r2(x.x), r2(x.y), r2(x.alt), r2(x.heading), Math.ceil((x.hp / x.maxHp) * 100), flags]);
       } else {
@@ -2490,6 +2762,7 @@ export class Game {
       if (ev.e.k === 'defeat' || ev.e.k === 'lightning' || ev.e.k === 'msg' || involved || nearAsset(ev.x, ev.y, 20)) e.push(ev.e);
     }
     const snap: Snapshot = { t: 's', time: r2(this.time), cash: Math.floor(p.cash), income: r2(p.income), u, c, p: pr, d, e };
+    if (this.phase === 'setup') snap.ph = { left: Math.ceil(this.setupLeft), ready: [...this.readySet] };
     if (full || this.sitesDirty || this.tickN % 10 === 0) {
       const intel = this.siteIntel.get(team);
       snap.s = this.sites.map((s, i) => {
@@ -2535,6 +2808,26 @@ export class Game {
 function mkWeapon(m: ModuleDef): Weapon {
   const ammo = m.ammo ?? -1;
   return { mod: m, ammo, max: ammo, cd: Math.random() * 0.5 };
+}
+
+/** A player's deployment zone: a circle around their home island. */
+export function deployZone(map: GameMap, slot: number): { x: number; y: number; r: number; island: number } | null {
+  const sp = map.spawns[slot];
+  if (!sp) return null;
+  const isl = map.islands[sp.island];
+  return { x: sp.x, y: sp.y, r: (isl?.r ?? 6) + DEPLOY_MARGIN, island: sp.island };
+}
+
+/** Where a unit may be placed in the deployment phase: ships on open water, troops on the home island, aircraft anywhere in the zone. */
+export function canDeployAt(map: GameMap, slot: number, type: UnitType, x: number, y: number): boolean {
+  const z = deployZone(map, slot);
+  if (!z || Math.hypot(x - z.x, y - z.y) > z.r) return false;
+  if (x < 0.5 || y < 0.5 || x > map.size - 0.5 || y > map.size - 0.5) return false;
+  const dom = UNITS[type].domain;
+  if (dom === 'air') return true;
+  const c = cellOf(map, x, y);
+  if (dom === 'land') return map.nav[c] === 1 && map.islandOf[c] === z.island;
+  return map.nav[c] === 0;
 }
 
 export function angDiff(a: number, b: number): number {

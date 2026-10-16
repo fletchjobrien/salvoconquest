@@ -1,5 +1,6 @@
 // A running match: wires world state, rendering, overlay, HUD, input, audio and the connection.
-import { UNITS, UNIT_TYPES, UnitType, MODULES, UNLOAD_RANGE } from '../shared/defs';
+import { UNITS, UNIT_TYPES, UnitType, MODULES, UNLOAD_RANGE, unitCost } from '../shared/defs';
+import { canDeployAt } from '../shared/game';
 import { islandAt } from '../shared/map';
 import { weatherStrength } from '../shared/weather';
 import type { Command, GameEvent, ServerMsg, StartInfo } from '../shared/protocol';
@@ -71,7 +72,19 @@ export class Match {
       pings: [],
     };
     this.hud = new Hud(this.world, {
-      build: (cat, type) => this.send({ c: 'build', cat, type }, true),
+      build: (cat, type) => {
+        // Deployment phase: the build bar picks what to place on the map instead.
+        if (this.world.setup) {
+          this.view.mode = { k: 'deploy', type };
+          audio.play('click');
+          return;
+        }
+        this.send({ c: 'build', cat, type }, true);
+      },
+      ready: (on) => {
+        this.send({ c: 'ready', on });
+        audio.play(on ? 'order' : 'click');
+      },
       cancel: (cat, type) => {
         const q = this.world.queues[cat];
         for (let i = q.length - 1; i >= 0; i--)
@@ -110,7 +123,7 @@ export class Match {
     this.bindInput();
     audio.setMusicTheme(this.world.map.theme);
     audio.startAmbient();
-    setTimeout(() => this.hud.banner(this.world.map.islands[0].name + ' AO', 'Capture resource sites · Take the enemy HQ'), 400);
+    setTimeout(() => this.hud.banner('DEPLOYMENT PHASE', 'Place your starting force inside your zone · then launch the battle'), 400);
     setTimeout(() => this.hud.toggleHelp(false), 25000);
   }
 
@@ -155,7 +168,8 @@ export class Match {
     this.rig.update(dt, w.map.size, w.clock);
     // Drop selections that no longer exist.
     for (const id of this.selected) if (!w.units.has(id)) this.selected.delete(id);
-    if (this.view.mode && !w.units.has(this.view.mode.ship)) this.view.mode = null;
+    if (this.view.mode?.k === 'unload' && !w.units.has(this.view.mode.ship)) this.view.mode = null;
+    if (this.view.mode?.k === 'deploy' && !w.setup) this.view.mode = null;
     this.updateMouseWorld();
     this.scene.update(dt, this.rig);
     this.r.render(w.clock);
@@ -367,10 +381,16 @@ export class Match {
     audio.play('deny');
   }
 
-  private ability(a: 'mines' | 'rtb' | 'retreat' | 'stop' | 'siteFactory') {
+  private ability(a: 'mines' | 'rtb' | 'retreat' | 'stop' | 'siteFactory' | 'refund') {
     const ids = this.ownSelectedIds();
     const w = this.world;
     switch (a) {
+      case 'refund':
+        if (!w.setup || !ids.length) break;
+        this.send({ c: 'undeploy', ids });
+        this.selected.clear();
+        audio.play('cash');
+        break;
       case 'mines':
         this.send({ c: 'mines', ids });
         break;
@@ -469,6 +489,40 @@ export class Match {
         this.hud.alert();
         break;
       }
+      case 'battle':
+        this.view.mode = null;
+        this.hud.banner('BATTLE STATIONS', 'Deployment over · weapons free');
+        audio.play('capture');
+        break;
+      case 'crit': {
+        // Critical hit on a ship: floating callout over it; a log line (and alert) if it is ours.
+        const u = w.units.get(e.id);
+        const txt: Record<string, string> = {
+          engine: 'ENGINE HIT',
+          rudder: 'STEERING JAMMED',
+          radar: 'RADAR DOWN',
+          weapon: (e.m ?? 'WEAPON').toUpperCase() + ' OUT',
+          fire: 'FIRE',
+          flood: 'FLOODING',
+          stun: 'CREW STUNNED',
+        };
+        if (u) this.overlay.floater(u.x, u.y, 0.1, txt[e.part], e.o === w.me ? '#ffb36b' : '#e8f6ff');
+        if (e.o === w.me && u) {
+          const msg: Record<string, string> = {
+            engine: 'Engine hit! Dead in the water.',
+            rudder: 'Steering jammed.',
+            radar: 'Radar knocked out.',
+            weapon: `${e.m ?? 'A weapon'} knocked out.`,
+            fire: 'Fire on board!',
+            flood: 'We are taking on water!',
+            stun: 'Crew stunned.',
+          };
+          // Stuns are frequent and short: shown on the map, not logged.
+          if (e.part !== 'stun') this.hud.log(unitName(fac, u.type, u.id), msg[e.part], 'bad');
+          if (e.part === 'engine' || e.part === 'flood' || e.part === 'fire') this.lastAlert = { x: u.x, y: u.y };
+        }
+        break;
+      }
       case 'retreat': {
         const u = w.units.get(e.id);
         if (u && u.owner === w.me) void voices.say(fac, this.voiceCat(u.type), 'retreat', unitName(fac, u.type, u.id));
@@ -553,6 +607,10 @@ export class Match {
         if (e.button === 2) {
           const m = this.view.mouse;
           if (!m.valid) return;
+          if (this.view.mode?.k === 'deploy') {
+            this.view.mode = null;
+            return;
+          }
           if (this.view.mode && !this.selected.size) this.view.mode = null;
           this.commandAt(m.wx, m.wy, this.pick(e.clientX, e.clientY), e.ctrlKey || e.metaKey);
         }
@@ -564,6 +622,17 @@ export class Match {
       this.drag = null;
       this.view.dragRect = null;
       if (!d || d.btn !== 0 || e.button !== 0) return;
+      const mode = this.view.mode;
+      if (mode?.k === 'deploy' && !d.moved) {
+        const m = this.view.mouse;
+        const w = this.world;
+        if (m.valid && w.setup && canDeployAt(w.map, w.players[w.me].slot, mode.type, m.wx, m.wy) && w.cash >= unitCost(mode.type, w.myFaction)) {
+          this.send({ c: 'deploy', type: mode.type, x: m.wx, y: m.wy });
+          audio.play('order');
+          if (!e.shiftKey) this.view.mode = null;
+        } else audio.play('deny');
+        return;
+      }
       if (this.view.mode?.k === 'unload' && !d.moved) {
         const m = this.view.mouse;
         if (m.valid) this.commandAt(m.wx, m.wy, null, false);
@@ -636,6 +705,7 @@ export class Match {
         }
       }
       if (!ids.length) return;
+      if ((e.code === 'Delete' || e.code === 'Backspace') && this.world.setup) this.ability('refund');
       if (e.code === 'KeyS') this.ability('stop');
       if (e.code === 'KeyU') this.enterUnload();
       if (e.code === 'KeyM') this.ability('mines');

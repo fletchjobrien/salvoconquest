@@ -1,5 +1,6 @@
 // Computer opponent. Uses only what its team can detect for targeting.
 import { BUILDABLE, UNITS, UnitType, unitCost } from './defs';
+import { canDeployAt, deployZone } from './game';
 import type { Game, Unit, SiteState } from './game';
 import { islandAt } from './map';
 
@@ -17,6 +18,7 @@ export class Bot {
   private transports: Transport[] = [];
   private fleetOrderAt = 0;
   private airOrderAt = 0;
+  private deployed = false;
 
   constructor(
     private game: Game,
@@ -27,6 +29,10 @@ export class Bot {
 
   tick() {
     const g = this.game;
+    if (g.phase === 'setup') {
+      if (!this.deployed) this.deploy();
+      return;
+    }
     if (g.time < this.nextThink || g.players[this.pid].defeated) return;
     this.nextThink = g.time + 2;
     this.produce();
@@ -34,6 +40,48 @@ export class Bot {
     this.fleet();
     this.air();
     this.groundIdle();
+  }
+
+  /** Deployment phase: buy a balanced opening force (keeping a reserve), place it, ready up. */
+  private deploy() {
+    const g = this.game;
+    const p = g.players[this.pid];
+    this.deployed = true;
+    const zone = deployZone(g.map, p.slot);
+    const site = (t: string) => g.sites.find((s) => s.owner === this.pid && s.type === t);
+    const hq = site('hq');
+    const nb = site('navalbase');
+    const bk = site('barracks');
+    const ab = site('airbase');
+    if (!zone || !hq) {
+      g.command(this.pid, { c: 'ready', on: true });
+      return;
+    }
+    const plan: { type: UnitType; at: { x: number; y: number } }[] = [
+      { type: 'destroyer', at: nb?.dock ?? hq },
+      { type: 'infantry', at: bk ?? hq },
+      { type: 'infantry', at: bk ?? hq },
+      { type: 'fighter', at: ab ?? hq },
+      { type: 'destroyer', at: nb?.dock ?? hq },
+      { type: 'sam', at: hq },
+      { type: 'infantry', at: bk ?? hq },
+      { type: 'coastal', at: hq },
+    ];
+    const reserve = p.cash * 0.2;
+    for (const it of plan) {
+      if (p.cash - unitCost(it.type, p.faction) < reserve) continue;
+      // Spiral out from the anchor to the first legal spot.
+      for (let k = 0; k < 200; k++) {
+        const r = 0.3 + k * 0.08;
+        const x = it.at.x + Math.cos(k * 2.4) * r;
+        const y = it.at.y + Math.sin(k * 2.4) * r;
+        if (canDeployAt(g.map, p.slot, it.type, x, y)) {
+          g.command(this.pid, { c: 'deploy', type: it.type, x, y });
+          break;
+        }
+      }
+    }
+    g.command(this.pid, { c: 'ready', on: true });
   }
 
   private mine(): Unit[] {
@@ -54,7 +102,7 @@ export class Bot {
     for (const u of this.mine()) count.set(u.type, (count.get(u.type) ?? 0) + 1);
     for (const cat of ['naval', 'ground', 'air'] as const) for (const it of p.queues[cat]) count.set(it.type, (count.get(it.type) ?? 0) + 1);
     // Rich bots field bigger forces.
-    const rich = 1 + Math.min(3, p.cash / 2000);
+    const rich = 1 + Math.min(3, p.cash / 6000);
     const want: Record<UnitType, number> = {
       infantry: Math.min(12 * rich, (4 + Math.floor(t / 90)) * rich),
       coastal: t > 150 ? Math.min(4, 1 + Math.floor(t / 400)) : 0,
@@ -70,7 +118,7 @@ export class Bot {
       lander: 0,
     };
     for (const cat of ['ground', 'naval', 'air'] as const) {
-      if (p.queues[cat].length >= (p.cash > 2000 ? 3 : 2)) continue;
+      if (p.queues[cat].length >= (p.cash > 6000 ? 3 : 2)) continue;
       let best: UnitType | null = null;
       let bestNeed = 0;
       for (const type of BUILDABLE[cat]) {

@@ -1,6 +1,7 @@
 // Crisp 2D tactical overlay drawn over the pixelated world: symbols, contacts, rings, orders.
-import { BUILDINGS, MODULES, UNITS, UNIT_TYPES, UNLOAD_RANGE, UnitType, deriveStats } from '../../shared/defs';
-import { ORDER_CODES, F_RETREAT, F_LANDED } from '../../shared/protocol';
+import { BUILDINGS, MODULES, UNITS, UNIT_TYPES, UNLOAD_RANGE, UnitType, deriveStats, unitCost } from '../../shared/defs';
+import { canDeployAt, deployZone } from '../../shared/game';
+import { ORDER_CODES, F_RETREAT, F_LANDED, F_FIRE, F_STOPPED, F_STUN } from '../../shared/protocol';
 import type { Renderer, CameraRig } from './renderer';
 import type { World, UView } from '../state';
 import { DOMAINS } from '../state';
@@ -22,7 +23,7 @@ export interface OverlayView {
   selected: Set<number>;
   hover: Hover | null;
   dragRect: { x0: number; y0: number; x1: number; y1: number } | null;
-  mode: { k: 'unload'; ship: number; ids: number[] } | null;
+  mode: { k: 'unload'; ship: number; ids: number[] } | { k: 'deploy'; type: UnitType } | null;
   mouse: { x: number; y: number; wx: number; wy: number; valid: boolean };
   showRanges: boolean;
   showSensors: boolean;
@@ -59,6 +60,8 @@ interface Floater {
   text: string;
   color: string;
   t: number;
+  /** Stack offset in pixels, so callouts at the same spot don't overlap. */
+  yo: number;
 }
 
 export class Overlay {
@@ -99,7 +102,10 @@ export class Overlay {
   }
 
   floater(x: number, y: number, alt: number, text: string, color: string) {
-    this.floaters.push({ x, y, alt, text, color, t: 0 });
+    // Stack above any fresh callout at the same spot.
+    let yo = 0;
+    for (const f of this.floaters) if (f.t < 1.2 && Math.abs(f.x - x) < 0.3 && Math.abs(f.y - y) < 0.3) yo = Math.max(yo, f.yo + 11);
+    this.floaters.push({ x, y, alt, text, color, t: 0, yo });
   }
 
   private proj(v: OverlayView, x: number, alt: number, y: number) {
@@ -159,6 +165,7 @@ export class Overlay {
     }
     if (selUnits.length && (v.showRanges || selUnits.length <= 12)) this.drawRanges(v, selUnits, selUnits.length > 6 ? 0.6 : 1);
     if (v.mode?.k === 'unload') this.drawUnloadMode(v);
+    if (w.setup) this.drawDeployZone(v);
 
     // ---- sites ----
     for (const s of w.map.sites) {
@@ -334,6 +341,24 @@ export class Overlay {
         ctx.fillStyle = hp > 0.6 ? '#7dff9a' : hp > 0.3 ? '#ffc94a' : '#ff5a4a';
         ctx.fillRect(sx - bw / 2, by, bw * hp, 2);
       }
+      // Damaged systems: tiny tags under the health bar (own ships show every system).
+      const tags = this.damageTags(w, u);
+      if (tags.length) {
+        ctx.font = `600 7px ${FONT}`;
+        ctx.textAlign = 'left';
+        let tw = 0;
+        for (const [t] of tags) tw += ctx.measureText(t).width + 4;
+        let tx = sx - tw / 2;
+        const ty = sy + sz + 13;
+        for (const [t, c] of tags) {
+          const wdt = ctx.measureText(t).width;
+          ctx.fillStyle = 'rgba(0,0,0,0.6)';
+          ctx.fillRect(tx - 1, ty - 7, wdt + 2, 9);
+          ctx.fillStyle = c;
+          ctx.fillText(t, tx, ty);
+          tx += wdt + 4;
+        }
+      }
       if (u.flags & F_RETREAT) {
         ctx.fillStyle = '#ffc94a';
         ctx.font = `600 8px ${FONT}`;
@@ -483,7 +508,7 @@ export class Overlay {
       ctx.fillStyle = f.color;
       ctx.font = `600 11px ${FONT}`;
       ctx.textAlign = 'center';
-      ctx.fillText(f.text, P.x, P.y - 18 - k * 26);
+      ctx.fillText(f.text, P.x, P.y - 18 - f.yo - k * 26);
       ctx.globalAlpha = 1;
     }
     this.floaters = this.floaters.filter((f) => f.t <= 2.2);
@@ -551,6 +576,21 @@ export class Overlay {
     const w = img.width / this.dpr;
     const h = img.height / this.dpr;
     this.ctx.drawImage(img, Math.round(x - w / 2), Math.round(y - h / 2), w, h);
+  }
+
+  /** Short tags for knocked-out ship systems: [text, colour]. */
+  private damageTags(w: World, u: UView): [string, string][] {
+    const out: [string, string][] = [];
+    const d = u.owner === w.me ? w.details.get(u.id)?.[13] : undefined;
+    if (u.flags & F_STOPPED) out.push(['DIW', '#ff5a4a']);
+    else if (d && d[0] > 0) out.push(['ENG', '#ffb36b']);
+    if (d && d[1] > 0) out.push(['RUD', '#ffb36b']);
+    if (d && d[2] > 0) out.push(['RAD', '#ffb36b']);
+    if (d && d[6] >= 0) out.push(['WPN', '#ffb36b']);
+    if (u.flags & F_FIRE) out.push(['FIRE', '#ff7a3a']);
+    if (d && d[4] > 0) out.push(['FLD', '#6fb8ff']);
+    if (u.flags & F_STUN) out.push(['STUN', '#ffe14a']);
+    return out;
   }
 
   label(w: World, u: UView): string {
@@ -918,9 +958,61 @@ export class Overlay {
     }
   }
 
+  /** Deployment phase: our zone, and a placement ghost (green ring = legal spot, red = not). */
+  private drawDeployZone(v: OverlayView) {
+    const w = v.world;
+    const ctx = this.ctx;
+    const z = deployZone(w.map, w.players[w.me].slot);
+    if (!z) return;
+    const symSize = 12;
+    const fmtMoney = (n: number) => '$' + Math.round(n).toLocaleString('en-US');
+    const col = sideColor('own');
+    const pulse = 0.5 + 0.5 * Math.sin(w.clock * 2);
+    if (this.circle(v, z.x, z.y, z.r, 0, 128)) {
+      ctx.fillStyle = col;
+      ctx.globalAlpha = 0.035;
+      ctx.fill();
+      ctx.strokeStyle = col;
+      ctx.globalAlpha = 0.45 + 0.2 * pulse;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([10, 6]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    if (this.proj(v, z.x, 0, z.y - z.r)) {
+      ctx.globalAlpha = 0.8;
+      ctx.fillStyle = col;
+      ctx.font = `600 10px ${FONT}`;
+      ctx.textAlign = 'center';
+      ctx.fillText('DEPLOYMENT ZONE', P.x, P.y - 8);
+    }
+    ctx.globalAlpha = 1;
+    const m = v.mode;
+    if (m?.k !== 'deploy' || !v.mouse.valid) return;
+    const ok = canDeployAt(w.map, w.players[w.me].slot, m.type, v.mouse.wx, v.mouse.wy);
+    const afford = w.cash >= unitCost(m.type, w.myFaction);
+    if (!this.proj(v, v.mouse.wx, 0, v.mouse.wy)) return;
+    const good = ok && afford;
+    ctx.globalAlpha = good ? 0.85 : 0.5;
+    this.blit(symbolCanvas('own', UNITS[m.type].domain as SymDomain, glyphFor(m.type), symSize, false), P.x, P.y);
+    ctx.strokeStyle = good ? '#7dff9a' : '#ff5a4a';
+    ctx.globalAlpha = 0.9;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(P.x, P.y, symSize * 1.6, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = good ? '#7dff9a' : '#ff5a4a';
+    ctx.font = `600 9px ${FONT}`;
+    ctx.textAlign = 'left';
+    const why = !afford ? 'NOT ENOUGH FUNDS' : !ok ? (UNITS[m.type].domain === 'land' ? 'TROOPS: HOME ISLAND ONLY' : UNITS[m.type].domain === 'air' ? 'INSIDE THE ZONE ONLY' : 'SHIPS: OPEN WATER IN THE ZONE') : `${UNITS[m.type].short} · ${fmtMoney(unitCost(m.type, w.myFaction))}`;
+    ctx.fillText(why, P.x + symSize * 1.9, P.y + 3);
+    ctx.globalAlpha = 1;
+  }
+
   private drawUnloadMode(v: OverlayView) {
     const w = v.world;
-    const m = v.mode!;
+    const m = v.mode;
+    if (m?.k !== 'unload') return;
     const ship = w.units.get(m.ship);
     if (!ship) return;
     const ctx = this.ctx;
