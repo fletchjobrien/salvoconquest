@@ -589,12 +589,11 @@ function placeSites(map: GameMap, rng: Rng) {
         const ang = Math.PI / 4 + (k * Math.PI) / 2;
         put('resource', true, (x, y) => -Math.hypot(x - (C + Math.cos(ang) * 9), y - (C + Math.sin(ang) * 9)));
       }
+      // The centre is a prize of resources, radar and missile batteries only: no factories
+      // (airbase, dockyard, barracks), so holding it never becomes a forward production base.
       put('radar', false, centrality);
-      put('airbase', false, (x, y) => -Math.abs(Math.hypot(x - C, y - C) - 4));
       put('battery', true, (x, y) => -Math.hypot(x - (C + 7), y - C));
       put('battery', true, (x, y) => -Math.hypot(x - (C - 7), y - C));
-      put('barracks', false, (x, y) => -Math.hypot(x - C, y - (C + 4)));
-      put('dockyard', true, (x, y) => -Math.hypot(x - C, y - (C - 8)));
     }
   }
   for (const isl of map.islands) {
