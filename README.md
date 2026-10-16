@@ -17,7 +17,7 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
 | RMB | Move · attack (on enemy or radar contact) · board (troops on a ship) |
 | Ctrl + RMB | Move without stopping to fight |
 | WASD / MMB drag / screen edge | Pan · Q/E rotate · wheel zoom |
-| U | Unload troops: a ring shows the landing range, click land inside it |
+| U | Unload troops: a ring shows the landing range, click land inside it (every selected ship with troops lands there) |
 | M / R / T / X | Drop mines · aircraft return to base · toggle auto-retreat · stop |
 | Ctrl+1–9 / 1–9 | Save / recall group (press twice to jump the camera) |
 | Tab / V | Show weapon ranges / toggle radar and sonar coverage |
@@ -56,7 +56,9 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
 Radar (surface and air), sonar (submarines only) and eyesight. Far-away or poor-quality detections show as a
 **radar contact**: one calm marker per track, placed somewhere within the error radius of the true position (the
 error shows on hover). As you close in, the estimate glides toward the truth until the contact becomes an identified
-track. Weapons only fire at classified tracks their seeker can find. The minimap shows your fog of war. Storms cut radar range and eyesight; fog banks cut eyesight. Submarines are
+track. **Unidentified contacts cannot be targeted**: they mark a position only (right-click there is a move);
+once a contact is classified you can attack it. Ground contacts use a square marker, surface contacts a quatrefoil.
+The minimap shows your fog of war. At most two weather systems are on the map at once. Storms cut radar range and eyesight; fog banks cut eyesight. Submarines are
 invisible until a sonar hears them, and they reveal themselves briefly when they fire.
 
 ![Storm cell and fog bank](docs/weather.png)

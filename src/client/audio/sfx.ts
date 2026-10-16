@@ -322,7 +322,7 @@ export class Audio {
       case 'thunder': {
         const d = Math.hypot((x ?? 0) - this.listener.x, (y ?? 0) - this.listener.y);
         const delay = Math.min(4, d * 0.08);
-        const o = this.out(Math.max(0.15, 0.7 * v), pan, 0.8, this.amb);
+        const o = this.out(Math.max(0.06, 0.3 * v), pan, 0.8, this.amb);
         this.burst(t + delay, 3.5, 1, 'lowpass', 500, 60, o, 0.5, true, 0.08);
         this.burst(t + delay, 0.6, 0.5, 'lowpass', 2500, 300, o, 0.5, false, 0.01);
         break;
@@ -413,8 +413,8 @@ export class Audio {
     const t = this.ctx.currentTime;
     const close = Math.max(0.2, Math.min(1, 30 / (zoom + 8)));
     this.ocean.gain.setTargetAtTime(0.25 * close + 0.08, t, 0.5);
-    this.wind!.gain.setTargetAtTime(storm * 0.25 + 0.015, t, 0.8);
-    this.rain!.gain.setTargetAtTime(storm * 0.12 * close, t, 0.8);
+    this.wind!.gain.setTargetAtTime(storm * 0.1 + 0.01, t, 0.8);
+    this.rain!.gain.setTargetAtTime(storm * 0.05 * close, t, 0.8);
   }
 
   private score: Music | null = null;

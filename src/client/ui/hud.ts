@@ -503,7 +503,7 @@ export class Hud {
     const b: string[] = [];
     const any = (f: (u: UView) => boolean) => sel.some(f);
     const ships = sel.filter((u) => (w.details.get(u.id)?.[2].length ?? 0) > 0);
-    if (ships.length === 1) b.push(`<button class="btn small" data-act="unload">UNLOAD<span class="kbd">U</span></button>`);
+    if (ships.length >= 1) b.push(`<button class="btn small" data-act="unload">UNLOAD${ships.length > 1 ? ` ×${ships.length}` : ''}<span class="kbd">U</span></button>`);
     if (any((u) => matchLoadoutOf(u.type).includes('mines'))) b.push(`<button class="btn small" data-act="mines">DROP MINES<span class="kbd">M</span></button>`);
     if (any((u) => UNITS[u.type].domain === 'air')) b.push(`<button class="btn small" data-act="rtb">RTB<span class="kbd">R</span></button>`);
     if (any((u) => UNITS[u.type].category === 'naval' || UNITS[u.type].category === 'ground')) {

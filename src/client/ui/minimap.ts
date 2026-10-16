@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { WEATHER_AXES, WIND_ANGLE } from '../../shared/weather';
 import type { World } from '../state';
 import { SIDE } from '../theme';
-import { BUILDINGS, UNITS, deriveStats } from '../../shared/defs';
+import { BUILDINGS, UNITS, UNIT_TYPES, deriveStats } from '../../shared/defs';
 import { deployZone } from '../../shared/game';
 import { F_LANDED } from '../../shared/protocol';
 import { matchLoadoutOf } from '../loadouts';
@@ -220,13 +220,18 @@ export class Minimap {
         ctx.fill();
       } else ctx.fillRect(s.x * k - z / 2, s.y * k - z / 2, z, z);
     }
-    // contacts: a small hollow diamond (hostile if classified, else unknown)
+    // contacts: a small hollow diamond (hostile if classified, else unknown); ground: a square
     ctx.lineWidth = 1;
     ctx.globalAlpha = 0.85;
     for (const c of w.contacts.values()) {
       ctx.strokeStyle = c.kind >= 10 ? SIDE.hostile : SIDE.unknown;
       const x = c.x * k;
       const y = c.y * k;
+      const ground = c.kind >= 10 ? UNITS[UNIT_TYPES[c.kind - 10]].domain === 'land' : c.kind === 3;
+      if (ground) {
+        ctx.strokeRect(x - 1.8, y - 1.8, 3.6, 3.6);
+        continue;
+      }
       ctx.beginPath();
       ctx.moveTo(x, y - 2.2);
       ctx.lineTo(x + 2.2, y);

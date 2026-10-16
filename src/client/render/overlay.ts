@@ -23,7 +23,7 @@ export interface OverlayView {
   selected: Set<number>;
   hover: Hover | null;
   dragRect: { x0: number; y0: number; x1: number; y1: number } | null;
-  mode: { k: 'unload'; ship: number; ids: number[] } | { k: 'deploy'; type: UnitType } | null;
+  mode: { k: 'unload'; ships: { ship: number; ids: number[] }[] } | { k: 'deploy'; type: UnitType } | null;
   mouse: { x: number; y: number; wx: number; wy: number; valid: boolean };
   showRanges: boolean;
   showSensors: boolean;
@@ -253,8 +253,8 @@ export class Overlay {
       ctx.fillStyle = col;
       ctx.textAlign = 'left';
       ctx.font = `500 8px ${FONT}`;
-      ctx.fillText(type ? UNITS[type].short : domain === 'sub' ? 'SONAR' : domain === 'air' ? 'AIR' : 'SURFACE', P.x + symSize + 2, P.y + 3);
-      if (hov) ctx.fillText('±' + c.r.toFixed(1) + ' km', P.x + symSize + 2, P.y + 12);
+      ctx.fillText(type ? UNITS[type].short : domain === 'sub' ? 'SONAR' : domain === 'air' ? 'AIR' : domain === 'land' ? 'GROUND' : 'SURFACE', P.x + symSize + 2, P.y + 3);
+      if (hov) ctx.fillText(type ? '±' + c.r.toFixed(1) + ' km' : 'UNIDENTIFIED · CANNOT TARGET', P.x + symSize + 2, P.y + 12);
       ctx.globalAlpha = 1;
       this.items.push({ kind: 'contact', id: c.id, sx: P.x, sy: P.y, own: false, type });
     }
@@ -1013,20 +1013,20 @@ export class Overlay {
     const w = v.world;
     const m = v.mode;
     if (m?.k !== 'unload') return;
-    const ship = w.units.get(m.ship);
-    if (!ship) return;
+    const ships = m.ships.map((s) => w.units.get(s.ship)).filter((s): s is UView => !!s);
+    if (!ships.length) return;
     const ctx = this.ctx;
     ctx.strokeStyle = '#8dffb4';
     ctx.lineWidth = 1.5;
     ctx.globalAlpha = 0.7;
     ctx.setLineDash([8, 5]);
     ctx.lineDashOffset = -w.clock * 10;
-    if (this.circle(v, ship.x, ship.y, UNLOAD_RANGE, 0, 96)) ctx.stroke();
+    for (const ship of ships) if (this.circle(v, ship.x, ship.y, UNLOAD_RANGE, 0, 96)) ctx.stroke();
     ctx.setLineDash([]);
     ctx.lineDashOffset = 0;
     ctx.globalAlpha = 1;
     if (v.mouse.valid) {
-      const inRange = Math.hypot(v.mouse.wx - ship.x, v.mouse.wy - ship.y) <= UNLOAD_RANGE;
+      const inRange = ships.every((ship) => Math.hypot(v.mouse.wx - ship.x, v.mouse.wy - ship.y) <= UNLOAD_RANGE);
       if (this.proj(v, v.mouse.wx, groundY(w.map, v.mouse.wx, v.mouse.wy), v.mouse.wy)) {
         ctx.strokeStyle = inRange ? '#8dffb4' : '#ffc94a';
         ctx.beginPath();
@@ -1042,7 +1042,8 @@ export class Overlay {
         ctx.fillStyle = ctx.strokeStyle;
         ctx.font = `600 9px ${FONT}`;
         ctx.textAlign = 'left';
-        ctx.fillText(inRange ? 'LAND HERE' : 'SHIP WILL CLOSE IN', P.x + 13, P.y - 6);
+        const n = ships.length > 1 ? `${ships.length} SHIPS · ` : '';
+        ctx.fillText(n + (inRange ? 'LAND HERE' : ships.length > 1 ? 'WILL CLOSE IN' : 'SHIP WILL CLOSE IN'), P.x + 13, P.y - 6);
       }
     }
   }

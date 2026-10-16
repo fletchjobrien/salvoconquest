@@ -512,6 +512,9 @@ export class Game {
         const us = own(cmd.ids);
         const t = this.units.get(Number(cmd.target));
         if (!t || t.dead || t.team === p.team) return;
+        // Only identified targets can be attacked; an unknown radar contact is just a position.
+        const kt = this.knowledge.get(p.team)?.get(t.id);
+        if (!kt || kt.ident < 1) return;
         const k = this.knowledge.get(p.team)?.get(t.id);
         for (const u of us) {
           if (u.inside >= 0) continue;
@@ -851,7 +854,7 @@ export class Game {
         [-r * 0.5, t],
       ][edge];
       const ang = Math.atan2(S / 2 - pos[1], S / 2 - pos[0]) + this.rng.range(-0.6, 0.6);
-      const sp = kind === 0 ? this.rng.range(0.05, 0.1) : this.rng.range(0.02, 0.05);
+      const sp = kind === 0 ? this.rng.range(0.08, 0.15) : this.rng.range(0.04, 0.08);
       this.weather.push({
         id: this.nextId++,
         kind,
@@ -866,10 +869,10 @@ export class Game {
         life: (S + r * 2) / sp,
       });
     };
-    // Weather is occasional: a calm opening, at most two of each kind, and half the old rate.
-    if (this.time > 150) {
-      if (this.rng.next() < (info.stormRate / 120) * dt && this.weather.filter((w) => w.kind === 0).length < 2) spawnCell(0);
-      if (this.rng.next() < (info.fogRate / 120) * dt && this.weather.filter((w) => w.kind === 1).length < 2) spawnCell(1);
+    // Weather is occasional: a calm opening and at most two systems (storm or fog) at a time.
+    if (this.time > 150 && this.weather.length < 2) {
+      if (this.rng.next() < (info.stormRate / 120) * dt) spawnCell(0);
+      else if (this.rng.next() < (info.fogRate / 120) * dt) spawnCell(1);
     }
     for (const w of this.weather) {
       w.x += w.vx * dt;
@@ -1992,9 +1995,9 @@ export class Game {
       if (t.landed) continue;
       if (k.lost) continue;
       const exact = k.ident === 2;
-      // Never fire blind: fuzzy contacts need a seeker that can find them, and must be
-      // classified (identified as a hostile type) unless the player ordered the attack.
-      if (!exact && !(w.mod.seeker && k.r <= w.mod.seeker && (k.ident >= 1 || id === forced))) continue;
+      // Never fire blind: fuzzy contacts must be classified (identified as a hostile type)
+      // and within reach of the weapon's seeker. Unidentified contacts cannot be targeted.
+      if (!exact && !(w.mod.seeker && k.r <= w.mod.seeker && k.ident >= 1)) continue;
       const tx = exact ? t.x : k.x;
       const ty = exact ? t.y : k.y;
       const d = Math.hypot(tx - sh.x, ty - sh.y);

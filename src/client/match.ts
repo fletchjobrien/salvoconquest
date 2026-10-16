@@ -168,7 +168,10 @@ export class Match {
     this.rig.update(dt, w.map.size, w.clock);
     // Drop selections that no longer exist.
     for (const id of this.selected) if (!w.units.has(id)) this.selected.delete(id);
-    if (this.view.mode?.k === 'unload' && !w.units.has(this.view.mode.ship)) this.view.mode = null;
+    if (this.view.mode?.k === 'unload') {
+      this.view.mode.ships = this.view.mode.ships.filter((s) => w.units.has(s.ship));
+      if (!this.view.mode.ships.length) this.view.mode = null;
+    }
     if (this.view.mode?.k === 'deploy' && !w.setup) this.view.mode = null;
     this.updateMouseWorld();
     this.scene.update(dt, this.rig);
@@ -305,10 +308,23 @@ export class Match {
         audio.play('deny');
         return;
       }
-      this.send({ c: 'unload', ship: mode.ship, ids: mode.ids, x, y });
+      // Every selected ship with troops lands them here, spread a little along the beach.
+      const n = mode.ships.length;
+      mode.ships.forEach((s, i) => {
+        const a = (i / Math.max(1, n)) * Math.PI * 2;
+        const off = n > 1 ? 0.35 : 0;
+        let lx = x + Math.cos(a) * off;
+        let ly = y + Math.sin(a) * off;
+        if (islandAt(w.map, lx, ly) < 0) {
+          lx = x;
+          ly = y;
+        }
+        this.send({ c: 'unload', ship: s.ship, ids: s.ids, x: lx, y: ly });
+      });
       this.ping(x, y, 'unload');
       audio.play('order');
-      void voices.say(w.myFaction, 'ground', 'unload', unitName(w.myFaction, 'infantry', mode.ids[0] ?? mode.ship));
+      const first = mode.ships[0];
+      void voices.say(w.myFaction, 'ground', 'unload', unitName(w.myFaction, 'infantry', first.ids[0] ?? first.ship));
       this.view.mode = null;
       this.hud.cargoSel.clear();
       return;
@@ -352,12 +368,16 @@ export class Match {
           }
         }
       } else if (hover.kind === 'contact') {
-        this.send({ c: 'attack', ids, target: hover.id });
         const c = w.contacts.get(hover.id);
-        if (c) this.ping(c.x, c.y, 'attack');
-        audio.play('order');
-        void voices.say(w.myFaction, cat, 'attack', who);
-        return;
+        // Unidentified contacts are only a position: right-click there is a move order.
+        if (c && c.kind >= 10) {
+          this.send({ c: 'attack', ids, target: hover.id });
+          this.ping(c.x, c.y, 'attack');
+          audio.play('order');
+          void voices.say(w.myFaction, cat, 'attack', who);
+          return;
+        }
+        if (c) this.hud.log('CIC', 'Unidentified contact: cannot target it yet. Close in or bring an AEW to identify it.', 'warn');
       }
     }
     this.send({ c: 'move', ids, x, y, mode: forceMove ? 'move' : 'attack' });
@@ -366,19 +386,23 @@ export class Match {
     void voices.say(w.myFaction, cat, 'move', who);
   }
 
+  /** Unload mode for every selected ship that carries troops (picked troops only, if any are picked). */
   private enterUnload() {
     const w = this.world;
+    const ships: { ship: number; ids: number[] }[] = [];
     for (const id of this.selected) {
       const d = w.details.get(id);
-      if (d && d[2].length) {
-        const ids = this.hud.cargoSel.size ? d[2].filter((c) => this.hud.cargoSel.has(c)) : d[2].slice();
-        this.view.mode = { k: 'unload', ship: id, ids };
-        audio.play('click');
-        this.hud.log('ORDERS', `Pick a landing point within ${UNLOAD_RANGE} km — the ship closes in if needed.`, 'good');
-        return;
-      }
+      if (!d || !d[2].length) continue;
+      const ids = this.hud.cargoSel.size ? d[2].filter((c) => this.hud.cargoSel.has(c)) : d[2].slice();
+      if (ids.length) ships.push({ ship: id, ids });
     }
-    audio.play('deny');
+    if (!ships.length) {
+      audio.play('deny');
+      return;
+    }
+    this.view.mode = { k: 'unload', ships };
+    audio.play('click');
+    this.hud.log('ORDERS', `Pick a landing point${ships.length > 1 ? ` for ${ships.length} ships` : ''} within ${UNLOAD_RANGE} km — ships close in if needed.`, 'good');
   }
 
   private ability(a: 'mines' | 'rtb' | 'retreat' | 'stop' | 'siteFactory' | 'refund') {

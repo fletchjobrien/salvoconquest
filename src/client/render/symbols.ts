@@ -159,6 +159,21 @@ function framePath(ctx: CanvasRenderingContext2D, affil: Affil, domain: SymDomai
     ctx.lineTo(o + r, -s * 0.4);
     return;
   }
+  if (domain === 'land') {
+    // Unknown ground contact: a square with clipped corners, so it never reads as a ship.
+    const a = s * 0.85;
+    const c = s * 0.32;
+    ctx.moveTo(-a + c, -a);
+    ctx.lineTo(a - c, -a);
+    ctx.lineTo(a, -a + c);
+    ctx.lineTo(a, a - c);
+    ctx.lineTo(a - c, a);
+    ctx.lineTo(-a + c, a);
+    ctx.lineTo(-a, a - c);
+    ctx.lineTo(-a, -a + c);
+    ctx.closePath();
+    return;
+  }
   ctx.arc(0, -o, r, Math.PI * 0.85, Math.PI * 2.15);
   ctx.arc(o, 0, r, Math.PI * 1.35, Math.PI * 2.65);
   ctx.arc(0, o, r, Math.PI * 1.85, Math.PI * 3.15);
