@@ -108,7 +108,7 @@ export class World {
   private started = false;
 
   constructor(readonly info: StartInfo) {
-    this.map = generateMap(info.seed, info.theme);
+    this.map = generateMap(info.seed, info.theme, info.players.map((p) => p.slot));
     this.me = info.you;
     this.players = info.players.map((p) => ({ ...p, res: 0, units: 0, defeated: false, dom: 0 }));
     this.myTeam = this.players[this.me]?.team ?? 0;

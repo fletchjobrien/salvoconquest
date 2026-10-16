@@ -721,7 +721,6 @@ export class Overlay {
     return p ? `${p.name}` : 'UNCLAIMED';
   }
 
-  /** Own radar (cyan) and sonar (violet) coverage as soft filled discs, DEFCON style. */
   /**
    * Sensor view (V): everything our sensors do not cover is darkened; where only air-search
    * radar reaches (aircraft and missiles only) it is half dark. Coverage edges are drawn as one

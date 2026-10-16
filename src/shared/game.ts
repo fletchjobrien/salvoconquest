@@ -326,7 +326,7 @@ export class Game {
     this.seed = seed;
     this.theme = theme;
     this.rng = new Rng(seed ^ 0x51ab);
-    this.map = generateMap(seed, theme);
+    this.map = generateMap(seed, theme, players.map((p) => p.slot));
     for (const s of this.map.sites) {
       const w = BUILDINGS[s.type].weapons.map((m) => mkWeapon(MODULES[m]));
       this.sites.push({ ...s, owner: -1, cap: 0, capBy: -1, weapons: w, merchantCd: 0 });

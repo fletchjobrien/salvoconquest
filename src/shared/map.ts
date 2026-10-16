@@ -192,7 +192,11 @@ function makeLobes(rng: Rng, r: number, arms: number, armLen: number, stretch: n
   return lobes;
 }
 
-export function generateMap(seed: number, theme: Theme): GameMap {
+/**
+ * `occupied`: the player slots in this match. Home islands of empty slots (e.g. slots 1 and 3
+ * in a 1v1) get no HQ; their other buildings stay as neutral prizes. Omit for all four.
+ */
+export function generateMap(seed: number, theme: Theme, occupied?: number[]): GameMap {
   const rng = new Rng(seed);
   const info = THEME_INFO[theme];
   const specs: IslandSpec[] = [];
@@ -394,7 +398,7 @@ export function generateMap(seed: number, theme: Theme): GameMap {
   }
   for (let c = 0; c < nn * nn; c++) if (comp[c] >= 0) map.islandOf[c] = owner[comp[c]];
 
-  placeSites(map, rng);
+  placeSites(map, rng, occupied);
   fixDocks(map);
   return map;
 }
@@ -523,7 +527,7 @@ function distToWater(map: GameMap, x: number, y: number): number {
   return Math.hypot(wx - x, wy - y);
 }
 
-function placeSites(map: GameMap, rng: Rng) {
+function placeSites(map: GameMap, rng: Rng, occupied?: number[]) {
   const sites = map.sites;
   const add = (type: BuildingType, x: number, y: number, island: number, home: number, needDock: boolean) => {
     let dock: { x: number; y: number } | null = null;
@@ -578,7 +582,7 @@ function placeSites(map: GameMap, rng: Rng) {
     const towardCenter = (x: number, y: number) => -Math.hypot(x - C, y - C) * 0.3;
     const centrality = (x: number, y: number) => -Math.hypot(x - isl.x, y - isl.y);
     if (isl.home >= 0) {
-      put('hq', false, centrality, isl.home);
+      if (!occupied || occupied.includes(isl.home)) put('hq', false, centrality, isl.home);
       put('navalbase', true, towardCenter, isl.home);
       put('airbase', false, (x, y) => -Math.abs(Math.hypot(x - isl.x, y - isl.y) - isl.r * 0.45), isl.home);
       put('barracks', false, (x, y) => -Math.abs(Math.hypot(x - isl.x, y - isl.y) - isl.r * 0.4), isl.home);

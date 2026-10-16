@@ -482,7 +482,7 @@ export class Match {
       case 'capture': {
         const s = w.map.sites[e.site];
         const isl = w.map.islands[s.island];
-        const name = `${isl.home >= 0 ? 'HOME' : isl.name} ${s.type === 'resource' ? 'RESOURCES' : s.type.toUpperCase()}`;
+        const name = `${isl.home >= 0 ? (w.players.some((p) => p.slot === isl.home) ? 'HOME' : 'UNCLAIMED') : isl.name} ${s.type === 'resource' ? 'RESOURCES' : s.type.toUpperCase()}`;
         if (e.o === w.me) {
           audio.play('capture');
           audio.stinger('capture');

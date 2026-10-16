@@ -296,7 +296,7 @@ export class Hud {
       } else if (f >= 0) {
         const s = w.map.sites[f];
         const isl = w.map.islands[s.island];
-        label = isl.home >= 0 ? 'HOME' : isl.name;
+        label = isl.home >= 0 ? (w.players.some((p) => p.slot === isl.home) ? 'HOME' : 'UNCLAIMED') : isl.name;
       }
       this.factoryLabels.get(cat)!.textContent = w.setup ? 'DEPLOY' : '@ ' + label;
       const q = w.queues[cat];
@@ -396,7 +396,7 @@ export class Hud {
     const isl = w.map.islands[s.island];
     const canProduce = sv.owner === w.me && b.produces;
     const isFactory = canProduce && w.factories[b.produces!] === id;
-    return `<div class="sp-head"><img src="${symbolDataUrl(affil, 'site', SITE_GLYPH[s.type], 13)}"><div><div class="nm">${b.name.toUpperCase()}</div><div class="ty">${esc(isl.home >= 0 ? 'HOME ISLAND' : isl.name)} · ${esc(owner)}</div></div></div>
+    return `<div class="sp-head"><img src="${symbolDataUrl(affil, 'site', SITE_GLYPH[s.type], 13)}"><div><div class="nm">${b.name.toUpperCase()}</div><div class="ty">${esc(isl.home >= 0 ? (w.players.some((p) => p.slot === isl.home) ? 'HOME ISLAND' : 'UNCLAIMED ISLAND') : isl.name)} · ${esc(owner)}</div></div></div>
       <div class="tt-r" style="color:var(--dim);font-size:10px;line-height:1.5">${b.desc}</div>
       ${sv.cap > 0 ? `<div class="status">CAPTURE ${Math.round(sv.cap * 100)}%</div><div class="bar"><i style="width:${sv.cap * 100}%;background:var(--warn)"></i></div>` : ''}
       ${canProduce ? `<div class="acts"><button class="btn small ${isFactory ? 'on' : ''}" data-act="siteFactory">${isFactory ? '✓ PRODUCING HERE' : 'PRODUCE ' + b.produces!.toUpperCase() + ' HERE'}</button></div>` : ''}`;
