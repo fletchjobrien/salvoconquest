@@ -439,41 +439,44 @@ export class Overlay {
             ux = ex / el;
             uy = ey / el;
           }
-          const L = asm ? 16 : 7;
-          ctx.strokeStyle = col;
-          ctx.globalAlpha = asm ? 0.6 : 0.5;
-          ctx.lineWidth = asm ? 1.5 : 1;
-          ctx.beginPath();
-          ctx.moveTo(sx, sy);
-          ctx.lineTo(sx - ux * L, sy - uy * L);
-          ctx.stroke();
-          ctx.globalAlpha = 1;
-        }
-        if (asm) {
-          if (!p.mine) {
-            ctx.fillStyle = col;
-            ctx.globalAlpha = 0.16;
+          // Short trail for anti-air missiles only; anti-ship darts carry no tail.
+          if (!asm) {
+            ctx.strokeStyle = col;
+            ctx.globalAlpha = 0.5;
+            ctx.lineWidth = 1;
             ctx.beginPath();
-            ctx.arc(sx, sy, 6, 0, Math.PI * 2);
-            ctx.fill();
+            ctx.moveTo(sx, sy);
+            ctx.lineTo(sx - ux * 7, sy - uy * 7);
+            ctx.stroke();
             ctx.globalAlpha = 1;
           }
-          // Arrowhead pointing along the flight path.
-          const hx = ux * 6.5;
-          const hy = uy * 6.5;
+        }
+        if (asm) {
+          // A slim dart with a notched back, pointing along the flight path; a soft glow
+          // (hostile only) instead of a filled halo.
+          const px = -uy;
+          const py = ux;
+          ctx.save();
+          if (!p.mine) {
+            ctx.shadowColor = col;
+            ctx.shadowBlur = 6;
+          }
           ctx.fillStyle = col;
+          ctx.globalAlpha = p.mine ? 0.75 : 0.9;
           ctx.beginPath();
-          ctx.moveTo(sx + hx, sy + hy);
-          ctx.lineTo(sx - hx * 0.6 - hy * 0.6, sy - hy * 0.6 + hx * 0.6);
-          ctx.lineTo(sx - hx * 0.25, sy - hy * 0.25);
-          ctx.lineTo(sx - hx * 0.6 + hy * 0.6, sy - hy * 0.6 - hx * 0.6);
+          ctx.moveTo(sx + ux * 5, sy + uy * 5);
+          ctx.lineTo(sx - ux * 3.5 + px * 2.4, sy - uy * 3.5 + py * 2.4);
+          ctx.lineTo(sx - ux * 2, sy - uy * 2);
+          ctx.lineTo(sx - ux * 3.5 - px * 2.4, sy - uy * 3.5 - py * 2.4);
           ctx.closePath();
           ctx.fill();
+          ctx.restore();
           if (!p.mine) {
-            ctx.font = `600 8px ${FONT}`;
+            ctx.font = `500 7px ${FONT}`;
             ctx.textAlign = 'left';
-            ctx.globalAlpha = 0.9;
-            ctx.fillText('ASM', sx + 7, sy - 5);
+            ctx.fillStyle = col;
+            ctx.globalAlpha = 0.55;
+            ctx.fillText('ASM', sx + 6, sy - 4);
             ctx.globalAlpha = 1;
           }
         } else {
