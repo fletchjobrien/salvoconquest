@@ -36,8 +36,8 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
   built; then the unit moves out to that spot. Ships can only go to water connected to one of your naval bases or
   dockyards, troops only to an island with one of your barracks; aircraft can be sent anywhere.
 - Units are expensive (prices ×3): forces are small and every hull counts. Ships carry few missiles
-  (destroyer: 4 anti-ship missiles; 5 SM-6 or 6 HQ-9B SAMs per launcher) and rearm at a naval base or dockyard, but only while not under attack (no hit in
-  the last 15 s and nothing homing on them). Missile batteries (buildings and trucks) fire at half their old rate.
+  (destroyer: 4 anti-ship missiles; 5 SM-6 or 6 HQ-9B SAMs per launcher) and rearm at a naval base or dockyard (ground units at any friendly building), but only after a lull: no hit
+  for 30 s, no shots fired for 20 s, and nothing homing on them. Field medics and launcher reloads wait too. Missile batteries (buildings and trucks) fire at half their old rate.
 - Ground units capture buildings by standing next to them. Captured **resource sites** spawn merchant
   ships that sail cargo home and turn it into cash. Enemy subs love merchants.
 - Other buildings give bonuses: radar stations (24 km air / 18 km surface radar), airbases, barracks and dockyards (forward production, repair, rearm),
@@ -50,6 +50,10 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
   crew (no firing for a few seconds). Torpedoes and mines flood and wreck engines; shells hit mounts; missiles start
   fires. Systems repair over time, three times faster at a friendly naval base. Damaged systems show as tags under
   the unit (DIW, RUD, RAD, WPN, FIRE, FLD, STUN) and in the selection panel with the seconds left.
+- **Targeting:** every weapon picks the most dangerous target it can reach (battleships, destroyers and subs
+  first, then attack aircraft, carriers and coastal batteries, merchants last); distance and damage only break
+  ties. Torpedoes listen for a target all the way (not only at their aim point), lead a moving ship, and turn
+  tightly enough to finish an attack run.
 - **Fire control (F):** each unit is on **weapons tight** by default: at most two of its own guided rounds
   (missiles, torpedoes, SAMs) in flight at one target, and it holds fire when the target is already as good as
   dead. **Weapons free** fires everything that bears, as fast as the launchers reload. **Hold fire** stops all
@@ -120,8 +124,9 @@ listens for 150 s: it hears submarines within 6 km, and ships further away, and 
 far, but enemy electronic support measures (ESM) hear your radar out to 1.5× its range and get a rough,
 unidentified position for you (marker only, cannot be targeted). Radar off (tag **DARK**): your unit sees only by
 eye (about 6 km) and sonar, and cannot be heard; your team's other sensors still feed it targets. When an enemy
-radar is tracking one of your units, a soft amber glow breathes behind its marker and the selection panel shows
-**ENEMY RADAR LOCK**.
+radar is tracking one of your units, a thin amber arc appears on its marker on the side the radar is painting
+from, with a faint glint sweeping along it (like a radar-warning receiver), and the selection panel shows
+**RADAR LOCK** with the compass bearing to that radar.
 
 ![Storm cell and fog bank](docs/weather.png)
 

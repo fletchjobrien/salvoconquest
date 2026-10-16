@@ -441,7 +441,8 @@ export class Hud {
     const kills = d?.[15] ?? 0;
     let html = `<div class="sp-head"><img src="${symbolDataUrl('own', def.domain as SymDomain, glyphFor(u.type), 13)}"><div><div class="nm">${esc(unitName(fac, u.type, u.id))}</div><div class="ty">${def.names[fac]}</div></div><div class="kc${kills ? '' : ' z'}" title="Enemy units destroyed">${kills}<span>KILLS</span></div></div>`;
     const portFlags = d ? d[7] : 0;
-    const port = portFlags & 8 ? ' · <span style="color:var(--bad)">IN PORT · UNDER ATTACK, REPAIRS HELD</span>' : portFlags & 4 ? ' · <span style="color:var(--good)">IN PORT · REPAIRING &amp; REARMING</span>' : '';
+    const where = def.domain === 'land' ? 'AT BASE' : 'IN PORT';
+    const port = portFlags & 8 ? ` · <span style="color:var(--bad)">${where} · IN COMBAT, REPAIRS HELD</span>` : portFlags & 4 ? ` · <span style="color:var(--good)">${where} · REPAIRING &amp; REARMING</span>` : '';
     html += `<div class="status">${statusTxt[order] ?? order.toUpperCase()}${u.flags & 8 ? ' · REARMING' : ''}${port}</div>`;
     html += `<div class="bar"><i style="width:${u.hp}%;background:${col}"></i></div>`;
     if (d) {
@@ -472,8 +473,8 @@ export class Hud {
         const dark = (u.flags & F_DARK) !== 0;
         const painted = (u.flags & F_PAINTED) !== 0;
         html += `<div class="wrow"><span>RADAR<span class="kbd">G</span></span><span class="pips" style="color:${dark ? 'var(--faint)' : 'var(--good)'}">${dark ? 'OFF · SILENT' : 'ACTIVE · EMITTING'}</span></div>`;
-        if (painted) html += `<div class="wrow"><span style="color:#ffb040">⚠ ENEMY RADAR LOCK</span><span></span></div>`;
-      } else if (u.flags & F_PAINTED) html += `<div class="wrow"><span style="color:#ffb040">⚠ ENEMY RADAR LOCK</span><span></span></div>`;
+        if (painted) html += lockRow(d?.[16]);
+      } else if (u.flags & F_PAINTED) html += lockRow(d?.[16]);
       const cmk = counterOf(u.type);
       if (cmk) {
         const left = d[14] ?? 0;
@@ -618,4 +619,11 @@ function esc(s: string): string {
 /** 0 hold fire, 1 weapons tight, 2 weapons free (from the unit flags). */
 export function fireModeOf(flags: number): number {
   return flags & F_HOLD ? 0 : flags & F_FREE ? 2 : 1;
+}
+
+/** A quiet line for an enemy radar lock, with the compass bearing to the radar. */
+function lockRow(b: number | undefined): string {
+  // Map frame: +x east, +y south, so compass = 90° + the map angle.
+  const deg = b === undefined || b === 999 ? null : Math.round((((b / 100) * 180) / Math.PI + 90 + 360) % 360);
+  return `<div class="wrow"><span style="color:rgba(255,186,92,0.85)">◜ RADAR LOCK</span><span class="pips" style="color:rgba(255,186,92,0.85)">${deg === null ? '' : String(deg).padStart(3, '0') + '°'}</span></div>`;
 }

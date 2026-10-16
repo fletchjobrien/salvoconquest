@@ -72,9 +72,10 @@ export type SiteRow = [number, number, number, number];
 /**
  * Own-unit details: id, ammo, cargo ids, fuel %, order code, order x, order y, flags, type index,
  * then (aircraft) range left before bingo in km, nearest base x, y, (carriers) the deck: ids of
- * flights based on it, (ships) the damage state, countermeasure charges left, and kills.
+ * flights based on it, (ships) the damage state, countermeasure charges left, kills, and the bearing to an
+ * enemy radar holding it (centiradians, map frame; 999 = not locked).
  */
-export type DetailRow = [number, number[], number[], number, number, number, number, number, number, number, number, number, number[], DamageRow, number, number];
+export type DetailRow = [number, number[], number[], number, number, number, number, number, number, number, number, number, number[], DamageRow, number, number, number];
 /** Seconds left on each damaged system: engine, rudder, radar, fire, flood, stun, disabled weapon index (-1 none), weapon. */
 export type DamageRow = [number, number, number, number, number, number, number, number];
 /** Weather cell: kind (0 storm, 1 fog), x, y, radius, intensity 0-100. */

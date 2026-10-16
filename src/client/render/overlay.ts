@@ -356,19 +356,9 @@ export class Overlay {
         }
       }
       const sz = small ? symSize - 4 : symSize;
-      // Radar warning: an enemy radar is tracking this unit. A soft amber glow that breathes
-      // behind the marker (it never covers the symbol itself).
-      if (u.flags & F_PAINTED && u.owner === w.me) {
-        const k = 0.5 + 0.5 * Math.sin(w.clock * 5.5 + u.id);
-        const R = sz * (1.55 + 0.25 * k);
-        const g = ctx.createRadialGradient(sx, sy, sz * 0.6, sx, sy, R);
-        g.addColorStop(0, `rgba(255, 176, 64, ${0.32 + 0.22 * k})`);
-        g.addColorStop(1, 'rgba(255, 176, 64, 0)');
-        ctx.fillStyle = g;
-        ctx.beginPath();
-        ctx.arc(sx, sy, R, 0, Math.PI * 2);
-        ctx.fill();
-      }
+      // Radar warning: like a radar-warning receiver, a thin amber arc on the side the enemy radar
+      // is painting from, with a faint glint sweeping along it (the beam brushing past).
+      if (u.flags & F_PAINTED && u.owner === w.me) this.drawRadarLock(v, u, y3, sx, sy, sz);
       const img = symbolCanvas(affil, dom as SymDomain, glyphFor(u.type), sz, sel || hov);
       const born = Math.min(1, (w.clock - u.born) / 0.4);
       ctx.globalAlpha = (small ? 0.75 : 1) * born;
@@ -660,6 +650,48 @@ export class Overlay {
   }
 
   /** Short tags for knocked-out ship systems: [text, colour]. */
+  /** Bearing arc for a unit an enemy radar holds in track (see the F_PAINTED cue above). */
+  private drawRadarLock(v: OverlayView, u: UView, y3: number, sx: number, sy: number, sz: number) {
+    const w = v.world;
+    const ctx = this.ctx;
+    const b = w.details.get(u.id)?.[16];
+    if (b === undefined || b === 999) return;
+    const bearing = b / 100;
+    // The map bearing turned into a screen direction (the camera may be rotated and tilted).
+    if (!this.proj(v, u.x, y3, u.y)) return;
+    const bx = P.x;
+    const by = P.y;
+    if (!this.proj(v, u.x + Math.cos(bearing), y3, u.y + Math.sin(bearing))) return;
+    const ang = Math.atan2(P.y - by, P.x - bx);
+    const R = sz * 1.95;
+    const half = 0.38;
+    const t = w.clock + u.id * 0.37;
+    const breathe = 0.5 + 0.5 * Math.sin(t * 2.4);
+    ctx.save();
+    ctx.lineCap = 'round';
+    // The arc and its end ticks.
+    ctx.strokeStyle = `rgba(255, 186, 92, ${0.32 + 0.28 * breathe})`;
+    ctx.lineWidth = 1.25;
+    ctx.beginPath();
+    ctx.arc(sx, sy, R, ang - half, ang + half);
+    ctx.stroke();
+    ctx.lineWidth = 1;
+    for (const e of [ang - half, ang + half]) {
+      ctx.beginPath();
+      ctx.moveTo(sx + Math.cos(e) * (R - 2.5), sy + Math.sin(e) * (R - 2.5));
+      ctx.lineTo(sx + Math.cos(e) * (R + 2.5), sy + Math.sin(e) * (R + 2.5));
+      ctx.stroke();
+    }
+    // The glint: travels end to end every 1.6 s, brightest mid-way.
+    const f = (t / 1.6) % 1;
+    const ga = ang - half + f * half * 2;
+    ctx.fillStyle = `rgba(255, 226, 170, ${Math.sin(f * Math.PI) * 0.85})`;
+    ctx.beginPath();
+    ctx.arc(sx + Math.cos(ga) * R, sy + Math.sin(ga) * R, 1.4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
   private damageTags(w: World, u: UView): [string, string][] {
     const out: [string, string][] = [];
     const d = u.owner === w.me ? w.details.get(u.id)?.[13] : undefined;

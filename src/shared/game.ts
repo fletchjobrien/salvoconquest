@@ -117,6 +117,23 @@ export type Order =
 
 const OVERKILL_CHECK = new Set<string>(['missile', 'torpedo', 'bomb']);
 const GUIDED = new Set<string>(['missile', 'torpedo', 'sam']);
+/** Seconds without being hit, and without firing, before a unit may repair or rearm. */
+const REPAIR_CALM = { hit: 30, fired: 20 };
+/** Target priority by how dangerous a unit is to us. */
+const THREAT: Partial<Record<UnitType, number>> = {
+  battleship: 1.3,
+  destroyer: 1.2,
+  sub: 1.2,
+  strike: 1.1,
+  carrier: 1.0,
+  coastal: 1.0,
+  fighter: 0.9,
+  sam: 0.8,
+  recon: 0.7,
+  infantry: 0.6,
+  lander: 0.5,
+  merchant: 0.1,
+};
 
 export interface ShipSystems {
   engine: number;
@@ -205,8 +222,9 @@ export interface Unit {
   lastHitUnit: number;
   /** Active radar on (default) or switched off for emission control. */
   radarOn: boolean;
-  /** Last time an enemy radar held this unit in track. */
+  /** Last time an enemy radar held this unit in track, and the bearing (rad, map frame) to the nearest such radar. */
   paintedAt: number;
+  paintBearing: number;
   /** Last enemy to hurt this unit (credited if fire or flooding sinks it), and when. */
   lastHitBy: number;
   lastHitAt: number;
@@ -515,6 +533,7 @@ export class Game {
       kills: 0,
       lastHitUnit: -1,
       paintedAt: -999,
+      paintBearing: 0,
       lastHitBy: -1,
       lastHitAt: -1e9,
       portState: 0,
@@ -1169,8 +1188,13 @@ export class Game {
     if (def.domain === 'air') return this.thinkAir(u, dt);
 
     // Regen
-    if (u.regen > 0 && u.hp < u.maxHp) u.hp = Math.min(u.maxHp, u.hp + u.regen * dt);
-    for (const w of u.weapons) if (w.mod.regen && w.ammo < w.max) w.ammo = Math.min(w.max, w.ammo + w.mod.regen * dt);
+    // Field medics and launcher reloads in the field also wait for a lull.
+    if ((u.regen > 0 && u.hp < u.maxHp) || u.weapons.some((w) => w.mod.regen && w.ammo < w.max)) {
+      if (!this.underAttack(u)) {
+        if (u.regen > 0) u.hp = Math.min(u.maxHp, u.hp + u.regen * dt);
+        for (const w of u.weapons) if (w.mod.regen && w.ammo < w.max) w.ammo = Math.min(w.max, w.ammo + w.mod.regen * dt);
+      }
+    }
 
     // Repair & rearm near friendly bases.
     if (this.tickN % 5 === 0) this.serviceAtBase(u, 0.5);
@@ -1254,7 +1278,7 @@ export class Game {
       if ((dom === 'sea' || dom === 'sub') && naval && s.dock) {
         if (Math.hypot(s.dock.x - u.x, s.dock.y - u.y) < 3) {
           u.portUntil = this.time + 0.6;
-          // No repairs or reloading under fire: hit in the last 15 s, or a weapon is homing on it.
+          // No repairs or reloading in combat (see underAttack).
           if (this.underAttack(u)) {
             u.portState = 2;
             return;
@@ -1268,17 +1292,28 @@ export class Game {
         }
       }
       if (dom === 'land' && Math.hypot(s.x - u.x, s.y - u.y) < 2.2) {
+        // Troops at a friendly building: the same rule as ships in port.
+        u.portUntil = this.time + 0.6;
+        if (this.underAttack(u)) {
+          u.portState = 2;
+          return;
+        }
+        u.portState = 1;
         u.hp = Math.min(u.maxHp, u.hp + 1.5 * dt);
         for (const w of u.weapons) if (w.max > 0) w.ammo = Math.min(w.max, w.ammo + dt * 0.2);
-        if (!this.underAttack(u) && this.time - u.cmAt > COUNTER.smokeLife) u.cm = 1;
+        if (this.time - u.cmAt > COUNTER.smokeLife) u.cm = 1;
         return;
       }
     }
   }
 
-  /** Hit in the last 15 seconds, or an enemy missile or torpedo is homing on it. */
+  /**
+   * In combat: hit in the last 30 s, fired its own weapons in the last 20 s, or an enemy weapon is
+   * homing on it. Repairs, rearming and field reloads wait until a unit has been out of action that long.
+   */
   underAttack(u: Unit): boolean {
-    if (this.time - u.lastHitAt < 15) return true;
+    if (this.time - u.lastHitAt < REPAIR_CALM.hit) return true;
+    if (u.firingUntil - 1.5 > this.time - REPAIR_CALM.fired) return true;
     for (const p of this.projs) if (!p.dead && p.target === u.id && p.team !== u.team) return true;
     return false;
   }
@@ -2215,11 +2250,10 @@ export class Game {
       if (sh.unit && sh.unit.fireMode === 1 && GUIDED.has(w.mod.proj!) && this.inFlightFrom(sh.unit.id, id) >= 2) continue;
       // Ground small arms only fight on the same island.
       if (sh.unit && UNITS[sh.unit.type].domain === 'land' && cls === 'land' && islandAt(this.map, t.x, t.y) !== islandAt(this.map, sh.x, sh.y)) continue;
-      let score = d / range;
+      // Biggest threat first: warships and attack aircraft before support craft; distance and
+      // damage only break ties (a merchant never draws fire while a destroyer is in range).
+      let score = (d / range) * 0.6 - (THREAT[t.type] ?? 0.5) - (dv / 150) - (1 - t.hp / t.maxHp) * 0.3;
       if (id === forced) score -= 10;
-      if (t.type === 'lander') score -= 0.3;
-      if (t.type === 'merchant') score += 0.2;
-      score -= dv / 100;
       if (score < bs) {
         bs = score;
         best = { unit: t, x: tx, y: ty, exact };
@@ -2244,10 +2278,10 @@ export class Game {
       if (this.rng.next() < acc) this.damage(t, dmg, sh.owner, 'bullet', u?.id);
       return;
     }
-    // Lead the target for shells.
+    // Lead the target for shells, and for torpedoes (a sub works out course and speed from its sonar track).
     let ax = tx;
     let ay = ty;
-    if (w.mod.proj === 'shell' || w.mod.proj === 'bomb') {
+    if (w.mod.proj === 'shell' || w.mod.proj === 'bomb' || w.mod.proj === 'torpedo') {
       const d = Math.hypot(tx - sh.x, ty - sh.y);
       const tt = d / (w.mod.speed ?? 2);
       ax += Math.cos(t.heading) * t.speed * tt;
@@ -2349,7 +2383,7 @@ export class Game {
         }
       }
       const want = Math.atan2(gy - p.y, gx - p.x);
-      const turn = p.kind === 'torpedo' ? 0.8 : p.kind === 'sam' ? 6 : 2.5;
+      const turn = p.kind === 'torpedo' ? 2.2 : p.kind === 'sam' ? 6 : 2.5;
       p.heading = turnToward(p.heading, want, turn * dt);
       p.x += Math.cos(p.heading) * p.speed * dt;
       p.y += Math.sin(p.heading) * p.speed * dt;
@@ -2390,6 +2424,14 @@ export class Game {
         }
       } else if (p.kind === 'torpedo') {
         p.alt = -0.03;
+        // Acoustic homing: an unlocked torpedo listens all the way, not only at its aim point.
+        if (p.target === -1 && !p.decoy && this.tickN % 3 === 0) {
+          const found = this.seekerSearch(p);
+          if (found) {
+            p.target = found.id;
+            p.seeking = false;
+          }
+        }
         if (heightAt(this.map, p.x, p.y) > -0.01) {
           p.dead = true;
           this.emit({ k: 'boom', x: p.x, y: p.y, s: 0.4, w: false }, p.x, p.y);
@@ -2422,7 +2464,7 @@ export class Game {
         if (p.kind !== 'sam') this.fizzle(p);
         continue;
       }
-      if (dist < (p.kind === 'torpedo' ? 0.12 : 0.15) && p.target !== -1) {
+      if (dist < (p.kind === 'torpedo' ? 0.2 : 0.15) && p.target !== -1) {
         this.resolveImpact(p);
         continue;
       }
@@ -2828,11 +2870,14 @@ export class Game {
         // Is an active enemy radar holding this unit? (Its radar warning receiver lights up.)
         if (dom !== 'sub' && !smoked) {
           const sig = dom === 'air' ? airSig(e.sig) : dom === 'land' ? 0.45 : Math.sqrt(e.sig);
+          let near = 1e9;
           for (const s of sensors) {
             const r = (dom === 'air' ? s.air : s.surf * sig) * radMul;
-            if (r > 0 && Math.hypot(s.x - e.x, s.y - e.y) < r) {
+            const d = Math.hypot(s.x - e.x, s.y - e.y);
+            if (r > 0 && d < r && d < near) {
+              near = d;
               e.paintedAt = this.time;
-              break;
+              e.paintBearing = Math.atan2(s.y - e.y, s.x - e.x);
             }
           }
         }
@@ -3001,6 +3046,7 @@ export class Game {
             this.damageRow(x),
             x.cm,
             x.kills,
+            this.time - x.paintedAt < 1.2 ? Math.round(x.paintBearing * 100) : 999,
           ]);
         }
         continue;
