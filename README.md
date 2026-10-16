@@ -20,7 +20,7 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
 | U | Unload troops: a ring shows the landing range, click land inside it (every selected ship with troops lands there) |
 | M / R / T / X | Drop mines · aircraft return to base · toggle auto-retreat · stop |
 | Ctrl+1–9 / 1–9 | Save / recall group (press twice to jump the camera) |
-| Tab / V | Show weapon ranges / toggle radar and sonar coverage |
+| Tab / V | Show weapon ranges / sensor view (darkens what you cannot see) |
 | Space · Enter · F1 · Esc | Jump to last alert · chat (online) · field manual · menu |
 
 **Goal:** capture the enemy **HQ**, or hold 75% of all resource sites for 3 minutes.
@@ -59,7 +59,8 @@ Radar (surface and air), sonar (submarines only) and eyesight. Far-away or poor-
 error shows on hover). As you close in, the estimate glides toward the truth until the contact becomes an identified
 track. **Unidentified contacts cannot be targeted**: they mark a position only (right-click there is a move);
 once a contact is classified you can attack it. Ground contacts use a square marker, surface contacts a quatrefoil.
-The minimap shows your fog of war. At most two weather systems are on the map at once. Storms cut radar range and eyesight; fog banks cut eyesight. Submarines are
+The minimap outlines your sensor coverage (surface radar and eyes, air radar, sonar). Press **V** (or the
+SENSORS button above the minimap) for the sensor view: everything your sensors cannot see goes dark. At most two weather systems are on the map at once. Storms cut radar range and eyesight; fog banks cut eyesight. Submarines are
 invisible until a sonar hears them, and they reveal themselves briefly when they fire.
 
 ![Storm cell and fog bank](docs/weather.png)

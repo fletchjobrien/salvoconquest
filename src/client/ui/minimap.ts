@@ -1,15 +1,12 @@
-// Minimap with fog of war: what your side's sensors cover is clear, the rest is dark.
+// Minimap with our sensor coverage outlined (surface radar and eyes, air radar, sonar).
 import * as THREE from 'three';
 import { WEATHER_AXES, WIND_ANGLE } from '../../shared/weather';
 import type { World } from '../state';
 import { SIDE } from '../theme';
-import { BUILDINGS, UNITS, UNIT_TYPES, deriveStats } from '../../shared/defs';
+import { UNITS, UNIT_TYPES } from '../../shared/defs';
+import { sensorCoverage, unionOutline, COVER_COLORS, Disc } from '../sensors';
 import { deployZone } from '../../shared/game';
-import { F_LANDED } from '../../shared/protocol';
-import { matchLoadoutOf } from '../loadouts';
 
-/** Fog layer resolution (pixels across the whole map). */
-const FOG_RES = 160;
 import type { Renderer, CameraRig } from '../render/renderer';
 
 export class Minimap {
@@ -18,12 +15,18 @@ export class Minimap {
   private ctx: CanvasRenderingContext2D;
   private land: HTMLCanvasElement;
   private size = 200;
-  private fog: HTMLCanvasElement;
-  private surfMask: HTMLCanvasElement;
-  private airMask: HTMLCanvasElement;
-  private fogAt = -1;
+  private cover: HTMLCanvasElement;
+  private scratch: HTMLCanvasElement;
+  private coverAt = -1;
   onJump: (x: number, y: number) => void = () => {};
   onCommand: (x: number, y: number) => void = () => {};
+  onToggleSensors: () => void = () => {};
+  readonly sensorBtn: HTMLDivElement;
+
+  /** Highlight the button while the sensor view is on. */
+  setSensors(on: boolean) {
+    this.sensorBtn.classList.toggle('on', on);
+  }
 
   constructor(private world: World) {
     this.el = document.createElement('div');
@@ -36,15 +39,23 @@ export class Minimap {
     this.ctx = this.c.getContext('2d')!;
     this.ctx.scale(dpr, dpr);
     this.el.appendChild(this.c);
+    // Toggle for the sensor view on the main map (same as V).
+    this.sensorBtn = document.createElement('div');
+    this.sensorBtn.className = 'mm-btn';
+    this.sensorBtn.textContent = 'SENSORS · V';
+    this.sensorBtn.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      this.onToggleSensors();
+    });
+    this.el.appendChild(this.sensorBtn);
     this.land = this.renderLand();
     const mk = () => {
       const c = document.createElement('canvas');
-      c.width = c.height = FOG_RES;
+      c.width = c.height = this.size * dpr;
       return c;
     };
-    this.fog = mk();
-    this.surfMask = mk();
-    this.airMask = mk();
+    this.cover = mk();
+    this.scratch = mk();
     let dragging = false;
     const at = (e: MouseEvent) => {
       const r = this.c.getBoundingClientRect();
@@ -106,58 +117,41 @@ export class Minimap {
   }
 
   /**
-   * Fog of war from our side's sensors (own and allied units and sites): fully clear where
-   * surface radar or eyes reach, half clear where only air-search radar reaches, dark beyond.
-   * Each layer is a union of soft-edged discs, so overlaps never stack up.
+   * Our sensor coverage as outlines: surface radar and eyes (bright), air-search radar (pale),
+   * sonar (violet). Overlapping sensors merge into one outline per kind.
    */
-  private updateFog() {
+  private updateCover() {
     const w = this.world;
-    const k = FOG_RES / w.map.size;
-    const surf: [number, number, number][] = [];
-    const air: [number, number, number][] = [];
-    for (const u of w.units.values()) {
-      if (w.teamOf(u.owner) !== w.myTeam || u.flags & F_LANDED) continue;
-      const lo = u.owner === w.me ? matchLoadoutOf(u.type) : UNITS[u.type].defaults;
-      const st = deriveStats(u.type, w.players[u.owner]?.faction ?? w.myFaction, lo);
-      const near = Math.max(st.radarSurf, UNITS[u.type].visual, st.sonar);
-      if (near > 0) surf.push([u.x, u.y, near]);
-      if (st.radarAir > near) air.push([u.x, u.y, st.radarAir]);
+    const R = this.cover.width;
+    const k = R / w.map.size;
+    const cov = sensorCoverage(w);
+    const g = this.cover.getContext('2d')!;
+    g.clearRect(0, 0, R, R);
+    const sc = this.scratch.getContext('2d')!;
+    const circle = (c: CanvasRenderingContext2D, [x, y, r]: Disc) => c.arc(x * k, y * k, r * k, 0, Math.PI * 2);
+    // A faint wash inside the surface picture, so "seen" reads at a glance.
+    g.fillStyle = COVER_COLORS.surf;
+    g.globalAlpha = 0.07;
+    for (const d of cov.surf) {
+      g.beginPath();
+      circle(g, d);
+      g.fill();
     }
-    for (const s of w.map.sites) {
-      const o = w.sites[s.id].owner;
-      if (o < 0 || w.teamOf(o) !== w.myTeam) continue;
-      const b = BUILDINGS[s.type];
-      const near = Math.max(b.radarSurf, b.visual);
-      surf.push([s.x, s.y, near]);
-      if (b.radarAir > near) air.push([s.x, s.y, b.radarAir]);
+    g.globalAlpha = 1;
+    const kinds: [Disc[], string, number, number][] = [
+      [cov.air, COVER_COLORS.air, 0.45, 1],
+      [cov.surf, COVER_COLORS.surf, 0.95, 1.3],
+      [cov.sonar, COVER_COLORS.sonar, 0.95, 1.3],
+    ];
+    const dpr = R / this.size;
+    for (const [discs, col, alpha, wdt] of kinds) {
+      if (!discs.length) continue;
+      sc.clearRect(0, 0, R, R);
+      unionOutline(sc, discs, col, wdt * dpr, circle);
+      g.globalAlpha = alpha;
+      g.drawImage(this.scratch, 0, 0);
+      g.globalAlpha = 1;
     }
-    const paint = (c: HTMLCanvasElement, discs: [number, number, number][]) => {
-      const g = c.getContext('2d')!;
-      g.clearRect(0, 0, FOG_RES, FOG_RES);
-      for (const [x, y, rad] of discs) {
-        const R = rad * k;
-        const grd = g.createRadialGradient(x * k, y * k, R * 0.8, x * k, y * k, R);
-        grd.addColorStop(0, 'rgba(0,0,0,1)');
-        grd.addColorStop(1, 'rgba(0,0,0,0)');
-        g.fillStyle = grd;
-        g.beginPath();
-        g.arc(x * k, y * k, R, 0, Math.PI * 2);
-        g.fill();
-      }
-    };
-    paint(this.surfMask, surf);
-    paint(this.airMask, air);
-    const f = this.fog.getContext('2d')!;
-    f.globalCompositeOperation = 'source-over';
-    f.clearRect(0, 0, FOG_RES, FOG_RES);
-    f.fillStyle = 'rgba(2,6,10,0.8)';
-    f.fillRect(0, 0, FOG_RES, FOG_RES);
-    f.globalCompositeOperation = 'destination-out';
-    f.globalAlpha = 0.45;
-    f.drawImage(this.airMask, 0, 0);
-    f.globalAlpha = 1;
-    f.drawImage(this.surfMask, 0, 0);
-    f.globalCompositeOperation = 'source-over';
   }
 
   draw(_dt: number, r: Renderer, _rig: CameraRig) {
@@ -186,13 +180,13 @@ export class Minimap {
       ctx.ellipse(x * k, y * k, rad * a * k, rad * b * k, WIND_ANGLE, 0, Math.PI * 2);
       ctx.fill();
     }
-    // fog of war (refreshed a few times a second)
-    if (w.clock - this.fogAt > 0.3 || w.clock < this.fogAt) {
-      this.fogAt = w.clock;
-      this.updateFog();
+    // sensor coverage outlines (refreshed a few times a second)
+    if (w.clock - this.coverAt > 0.3 || w.clock < this.coverAt) {
+      this.coverAt = w.clock;
+      this.updateCover();
     }
     ctx.imageSmoothingEnabled = true;
-    ctx.drawImage(this.fog, 0, 0, S, S);
+    ctx.drawImage(this.cover, 0, 0, S, S);
     ctx.imageSmoothingEnabled = false;
     // deployment zone (setup phase only)
     if (w.setup) {

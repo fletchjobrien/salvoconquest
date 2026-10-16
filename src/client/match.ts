@@ -107,6 +107,7 @@ export class Match {
     this.minimap = new Minimap(this.world);
     this.minimap.onJump = (x, y) => this.rig.flyTo(x, y);
     this.minimap.onCommand = (x, y) => this.commandAt(x, y, null, false);
+    this.minimap.onToggleSensors = () => this.toggleSensors();
     this.hud.root.appendChild(this.minimap.el);
     ui.appendChild(this.hud.root);
     voices.onSubtitle = (_cat, text, who) => this.hud.log(who, text);
@@ -387,6 +388,12 @@ export class Match {
   }
 
   /** Unload mode for every selected ship that carries troops (picked troops only, if any are picked). */
+  private toggleSensors() {
+    this.view.showSensors = !this.view.showSensors;
+    this.minimap.setSensors(this.view.showSensors);
+    audio.play('click');
+  }
+
   private enterUnload() {
     const w = this.world;
     const ships: { ship: number; ids: number[] }[] = [];
@@ -703,8 +710,7 @@ export class Match {
         this.view.showRanges = true;
       }
       if (e.code === 'KeyV') {
-        this.view.showSensors = !this.view.showSensors;
-        this.hud.log('CIC', `Sensor coverage ${this.view.showSensors ? 'shown' : 'hidden'}.`);
+        this.toggleSensors();
       }
       if (e.code === 'Space' && this.lastAlert) {
         e.preventDefault();

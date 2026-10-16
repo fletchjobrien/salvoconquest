@@ -1076,3 +1076,23 @@ input[type='range'] {
 #setup .btn {
   min-width: 220px;
 }
+
+#minimap .mm-btn {
+  position: absolute;
+  left: 0;
+  top: -22px;
+  padding: 3px 8px;
+  font-size: 9px;
+  letter-spacing: 0.15em;
+  color: var(--dim);
+  background: rgba(5, 9, 12, 0.75);
+  border: 1px solid var(--line);
+  cursor: pointer;
+}
+#minimap .mm-btn:hover {
+  color: #fff;
+}
+#minimap .mm-btn.on {
+  color: #6fd0ff;
+  border-color: #6fd0ff;
+}
