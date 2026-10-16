@@ -208,6 +208,39 @@ export const FACTION_MOD: Record<Faction, { cost: number; hp: number; build: num
 /** Every unit costs three times its base price: forces are small and every hull counts. */
 export const COST_SCALE = 3;
 
+/**
+ * Countermeasures: one charge each, refilled when the unit rearms.
+ * Chaff (warships, aircraft): a cloud of foil that pulls homing missiles off the unit.
+ * Smoke (ground units): a screen that hides the units inside it and spoils the aim of shots already fired.
+ */
+export const COUNTER = {
+  /** Chaff: chance to decoy each enemy missile homing on the unit (hypersonic ones less often). */
+  chaffChance: 0.6,
+  chaffHard: 0.4,
+  /** Chaff works on missiles closer than this (km) while the cloud lasts (s). */
+  chaffRange: 12,
+  chaffLife: 8,
+  /** Chaff only works while its unit is still this close (km) to the cloud. */
+  chaffNear: 2.5,
+  /** Smoke: radius (km), life (s), range inside which an enemy still sees through it, hit chance factor. */
+  smokeR: 1.1,
+  smokeLife: 25,
+  smokeSee: 0.35,
+  smokeHit: 0.45,
+  /** After popping smoke, a ground unit keeps laying more behind it for this long (s) as it moves. */
+  smokeTrail: 12,
+};
+
+export type CounterKind = 'chaff' | 'smoke';
+
+export function counterOf(type: UnitType): CounterKind | null {
+  const d = UNITS[type];
+  if (d.domain === 'air') return 'chaff';
+  if (d.domain === 'land') return 'smoke';
+  if (type === 'destroyer' || type === 'battleship' || type === 'carrier') return 'chaff';
+  return null;
+}
+
 // Counter triangle: submarine > battleship/carrier, battleship > destroyer, destroyer > submarine.
 /** Passive sonar range against surface ships, as a share of sonar range (a sub vs a ship's own hull sonar). */
 export const PASSIVE_SUB = 1.3;

@@ -1,5 +1,5 @@
 // Computer opponent. Uses only what its team can detect for targeting.
-import { BUILDABLE, UNITS, UnitType, unitCost } from './defs';
+import { BUILDABLE, UNITS, UnitType, unitCost, counterOf } from './defs';
 import { canDeployAt, deployZone } from './game';
 import type { Game, Unit, SiteState } from './game';
 import { islandAt } from './map';
@@ -19,6 +19,7 @@ export class Bot {
   private fleetOrderAt = 0;
   private airOrderAt = 0;
   private deployed = false;
+  private counterAt = 0;
   /** Enemy warships our side has identified (id -> type), for counter-building. */
   private spotted = new Map<number, UnitType>();
 
@@ -35,7 +36,12 @@ export class Bot {
       if (!this.deployed) this.deploy();
       return;
     }
-    if (g.time < this.nextThink || g.players[this.pid].defeated) return;
+    if (g.players[this.pid].defeated) return;
+    if (g.time >= this.counterAt) {
+      this.counterAt = g.time + 0.5;
+      this.countermeasures();
+    }
+    if (g.time < this.nextThink) return;
     this.nextThink = g.time + 2;
     this.produce();
     this.expand();
@@ -147,6 +153,23 @@ export class Bot {
 
   private home(): SiteState | undefined {
     return this.game.sites.find((s) => s.type === 'hq' && s.owner === this.pid);
+  }
+
+  /** Chaff when a missile homing on us gets close; smoke when troops are hurt and under fire. */
+  private countermeasures() {
+    const g = this.game;
+    const fire: number[] = [];
+    for (const u of this.mine()) {
+      if (u.cm < 1 || u.landed || u.inside >= 0) continue;
+      const kind = counterOf(u.type);
+      if (kind === 'chaff') {
+        const near = UNITS[u.type].domain === 'air' ? 4 : 6;
+        if (g.projs.some((p) => !p.dead && p.target === u.id && p.team !== u.team && (p.kind === 'missile' || p.kind === 'sam') && Math.hypot(p.x - u.x, p.y - u.y) < near)) fire.push(u.id);
+      } else if (kind === 'smoke') {
+        if (u.hp < u.maxHp * 0.55 && g.time - u.lastHitAt < 3 && !g.inSmoke(u.x, u.y)) fire.push(u.id);
+      }
+    }
+    if (fire.length) g.command(this.pid, { c: 'counter', ids: fire });
   }
 
   private produce() {

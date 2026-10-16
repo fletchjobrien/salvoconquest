@@ -1,10 +1,11 @@
 // A running match: wires world state, rendering, overlay, HUD, input, audio and the connection.
-import { UNITS, UNIT_TYPES, UnitType, MODULES, UNLOAD_RANGE, unitCost } from '../shared/defs';
+import { UNITS, UNIT_TYPES, UnitType, MODULES, UNLOAD_RANGE, unitCost, counterOf } from '../shared/defs';
 import { canDeployAt, rallySite } from '../shared/game';
 import { shipDoctrine } from '../shared/doctrine';
 import { islandAt } from '../shared/map';
 import { weatherStrength } from '../shared/weather';
 import type { Command, GameEvent, ServerMsg, StartInfo } from '../shared/protocol';
+import { F_LANDED } from '../shared/protocol';
 import { Conn } from './net';
 import { World, UView } from './state';
 import { Renderer, CameraRig } from './render/renderer';
@@ -417,7 +418,7 @@ export class Match {
     this.hud.log('ORDERS', `Pick a landing point${ships.length > 1 ? ` for ${ships.length} ships` : ''} within ${UNLOAD_RANGE} km — ships close in if needed.`, 'good');
   }
 
-  private ability(a: 'mines' | 'rtb' | 'retreat' | 'stop' | 'siteFactory' | 'refund' | 'special') {
+  private ability(a: 'mines' | 'rtb' | 'retreat' | 'stop' | 'siteFactory' | 'refund' | 'special' | 'counter') {
     const ids = this.ownSelectedIds();
     const w = this.world;
     switch (a) {
@@ -432,6 +433,19 @@ export class Match {
           break;
         }
         this.send({ c: 'special', ids: ready });
+        break;
+      }
+      case 'counter': {
+        // Every selected unit that still has its chaff or smoke fires it.
+        const ready = ids.filter((id) => {
+          const u = w.units.get(id);
+          return u && counterOf(u.type) && (w.details.get(id)?.[15] ?? 0) > 0 && !(u.flags & F_LANDED);
+        });
+        if (!ready.length || w.setup) {
+          audio.play('deny');
+          break;
+        }
+        this.send({ c: 'counter', ids: ready });
         break;
       }
       case 'refund':
@@ -549,6 +563,18 @@ export class Match {
           audio.play('order');
           this.hud.log(unitName(fac, u.type, u.id), `${txt}.`, 'good');
         } else if (w.teamOf(e.o) !== w.myTeam) this.hud.log('INTEL', `Enemy ${sp.name}!`, 'warn');
+        break;
+      }
+      case 'chaff':
+      case 'smoke': {
+        const u = w.units.get(e.id);
+        const txt = e.k === 'chaff' ? 'CHAFF' : 'SMOKE';
+        const mine = !!u && u.owner === w.me;
+        this.overlay.floater(e.x, e.y, e.k === 'chaff' ? e.a : 0.05, txt, mine ? '#7dd8ff' : '#ffb36b');
+        if (mine && u) {
+          audio.play('order');
+          this.hud.log(unitName(fac, u.type, u.id), e.k === 'chaff' ? 'Chaff away!' : 'Popping smoke!', 'good');
+        }
         break;
       }
       case 'battle':
@@ -785,6 +811,7 @@ export class Match {
       if ((e.code === 'Delete' || e.code === 'Backspace') && this.world.setup) this.ability('refund');
       if (e.code === 'KeyX') this.ability('stop');
       if (e.code === 'KeyF') this.ability('special');
+      if (e.code === 'KeyC') this.ability('counter');
       if (e.code === 'KeyU') this.enterUnload();
       if (e.code === 'KeyM') this.ability('mines');
       if (e.code === 'KeyR') this.ability('rtb');

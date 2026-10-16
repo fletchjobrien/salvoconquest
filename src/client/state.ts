@@ -96,6 +96,8 @@ export class World {
   cash = 0;
   /** Deployment phase info while it lasts (seconds left, ready players), else null. */
   setup: { left: number; ready: number[] } | null = null;
+  /** Smoke screens on the map: x, y, radius, seconds left. */
+  smokes: [number, number, number, number][] = [];
   displayCash = 0;
   income = 0;
   queues: Record<'naval' | 'ground' | 'air', QueueItem[]> = { naval: [], ground: [], air: [] };
@@ -139,6 +141,7 @@ export class World {
     this.cash = s.cash;
     this.income = s.income;
     this.setup = s.ph ?? null;
+    this.smokes = s.sm ?? [];
     if (s.q) this.queues = s.q;
     if (s.f) this.factories = s.f;
     if (s.s) for (const [id, owner, cap, capBy] of s.s) this.sites[id] = { id, owner, cap: cap / 100, capBy };

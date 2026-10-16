@@ -18,7 +18,7 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
 | Ctrl + RMB | Move without stopping to fight |
 | WASD / MMB drag / screen edge | Pan · Q/E rotate · wheel zoom |
 | U | Unload troops: a ring shows the landing range, click land inside it (every selected ship with troops lands there) |
-| F / M / R / T / X | Ship special · drop mines · aircraft return to base · toggle auto-retreat · stop |
+| F / C / M / R / T / X | Ship special · chaff or smoke · drop mines · aircraft return to base · toggle auto-retreat · stop |
 | Ctrl+1–9 / 1–9 | Save / recall group (press twice to jump the camera) |
 | Tab / V | Show weapon ranges / sensor view (darkens what you cannot see) |
 | Space · Enter · F1 · Esc | Jump to last alert · chat (online) · field manual · menu |
@@ -50,6 +50,11 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
   crew (no firing for a few seconds). Torpedoes and mines flood and wreck engines; shells hit mounts; missiles start
   fires. Systems repair over time, three times faster at a friendly naval base. Damaged systems show as tags under
   the unit (DIW, RUD, RAD, WPN, FIRE, FLD, STUN) and in the selection panel with the seconds left.
+- **Countermeasures (C):** every warship and air flight carries one load of **chaff**, every ground unit one load of
+  **smoke**. Chaff throws a cloud of foil that pulls each enemy missile or SAM homing on the unit off course
+  (60% chance each, 40% for hypersonic missiles), while the unit stays within 2.5 km of the cloud (8 s). Smoke hides
+  ground units inside it from everything further than 350 m, makes shots already on the way hit less than half as
+  often, and keeps laying more smoke behind the unit for 12 s so it can run. Loads refill when the unit rearms.
 - **Automation:** ground units attack-move by default, idle troops engage enemies on their island, damaged units
   retreat to friendly buildings and come back when repaired, aircraft fly their mission, return to rearm and
   go back on station. Ships close the distance on their own when you order an unload out of range.

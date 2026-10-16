@@ -31,6 +31,8 @@ import {
   moduleFor,
   deckCap,
   PASSIVE_SUB,
+  COUNTER,
+  counterOf,
   PASSIVE_SHIP,
   TORPEDO_VS,
 } from './defs';
@@ -185,6 +187,10 @@ export interface Unit {
   sys: ShipSystems;
   /** Faction special ability (doctrine.ts): usable again at `ready`, active until `until`, toggle state. */
   spec: { ready: number; until: number; on: boolean };
+  /** Countermeasure charges left (chaff for warships and aircraft, smoke for ground units). */
+  cm: number;
+  /** When the last countermeasure was used (no refill until it has cleared). */
+  cmAt: number;
   /** Last enemy to hurt this unit (credited if fire or flooding sinks it), and when. */
   lastHitBy: number;
   lastHitAt: number;
@@ -239,6 +245,10 @@ export interface Projectile {
   arc?: { a0: number; apex: number; flown: number; f: number };
   /** Expected damage reserved on a unit (anti-overkill); released when the projectile ends. */
   resv?: { id: number; dmg: number };
+  /** Pulled off its target by chaff: flies into the cloud (at this altitude) and detonates there. */
+  decoy?: { alt: number };
+  /** Already rolled against a chaff cloud. */
+  chaffed?: boolean;
 }
 
 interface Mine {
@@ -323,6 +333,11 @@ export class Game {
   units = new Map<number, Unit>();
   projs: Projectile[] = [];
   mines: Mine[] = [];
+  /** Chaff clouds (drift with the wind of the launching unit) and smoke screens. */
+  chaffs: { x: number; y: number; alt: number; until: number; unit: number; team: number }[] = [];
+  smokes: { x: number; y: number; r: number; until: number; team: number }[] = [];
+  /** Units still laying a smoke trail as they move (engine smoke), and where the last patch went. */
+  smokeLayers: { unit: number; until: number; lx: number; ly: number }[] = [];
   sites: SiteState[] = [];
   weather: Weather[] = [];
   knowledge = new Map<number, Map<number, Contact>>();
@@ -468,6 +483,8 @@ export class Game {
       pendingDmg: 0,
       sys: newSystems(),
       spec: { ready: 0, until: 0, on: false },
+      cm: counterOf(type) ? 1 : 0,
+      cmAt: -999,
       lastHitBy: -1,
       lastHitAt: -1e9,
       portState: 0,
@@ -592,6 +609,9 @@ export class Game {
         break;
       case 'special':
         for (const u of own(cmd.ids)) this.useSpecial(u);
+        break;
+      case 'counter':
+        for (const u of own(cmd.ids)) this.useCounter(u);
         break;
       case 'rtb':
         // A player RTB ends the mission: land and stay down until given a new order.
@@ -725,6 +745,64 @@ export class Game {
   }
 
   /** Activate (or toggle) a ship's faction special if it is ready. */
+  /** Fire the unit's countermeasure: chaff (warships, aircraft) or smoke (ground units). One charge. */
+  useCounter(u: Unit) {
+    const kind = counterOf(u.type);
+    if (!kind || u.cm < 1 || u.landed || !this.inWorld(u)) return;
+    u.cm--;
+    u.cmAt = this.time;
+    if (kind === 'chaff') {
+      const alt = Math.max(u.alt, 0.08);
+      this.chaffs.push({ x: u.x, y: u.y, alt, until: this.time + COUNTER.chaffLife, unit: u.id, team: u.team });
+      this.emit({ k: 'chaff', id: u.id, x: u.x, y: u.y, a: alt }, u.x, u.y);
+    } else {
+      this.smokes.push({ x: u.x, y: u.y, r: COUNTER.smokeR, until: this.time + COUNTER.smokeLife, team: u.team });
+      this.smokeLayers.push({ unit: u.id, until: this.time + COUNTER.smokeTrail, lx: u.x, ly: u.y });
+      this.emit({ k: 'smoke', id: u.id, x: u.x, y: u.y, r: COUNTER.smokeR }, u.x, u.y);
+    }
+  }
+
+  inSmoke(x: number, y: number): boolean {
+    for (const s of this.smokes) if (Math.hypot(s.x - x, s.y - y) < s.r) return true;
+    return false;
+  }
+
+  /** Chaff pulls homing missiles off the unit that fired it (one roll per missile); old clouds and smoke clear. */
+  private updateCounters() {
+    if (this.chaffs.length) {
+      this.chaffs = this.chaffs.filter((c) => c.until > this.time);
+      for (const c of this.chaffs) {
+        // The seeker must see the cloud next to its target: a fast jet soon leaves its chaff behind.
+        const u = this.units.get(c.unit);
+        if (!u || u.dead || Math.hypot(u.x - c.x, u.y - c.y) > COUNTER.chaffNear) continue;
+        for (const p of this.projs) {
+          if (p.dead || p.chaffed || p.target !== c.unit || (p.kind !== 'missile' && p.kind !== 'sam')) continue;
+          if (Math.hypot(p.x - c.x, p.y - c.y) > COUNTER.chaffRange) continue;
+          p.chaffed = true;
+          if (this.rng.next() < (p.hard ? COUNTER.chaffHard : COUNTER.chaffChance)) {
+            p.target = -1;
+            p.seeking = false;
+            p.tx = c.x;
+            p.ty = c.y;
+            p.decoy = { alt: c.alt };
+          }
+        }
+      }
+    }
+    // Units that popped smoke keep laying it behind them for a while, covering their escape.
+    if (this.smokeLayers.length) {
+      this.smokeLayers = this.smokeLayers.filter((l) => l.until > this.time && !!this.units.get(l.unit) && !this.units.get(l.unit)!.dead);
+      for (const l of this.smokeLayers) {
+        const u = this.units.get(l.unit)!;
+        if (Math.hypot(u.x - l.lx, u.y - l.ly) < COUNTER.smokeR * 0.6) continue;
+        l.lx = u.x;
+        l.ly = u.y;
+        this.smokes.push({ x: u.x, y: u.y, r: COUNTER.smokeR * 0.85, until: this.time + COUNTER.smokeLife * 0.8, team: u.team });
+      }
+    }
+    if (this.smokes.length) this.smokes = this.smokes.filter((m) => m.until > this.time);
+  }
+
   useSpecial(u: Unit) {
     const sp = this.specialOf(u);
     if (!sp || u.dead || u.inside >= 0 || this.time < u.spec.ready) return;
@@ -744,6 +822,7 @@ export class Game {
       for (const a of this.units.values()) {
         if (a.dead || !a.base || !('unit' in a.base) || a.base.unit !== u.id) continue;
         a.fuel = a.fuelMax;
+        a.cm = 1;
         for (const w of a.weapons) w.ammo = w.max;
         if (a.landed) a.rearm = 0;
       }
@@ -804,6 +883,7 @@ export class Game {
     }
     if (this.tickN % 2 === 0) this.separate();
     this.updateWeapons(dt);
+    this.updateCounters();
     this.updateProjectiles(dt);
     this.updateMines();
     this.updateCapture(dt);
@@ -1182,12 +1262,14 @@ export class Game {
           u.sys.dockedUntil = this.time + 0.6;
           u.hp = Math.min(u.maxHp, u.hp + 3 * dt);
           for (const w of u.weapons) if (w.max > 0) w.ammo = Math.min(w.max, w.ammo + dt * 0.5);
+          if (counterOf(u.type) && this.time - u.cmAt > COUNTER.chaffLife) u.cm = 1;
           return;
         }
       }
       if (dom === 'land' && Math.hypot(s.x - u.x, s.y - u.y) < 2.2) {
         u.hp = Math.min(u.maxHp, u.hp + 1.5 * dt);
         for (const w of u.weapons) if (w.max > 0) w.ammo = Math.min(w.max, w.ammo + dt * 0.2);
+        if (!this.underAttack(u) && this.time - u.cmAt > COUNTER.smokeLife) u.cm = 1;
         return;
       }
     }
@@ -1656,6 +1738,7 @@ export class Game {
       u.hp = Math.min(u.maxHp, u.hp + 2 * dt);
       if (u.rearm <= 0) {
         for (const w of u.weapons) w.ammo = w.max;
+        u.cm = 1;
         u.fuel = u.fuelMax;
         if (!u.resume || u.resume.k !== 'rtb') {
           // Back to the mission it left to refuel or rearm.
@@ -2243,7 +2326,7 @@ export class Game {
       // Guided projectiles.
       let gx = p.tx;
       let gy = p.ty;
-      let galt = 0.02;
+      let galt = p.decoy ? p.decoy.alt : 0.02;
       if (p.target <= -2) {
         const m = this.projs.find((q) => q.id === -2 - p.target);
         if (!m || m.dead) {
@@ -2321,13 +2404,19 @@ export class Game {
       }
       // A SAM whose target is gone self-destructs; it never picks a new one (that is how
       // three, four or more SAMs ended up chasing the same aircraft).
-      if (p.kind === 'sam' && p.target === -1) {
+      if (p.kind === 'sam' && p.target === -1 && !p.decoy) {
         p.dead = true;
         this.emit({ k: 'boom', x: p.x, y: p.y, s: 0.12, w: false, a: p.alt }, p.x, p.y);
         continue;
       }
       // Seeker search when arriving at an aim point without a lock (the fuzzy track was off,
       // or the target slipped away): look around, lock on to whatever is there, or give up.
+      if (p.decoy && dist < 0.3) {
+        // Reached the chaff cloud: the fuze fires on the foil.
+        p.dead = true;
+        this.emit({ k: 'boom', x: p.x, y: p.y, s: 0.25, w: false, a: p.alt }, p.x, p.y);
+        continue;
+      }
       if ((p.target === -1 || (p.kind !== 'sam' && p.seeking)) && dist < 0.4) {
         const found = this.seekerSearch(p);
         if (found) {
@@ -2413,6 +2502,7 @@ export class Game {
       chance *= TORPEDO_VS[t.type]?.hit ?? 1;
     }
     if (p.kind === 'missile') chance *= (1 - t.ecm) * (this.screened(t) ? 0.6 : 1);
+    if (UNITS[t.type].domain === 'land' && this.inSmoke(t.x, t.y)) chance *= COUNTER.smokeHit;
     if (p.kind === 'sam' && cls === 'air') chance *= 1 - t.ecm * 0.5;
     const w = this.weatherAt(t.x, t.y);
     chance *= 1 - 0.25 * w.storm;
@@ -2725,9 +2815,12 @@ export class Game {
         let q = 0;
         let exact = false;
         let viaSonar = false;
+        // Ground units inside a smoke screen are seen only from point-blank range.
+        const smoked = dom === 'land' && this.inSmoke(e.x, e.y);
         for (const s of sensors) {
           const d = Math.hypot(s.x - e.x, s.y - e.y);
           if (d > 70) continue;
+          if (smoked && d > COUNTER.smokeSee) continue;
           if (dom !== 'sub' && d < s.vis * visMul) {
             exact = true;
             break;
@@ -2763,7 +2856,7 @@ export class Game {
             }
           }
         }
-        if (!exact && e.revealUntil > this.time) {
+        if (!exact && !smoked && e.revealUntil > this.time) {
           // Launch transients: everybody nearby hears it.
           for (const s of sensors) {
             if (s.isUnit && Math.hypot(s.x - e.x, s.y - e.y) < 25) {
@@ -2871,6 +2964,7 @@ export class Game {
             UNITS[x.type].deck ? this.deckIds(x) : [],
             this.damageRow(x),
             [Math.max(0, Math.ceil(x.spec.ready - this.time)), Math.max(0, Math.ceil(x.spec.until - this.time)), x.spec.on ? 1 : 0],
+            x.cm,
           ]);
         }
         continue;
@@ -2917,6 +3011,7 @@ export class Game {
     }
     const snap: Snapshot = { t: 's', time: r2(this.time), cash: Math.floor(p.cash), income: r2(p.income), u, c, p: pr, d, e };
     if (this.phase === 'setup') snap.ph = { left: Math.ceil(this.setupLeft), ready: [...this.readySet] };
+    if (this.smokes.length) snap.sm = this.smokes.map((m) => [Math.round(m.x * 100) / 100, Math.round(m.y * 100) / 100, m.r, Math.ceil(m.until - this.time)]);
     if (full || this.sitesDirty || this.tickN % 10 === 0) {
       const intel = this.siteIntel.get(team);
       snap.s = this.sites.map((s, i) => {

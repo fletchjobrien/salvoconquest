@@ -20,7 +20,9 @@ export type Command =
   | { c: 'undeploy'; ids: number[] }
   | { c: 'ready'; on: boolean }
   // Faction special ability of the selected ships (doctrine.ts), hotkey F:
-  | { c: 'special'; ids: number[] };
+  | { c: 'special'; ids: number[] }
+  // Countermeasure of the selected units (chaff or smoke), hotkey C:
+  | { c: 'counter'; ids: number[] };
 
 export interface LobbySlot {
   slot: number;
@@ -68,9 +70,9 @@ export type SiteRow = [number, number, number, number];
 /**
  * Own-unit details: id, ammo, cargo ids, fuel %, order code, order x, order y, flags, type index,
  * then (aircraft) range left before bingo in km, nearest base x, y, (carriers) the deck: ids of
- * flights based on it, and (ships) the damage state.
+ * flights based on it, (ships) the damage state, the faction special, and countermeasure charges left.
  */
-export type DetailRow = [number, number[], number[], number, number, number, number, number, number, number, number, number, number[], DamageRow, SpecialRow];
+export type DetailRow = [number, number[], number[], number, number, number, number, number, number, number, number, number, number[], DamageRow, SpecialRow, number];
 /** Faction special: seconds until usable, seconds still active, toggle on (1/0). */
 export type SpecialRow = [number, number, number];
 /** Seconds left on each damaged system: engine, rudder, radar, fire, flood, stun, disabled weapon index (-1 none), weapon. */
@@ -106,6 +108,8 @@ export interface Snapshot {
   pl?: { id: number; res: number; units: number; defeated: boolean; dom: number }[];
   /** Present while the deployment phase runs: seconds left and the players who are ready. */
   ph?: { left: number; ready: number[] };
+  /** Smoke screens: x, y, radius, seconds left. */
+  sm?: [number, number, number, number][];
 }
 
 export type GameEvent =
@@ -127,6 +131,8 @@ export type GameEvent =
   | { k: 'crit'; id: number; part: CritPart; o: number; m?: string }
   | { k: 'battle' }
   | { k: 'special'; id: number; s: string; o: number; on: boolean }
+  | { k: 'chaff'; id: number; x: number; y: number; a: number }
+  | { k: 'smoke'; id: number; x: number; y: number; r: number }
   | { k: 'msg'; text: string; o?: number };
 
 export type ServerMsg =

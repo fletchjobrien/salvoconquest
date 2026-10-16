@@ -1,5 +1,5 @@
 // DOM heads-up display: top bar, radio log, build bar, selection panel, tooltips, banners.
-import { BUILDABLE, BUILDINGS, CRIT, MODULES, UNITS, UnitType, unitBuildTime, unitCost, FACTION_MOD, moduleFor } from '../../shared/defs';
+import { BUILDABLE, BUILDINGS, CRIT, MODULES, UNITS, UnitType, unitBuildTime, unitCost, FACTION_MOD, moduleFor, counterOf } from '../../shared/defs';
 import { shipDoctrine } from '../../shared/doctrine';
 import { ORDER_CODES } from '../../shared/protocol';
 import type { World, UView } from '../state';
@@ -16,7 +16,7 @@ export interface HudActions {
   selectOnly(ids: number[]): void;
   unloadMode(ship: number, ids: number[]): void;
   toggleCargo(id: number): void;
-  ability(name: 'mines' | 'rtb' | 'retreat' | 'stop' | 'siteFactory' | 'refund' | 'special'): void;
+  ability(name: 'mines' | 'rtb' | 'retreat' | 'stop' | 'siteFactory' | 'refund' | 'special' | 'counter'): void;
   ready(on: boolean): void;
 }
 
@@ -478,6 +478,11 @@ export class Hud {
         const col = (sp.toggle ? on : active > 0) ? 'var(--accent)' : ready > 0 ? 'var(--faint)' : 'var(--good)';
         html += `<div class="spec"><div class="wrow"><span>★ ${sp.name.toUpperCase()}</span><span class="pips" style="color:${col}">${state}</span></div><div class="sd">${sp.desc}</div><div class="sd">Trait: ${doc.trait.text}</div></div>`;
       }
+      const cmk = counterOf(u.type);
+      if (cmk) {
+        const left = d[15] ?? 0;
+        html += `<div class="wrow"><span>${cmk === 'chaff' ? 'CHAFF' : 'SMOKE'}<span class="kbd">C</span></span><span class="pips" style="color:${left > 0 ? 'var(--good)' : 'var(--faint)'}">${left > 0 ? 'READY' : 'USED · REARM'}</span></div>`;
+      }
       if (def.domain === 'air') {
         html += `<div class="wrow"><span>FUEL</span><span>${d[3]}%</span></div><div class="bar"><i style="width:${d[3]}%;background:var(--accent)"></i></div>`;
       }
@@ -546,6 +551,9 @@ export class Hud {
     // Faction special (all selected ships that have one).
     const specs = new Set(sel.map((u) => shipDoctrine(w.myFaction, u.type)?.special.name).filter(Boolean));
     if (specs.size) b.push(`<button class="btn small on" data-act="special">${specs.size === 1 ? [...specs][0]!.toUpperCase() : 'SPECIALS'}<span class="kbd">F</span></button>`);
+    // Countermeasures: chaff (warships, aircraft), smoke (ground units).
+    const cms = new Set(sel.map((u) => counterOf(u.type)).filter(Boolean));
+    if (cms.size) b.push(`<button class="btn small" data-act="counter">${cms.size === 1 ? [...cms][0]!.toUpperCase() : 'CHAFF / SMOKE'}<span class="kbd">C</span></button>`);
     b.push(`<button class="btn small" data-act="stop">STOP<span class="kbd">X</span></button>`);
     return b.join('');
   }
@@ -583,7 +591,7 @@ const HELP = `<b>FIELD MANUAL</b> <span style="float:right;color:var(--faint)">[
 <span class="k">CTRL+RMB</span> force move (no fighting)<br>
 <span class="k">WASD · MMB drag</span> pan · <span class="k">Q/E</span> rotate · <span class="k">wheel</span> zoom<br>
 <span class="k">U</span> unload troops, then click land in the ring<br>
-<span class="k">F</span> ship special · <span class="k">M</span> mines · <span class="k">R</span> aircraft RTB · <span class="k">X</span> stop<br>
+<span class="k">F</span> ship special · <span class="k">C</span> chaff / smoke · <span class="k">M</span> mines · <span class="k">R</span> aircraft RTB · <span class="k">X</span> stop<br>
 <span class="k">CTRL+1-9</span> group · <span class="k">1-9</span> recall · <span class="k">SPACE</span> last alert<br>
 <span class="k">TAB</span> weapon ranges · <span class="k">V</span> sensor coverage<br>
 <span class="k">ENTER</span> chat · <span class="k">ESC</span> menu<br>

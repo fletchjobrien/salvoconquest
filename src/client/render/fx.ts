@@ -296,6 +296,34 @@ export class Fx {
     this.smoke.add({ x: x + rnd(-0.03, 0.03) * size, y: alt + 0.08, z: y + rnd(-0.03, 0.03) * size, vx: 0.03, vy: rnd(0.08, 0.14), vz: 0.01, max: rnd(4, 7), s0: 0.08 * size, s1: 0.6 * size, r: 0.16, g: 0.15, b: 0.15, a0: 0.65, drag: 0.3 });
   }
 
+  /** Chaff: a launcher thump, then a glittering cloud of foil that spreads, drifts and slowly falls. */
+  chaff(x: number, alt: number, y: number) {
+    this.glow.add({ x, y: alt, z: y, max: 0.25, s0: 0.2, s1: 0.05, r: 1, g: 0.9, b: 0.6, a0: 1 });
+    for (let i = 0; i < 70; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const v = rnd(0.05, 0.4);
+      const k = rnd(0.75, 1);
+      this.glow.add({ x, y: alt + 0.03, z: y, vx: Math.cos(a) * v, vy: rnd(0.02, 0.2), vz: Math.sin(a) * v, max: rnd(4, 7.5), s0: rnd(0.012, 0.025), s1: 0.008, r: k, g: k, b: k * 1.05, a0: 0.9, drag: 1.2, grav: 0.015 });
+    }
+    for (let i = 0; i < 6; i++) {
+      this.smoke.add({ x: x + rnd(-0.05, 0.05), y: alt + 0.02, z: y + rnd(-0.05, 0.05), vx: rnd(-0.06, 0.06), vy: rnd(0.01, 0.05), vz: rnd(-0.06, 0.06), max: rnd(2, 3.5), s0: 0.05, s1: 0.25, r: 0.85, g: 0.86, b: 0.9, a0: 0.3, drag: 1 });
+    }
+  }
+
+  /** Smoke grenades bursting around a ground unit. */
+  smokeBurst(x: number, alt: number, y: number) {
+    for (let i = 0; i < 24; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const v = rnd(0.1, 0.35);
+      this.smoke.add({ x, y: alt + 0.03, z: y, vx: Math.cos(a) * v, vy: rnd(0.02, 0.08), vz: Math.sin(a) * v, max: rnd(3, 5), s0: 0.08, s1: 0.55, r: 0.86, g: 0.87, b: 0.85, a0: 0.75, drag: 0.9 });
+    }
+  }
+
+  /** One puff of a standing smoke screen (white-grey, slowly rising and spreading). */
+  smokePuff(x: number, alt: number, y: number, size: number, a0: number) {
+    this.smoke.add({ x, y: alt + 0.02, z: y, vx: rnd(-0.02, 0.02) + 0.01, vy: rnd(0.01, 0.04), vz: rnd(-0.02, 0.02), max: rnd(3.5, 5.5), s0: size * 0.4, s1: size, r: 0.84, g: 0.85, b: 0.83, a0, drag: 0.5 });
+  }
+
   intercept(x: number, alt: number, y: number) {
     this.glow.add({ x, y: alt, z: y, max: 0.3, s0: 0.5, s1: 0.1, r: 1, g: 1, b: 0.85, a0: 1 });
     for (let i = 0; i < 10; i++) {

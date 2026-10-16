@@ -61,6 +61,7 @@ export class GameScene {
   private flashLight: THREE.PointLight;
   private time = 0;
   private weatherEmit = 0;
+  private smokeEmit = 0;
   overlay: Overlay | null = null;
   onSound: (name: string, x: number, y: number, vol?: number) => void = () => {};
 
@@ -302,6 +303,21 @@ export class GameScene {
     this.hemi.intensity = 1.25 * (1 - wa.storm * 0.35);
     // Fog layers now carry the fog look; keep only a faint veil when the camera is inside a bank.
     this.r.setVeil(Math.min(0.12, wa.fog * 0.12 * Math.max(0, 1 - rig.dist / 30)), new THREE.Color(0.85, 0.87, 0.89));
+    // Standing smoke screens: keep them topped up with puffs, thinning out in their last seconds.
+    this.smokeEmit -= dt;
+    if (this.smokeEmit <= 0 && w.smokes.length) {
+      this.smokeEmit = 0.08;
+      for (const [sx, sy, r, left] of w.smokes) {
+        const fade = Math.min(1, left / 6);
+        for (let k = 0; k < 2; k++) {
+          const a = Math.random() * Math.PI * 2;
+          const d = Math.sqrt(Math.random()) * r * 0.85;
+          const px = sx + Math.cos(a) * d;
+          const py = sy + Math.sin(a) * d;
+          this.fx.smokePuff(px, groundY(w.map, px, py), py, 0.5 + Math.random() * 0.4, 0.55 * fade + 0.1);
+        }
+      }
+    }
     this.weatherEmit -= dt;
     if (this.weatherEmit <= 0) {
       this.weatherEmit = 0.05;
@@ -407,6 +423,16 @@ export class GameScene {
       case 'splash':
         this.fx.splash(e.x, e.y, 0.5);
         this.onSound('splash', e.x, e.y, 0.6);
+        break;
+      case 'chaff': {
+        const ca = Math.max(groundY(map, e.x, e.y) + 0.05, e.a * VSCALE);
+        this.fx.chaff(e.x, ca, e.y);
+        this.onSound('launch', e.x, e.y, 0.5);
+        break;
+      }
+      case 'smoke':
+        this.fx.smokeBurst(e.x, groundY(map, e.x, e.y), e.y);
+        this.onSound('splash', e.x, e.y, 0.4);
         break;
       case 'intercept':
         const ia = Math.max(groundY(map, e.x, e.y) + 0.03, e.a * VSCALE);
