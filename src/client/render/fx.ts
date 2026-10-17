@@ -271,14 +271,18 @@ export class Fx {
   }
 
   /**
-   * Camera shake: only for blasts near the centre of the view (falls off within ~3 km), and only
-   * when zoomed in: full at 6 km camera distance, none beyond 30 km.
+   * Camera shake, only for a blast you are looking at: inside the middle of the view (a radius of
+   * a third of the camera distance, at least 1.5 km), strongest at the centre, none outside; and
+   * only when zoomed in (full at 6 km camera distance, none beyond 30 km).
    */
   addShake(x: number, y: number, amount: number) {
     const zoom = Math.max(0, Math.min(1, (30 - this.view.dist) / 24));
     if (zoom <= 0) return;
+    const R = Math.max(1.5, this.view.dist * 0.33);
     const d = Math.hypot(x - this.view.x, y - this.view.y);
-    this.shake = Math.min(1, this.shake + (amount * zoom * zoom) / (1 + (d / 3) ** 2));
+    if (d >= R) return;
+    const near = 1 - (d / R) ** 2;
+    this.shake = Math.min(1, this.shake + amount * zoom * zoom * near);
   }
 
   /** One tracer streak this frame, from (x1..) back toward (x0..). */
