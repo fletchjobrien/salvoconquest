@@ -150,6 +150,34 @@ export class Overlay {
     return any;
   }
 
+  /**
+   * Add a world-space polyline to the current path, sampled along each leg and broken wherever a point
+   * cannot be projected (behind the camera). Joining across such a gap draws stray lines across the
+   * screen. Returns whether any point landed near the screen.
+   */
+  private polyline(v: OverlayView, pts: [number, number][], alt = 0, steps = 1): boolean {
+    const ctx = this.ctx;
+    let open = false;
+    let any = false;
+    for (let i = 0; i < pts.length; i++) {
+      const [x1, y1] = pts[i];
+      const [x0, y0] = i > 0 ? pts[i - 1] : pts[i];
+      for (let k = i === 0 ? steps : 1; k <= steps; k++) {
+        const f = k / steps;
+        v.r.project(x0 + (x1 - x0) * f, alt, y0 + (y1 - y0) * f, P);
+        if (P.z >= 1) {
+          open = false;
+          continue;
+        }
+        if (P.x > -50 && P.y > -50 && P.x < this.w + 50 && P.y < this.h + 50) any = true;
+        if (open) ctx.lineTo(P.x, P.y);
+        else ctx.moveTo(P.x, P.y);
+        open = true;
+      }
+    }
+    return any;
+  }
+
   affilOf(w: World, owner: number): Affil {
     if (owner === -2) return 'unknown';
     if (owner < 0) return 'neutral';
@@ -720,27 +748,26 @@ export class Overlay {
     ctx.lineWidth = 1;
     ctx.globalAlpha = 0.05 + zoomedOut * 0.07;
     ctx.beginPath();
+    const steps = Math.ceil(S / 5);
     for (let k = 0; k <= S; k += 10) {
-      if (this.proj(v, k, 0, 0)) ctx.moveTo(P.x, P.y);
-      if (this.proj(v, k, 0, S)) ctx.lineTo(P.x, P.y);
-      if (this.proj(v, 0, 0, k)) ctx.moveTo(P.x, P.y);
-      if (this.proj(v, S, 0, k)) ctx.lineTo(P.x, P.y);
+      this.polyline(v, [[k, 0], [k, S]], 0, steps);
+      this.polyline(v, [[0, k], [S, k]], 0, steps);
     }
     ctx.stroke();
     ctx.globalAlpha = 0.35;
     ctx.beginPath();
-    const corners: [number, number][] = [
-      [0, 0],
-      [S, 0],
-      [S, S],
-      [0, S],
-      [0, 0],
-    ];
-    corners.forEach(([x, y], i) => {
-      this.proj(v, x, 0, y);
-      if (i === 0) ctx.moveTo(P.x, P.y);
-      else ctx.lineTo(P.x, P.y);
-    });
+    this.polyline(
+      v,
+      [
+        [0, 0],
+        [S, 0],
+        [S, S],
+        [0, S],
+        [0, 0],
+      ],
+      0,
+      steps,
+    );
     ctx.stroke();
     // Grid labels along the top edge.
     ctx.globalAlpha = 0.25 + zoomedOut * 0.2;
@@ -765,16 +792,9 @@ export class Overlay {
       ctx.setLineDash(kind === 0 ? [10, 6] : [2, 6]);
       // Same shape the simulation uses: squall line across the wind, fog tongue along it.
       ctx.beginPath();
-      let any = false;
-      for (let k = 0; k <= 64; k++) {
-        const [ox, oy] = weatherOutline(kind as 0 | 1, x, y, r * 0.92, (k / 64) * Math.PI * 2);
-        v.r.project(ox, 0.2, oy, P);
-        if (P.z >= 1) continue;
-        if (P.x > -50 && P.y > -50 && P.x < this.w + 50 && P.y < this.h + 50) any = true;
-        if (k === 0) ctx.moveTo(P.x, P.y);
-        else ctx.lineTo(P.x, P.y);
-      }
-      if (any) ctx.stroke();
+      const outline: [number, number][] = [];
+      for (let k = 0; k <= 64; k++) outline.push(weatherOutline(kind as 0 | 1, x, y, r * 0.92, (k / 64) * Math.PI * 2));
+      if (this.polyline(v, outline, 0.2)) ctx.stroke();
       ctx.setLineDash([]);
       if (this.proj(v, x, 0.2, y)) {
         ctx.fillStyle = ctx.strokeStyle;
@@ -1069,18 +1089,15 @@ export class Overlay {
       const ca = Math.cos(ang);
       const sa = Math.sin(ang);
       ctx.beginPath();
-      let any = false;
       const seg = 72;
+      const ring: [number, number][] = [];
       for (let i = 0; i <= seg; i++) {
         const t = (i / seg) * Math.PI * 2;
         const ex = Math.cos(t) * a;
         const ey = Math.sin(t) * b;
-        v.r.project(cx + ex * ca - ey * sa, 0, cy + ex * sa + ey * ca, P);
-        if (P.z >= 1) continue;
-        if (P.x > -50 && P.y > -50 && P.x < this.w + 50 && P.y < this.h + 50) any = true;
-        if (i === 0) ctx.moveTo(P.x, P.y);
-        else ctx.lineTo(P.x, P.y);
+        ring.push([cx + ex * ca - ey * sa, cy + ex * sa + ey * ca]);
       }
+      const any = this.polyline(v, ring);
       if (any) {
         ctx.globalAlpha = 0.04 * alpha;
         ctx.fillStyle = col;
