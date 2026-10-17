@@ -2,7 +2,7 @@
 import { BUILDABLE, UNITS, UnitType, unitCost, counterOf } from './defs';
 import { canDeployAt, deployZone } from './game';
 import type { Contact, Game, Unit, SiteState } from './game';
-import { islandAt } from './map';
+import { cellOf, islandAt } from './map';
 
 /** How dangerous a unit is to a fleet (hp-weighted when it is ours). */
 const NAVAL_POWER: Partial<Record<UnitType, number>> = { battleship: 8, destroyer: 5, sub: 3, carrier: 3, coastal: 4, strike: 3 };
@@ -76,6 +76,8 @@ export class Bot {
   private avoid = new Map<number, number>();
   /** Ships ordered to break off: no new engagements until then. */
   private noEngage = new Map<number, number>();
+  /** Submarine raid plans: target point and the safe route to it. */
+  private raids = new Map<number, { tx: number; ty: number; pts: [number, number][]; i: number; at: number; home: boolean }>();
 
   constructor(
     private game: Game,
@@ -106,6 +108,7 @@ export class Bot {
     this.operation();
     this.grabs();
     this.fleet();
+    this.subRaids();
     this.air();
     this.groundIdle();
   }
@@ -250,8 +253,9 @@ export class Bot {
         }
       }
       if (s.type === 'sub') {
-        const hunter = near(['destroyer'], 9)[0];
-        const prey = near(['carrier', 'battleship', 'merchant'], 40).sort((a, b) => (VALUE[b.e.type] ?? 1) / (1 + Math.hypot(b.k.x - s.x, b.k.y - s.y) / 8) - (VALUE[a.e.type] ?? 1) / (1 + Math.hypot(a.k.x - s.x, a.k.y - s.y) / 8))[0];
+        const hunter = near(['destroyer'], 10)[0];
+        // Strike only what is close; getting there quietly is the raid planner's job.
+        const prey = near(['carrier', 'battleship', 'merchant', 'lander'], 12).sort((a, b) => (VALUE[b.e.type] ?? 1) / (1 + Math.hypot(b.k.x - s.x, b.k.y - s.y) / 8) - (VALUE[a.e.type] ?? 1) / (1 + Math.hypot(a.k.x - s.x, a.k.y - s.y) / 8))[0];
         if (hunter && (!prey || Math.hypot(prey.k.x - s.x, prey.k.y - s.y) > 7)) {
           away(s, hunter.k, 8);
           continue;
@@ -356,7 +360,7 @@ export class Bot {
       coastal: t > 150 ? (t > 600 ? 2 : 1) : 0,
       sam: t > 120 ? (t > 600 ? 2 : 1) : 0,
       destroyer: Math.min(10, (3 + t / 150) * rich),
-      sub: t > 300 ? Math.min(3, Math.floor(t / 400)) : 0,
+      sub: t > 240 ? Math.min(3, 1 + Math.floor((t - 240) / 360)) : 0,
       battleship: t > 600 ? (t > 1200 ? 2 : 1) * Math.floor(rich) : 0,
       carrier: t > 720 && p.cash > 3000 ? 1 : 0,
       fighter: Math.min(3, 1 + Math.floor(t / 240)),
@@ -811,22 +815,7 @@ export class Bot {
       const dl = Math.hypot(dx, dy) || 1;
       g.command(this.pid, { c: 'move', ids: cvs.map((s) => s.id), x: rally.x + (dx / dl) * Math.min(12, dl), y: rally.y + (dy / dl) * Math.min(12, dl) });
     }
-    // Subs without prey lie in wait on the enemy's shipping lanes (resource site -> home port).
-    const subs = ships.filter((s) => s.type === 'sub' && s.order.k !== 'attack');
-    if (subs.length) {
-      const enemyHq = g.sites.find((s) => s.type === 'hq' && s.owner >= 0 && g.team(s.owner) !== myTeam);
-      const lanes = g.sites.filter((s) => s.type === 'resource' && s.owner >= 0 && g.team(s.owner) !== myTeam);
-      subs.forEach((sub, i) => {
-        let tx = enemyHq ? (enemyHq.x + g.map.size / 2) / 2 : g.map.size / 2;
-        let ty = enemyHq ? (enemyHq.y + g.map.size / 2) / 2 : g.map.size / 2;
-        if (lanes.length && enemyHq) {
-          const r = lanes[i % lanes.length];
-          tx = r.x * 0.6 + enemyHq.x * 0.4;
-          ty = r.y * 0.6 + enemyHq.y * 0.4;
-        }
-        g.command(this.pid, { c: 'move', ids: [sub.id], x: tx, y: ty });
-      });
-    }
+    // Submarines are handled by subRaids().
   }
 
   /** Strike flights support the operation (enemy ground units and soft ships at the target); otherwise loiter at the front. */
@@ -847,6 +836,186 @@ export class Bot {
         }
       }
       g.command(this.pid, { c: 'move', ids: [pl.id], x: front.x, y: front.y });
+    }
+  }
+
+  // ------------------------------------------------------------------ submarine raids
+  //
+  // Subs hunt the enemy's rear: merchant lanes and capital ships in port, not the front line.
+  // Radar cannot see a submerged boat; only sonar can (destroyers, enemy subs, sonobuoys), so
+  // each sub plans its route around the enemy sonar we know of, closes in quietly, strikes, and
+  // slips away along a safe route to look for the next target.
+
+  /** Coarse water grid for route planning (2 km cells): 1 = open water. */
+  private raidGrid: { n: number; h: number; water: Uint8Array } | null = null;
+
+  private gridFor() {
+    if (this.raidGrid) return this.raidGrid;
+    const m = this.game.map;
+    const h = 2;
+    const n = Math.ceil(m.size / h);
+    const water = new Uint8Array(n * n);
+    for (let j = 0; j < n; j++) {
+      for (let i = 0; i < n; i++) {
+        // Water only if most of the cell is deep water.
+        let wet = 0;
+        for (const [a, b] of [[0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75], [0.5, 0.5]]) if (m.nav[cellOf(m, (i + a) * h, (j + b) * h)] === 0) wet++;
+        water[j * n + i] = wet >= 4 ? 1 : 0;
+      }
+    }
+    this.raidGrid = { n, h, water };
+    return this.raidGrid;
+  }
+
+  /** Enemy sonar we know of (fresh sightings only), as circles a sub should keep out of. */
+  private sonarThreats(): { x: number; y: number; r: number }[] {
+    const g = this.game;
+    const out: { x: number; y: number; r: number }[] = [];
+    for (const m of this.intel.values()) {
+      if (g.time - m.t > 90) continue;
+      // Destroyers hear a sub at about 15-18 km at speed; enemy subs and AEW (buoys) closer.
+      const r = m.type === 'destroyer' ? 17 : m.type === 'sub' ? 11 : m.type === 'recon' ? 9 : 0;
+      if (r) out.push({ x: m.x, y: m.y, r: r + 2 });
+    }
+    return out;
+  }
+
+  /** A* on the coarse grid; danger (inside known sonar) costs 12x. Returns waypoints and cost. */
+  private safeRoute(sx: number, sy: number, tx: number, ty: number, threats: { x: number; y: number; r: number }[]): { pts: [number, number][]; cost: number } | null {
+    const { n, h, water } = this.gridFor();
+    const idx = (x: number, y: number) => Math.max(0, Math.min(n - 1, Math.floor(y / h))) * n + Math.max(0, Math.min(n - 1, Math.floor(x / h)));
+    const snap = (k: number) => {
+      if (water[k]) return k;
+      const i0 = k % n;
+      const j0 = (k - i0) / n;
+      for (let r = 1; r < 6; r++)
+        for (let j = j0 - r; j <= j0 + r; j++)
+          for (let i = i0 - r; i <= i0 + r; i++) if (i >= 0 && j >= 0 && i < n && j < n && water[j * n + i]) return j * n + i;
+      return -1;
+    };
+    const s = snap(idx(sx, sy));
+    const t = snap(idx(tx, ty));
+    if (s < 0 || t < 0) return null;
+    const danger = (k: number) => {
+      const x = ((k % n) + 0.5) * h;
+      const y = (Math.floor(k / n) + 0.5) * h;
+      let d = 0;
+      for (const c of threats) {
+        const q = Math.hypot(c.x - x, c.y - y);
+        if (q < c.r) d = Math.max(d, 1 - (q / c.r) * 0.5);
+      }
+      return d;
+    };
+    const gS = new Float32Array(n * n).fill(Infinity);
+    const came = new Int32Array(n * n).fill(-1);
+    const closed = new Uint8Array(n * n);
+    const open: number[] = [s];
+    gS[s] = 0;
+    const hx = (k: number) => Math.hypot((k % n) - (t % n), Math.floor(k / n) - Math.floor(t / n)) * h;
+    while (open.length) {
+      // Small grid: a linear scan for the best open node is fast enough.
+      let bi = 0;
+      for (let i = 1; i < open.length; i++) if (gS[open[i]] + hx(open[i]) < gS[open[bi]] + hx(open[bi])) bi = i;
+      const k = open[bi];
+      open[bi] = open[open.length - 1];
+      open.pop();
+      if (k === t) break;
+      if (closed[k]) continue;
+      closed[k] = 1;
+      const i = k % n;
+      const j = (k - i) / n;
+      for (let dj = -1; dj <= 1; dj++)
+        for (let di = -1; di <= 1; di++) {
+          if (!di && !dj) continue;
+          const ii = i + di;
+          const jj = j + dj;
+          if (ii < 0 || jj < 0 || ii >= n || jj >= n) continue;
+          const kk = jj * n + ii;
+          if (!water[kk] || closed[kk]) continue;
+          // No corner cutting past land.
+          if (di && dj && (!water[j * n + ii] || !water[jj * n + i])) continue;
+          const c = gS[k] + Math.hypot(di, dj) * h * (1 + 12 * danger(kk));
+          if (c < gS[kk]) {
+            gS[kk] = c;
+            came[kk] = k;
+            open.push(kk);
+          }
+        }
+    }
+    if (!Number.isFinite(gS[t])) return null;
+    const cells: number[] = [];
+    for (let k = t; k !== -1; k = came[k]) cells.push(k);
+    cells.reverse();
+    // Keep every 4th cell (about 8 km legs); the unit's own pathfinding does the fine work.
+    const pts: [number, number][] = [];
+    for (let i = 4; i < cells.length; i += 4) pts.push([((cells[i] % n) + 0.5) * h, (Math.floor(cells[i] / n) + 0.5) * h]);
+    pts.push([tx, ty]);
+    return { pts, cost: gS[t] };
+  }
+
+  /** Where a sub can do damage behind the lines: capital ships we have seen, the enemy's merchant lanes. */
+  private raidTargets(): { x: number; y: number; value: number; unit?: number }[] {
+    const g = this.game;
+    const team = g.players[this.pid].team;
+    const out: { x: number; y: number; value: number; unit?: number }[] = [];
+    for (const [id, m] of this.intel) {
+      if (g.time - m.t > 150) continue;
+      if (m.type === 'carrier' || m.type === 'battleship') out.push({ x: m.x, y: m.y, value: m.type === 'carrier' ? 10 : 8, unit: id });
+    }
+    for (const s of g.sites) {
+      if (s.type !== 'resource' || !s.dock || s.owner < 0 || g.team(s.owner) === team) continue;
+      // Lie in wait on the lane, a little out from the resource island.
+      const hq = g.sites.find((h) => h.type === 'hq' && h.owner === s.owner);
+      const port = hq?.dock ?? hq ?? s.dock;
+      out.push({ x: s.dock.x * 0.7 + port.x * 0.3, y: s.dock.y * 0.7 + port.y * 0.3, value: 4 });
+    }
+    return out;
+  }
+
+  private subRaids() {
+    const g = this.game;
+    const subs = this.mine().filter((u) => u.type === 'sub' && u.inside < 0 && !u.retreating);
+    for (const id of this.raids.keys()) if (!subs.some((s) => s.id === id)) this.raids.delete(id);
+    if (!subs.length) return;
+    const threats = this.sonarThreats();
+    for (const sub of subs) {
+      // Busy with a target (tactics gave it an attack order), or rearming: leave it.
+      if (sub.order.k === 'attack' || sub.rearming) continue;
+      let r = this.raids.get(sub.id);
+      const lowAmmo = sub.weapons.length > 0 && sub.weapons.every((w) => (w.mod.ammo ?? -1) > 0 && w.ammo <= 0);
+      if (lowAmmo || sub.hp < sub.maxHp * 0.45) {
+        // Home through safe water to repair or reload.
+        const port = this.nearestOwnPort(sub.x, sub.y);
+        if (port && (!r || r.home !== true)) {
+          const route = this.safeRoute(sub.x, sub.y, port.x, port.y, threats);
+          r = { tx: port.x, ty: port.y, pts: route?.pts ?? [[port.x, port.y]], i: 0, at: g.time, home: true };
+          this.raids.set(sub.id, r);
+        }
+      } else if (!r || r.home || g.time - r.at > 45 || Math.hypot(sub.x - r.tx, sub.y - r.ty) < 4) {
+        // New plan: the best target by value per (danger-weighted) route length; spread the boats out.
+        const taken = new Set([...this.raids.entries()].filter(([id]) => id !== sub.id).map(([, v]) => `${Math.round(v.tx)},${Math.round(v.ty)}`));
+        let best: { tx: number; ty: number; pts: [number, number][]; score: number } | null = null;
+        for (const c of this.raidTargets()) {
+          if (taken.has(`${Math.round(c.x)},${Math.round(c.y)}`)) continue;
+          // Arrived at a lane with nothing there: try another.
+          if (r && Math.hypot(sub.x - c.x, sub.y - c.y) < 4 && !c.unit) continue;
+          const route = this.safeRoute(sub.x, sub.y, c.x, c.y, threats);
+          if (!route) continue;
+          const score = c.value / (1 + route.cost / 30);
+          if (!best || score > best.score) best = { tx: c.x, ty: c.y, pts: route.pts, score };
+        }
+        if (best) {
+          r = { tx: best.tx, ty: best.ty, pts: best.pts, i: 0, at: g.time, home: false };
+          this.raids.set(sub.id, r);
+        }
+      }
+      if (!r) continue;
+      // Next leg: skip waypoints we have reached.
+      while (r.i < r.pts.length - 1 && Math.hypot(sub.x - r.pts[r.i][0], sub.y - r.pts[r.i][1]) < 3) r.i++;
+      const [wx, wy] = r.pts[r.i];
+      const o = sub.order;
+      if (!(o.k === 'move' && Math.hypot(o.x - wx, o.y - wy) < 0.5)) g.command(this.pid, { c: 'move', ids: [sub.id], x: wx, y: wy, mode: 'move' });
+      sub.fireMode = 1;
     }
   }
 

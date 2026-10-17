@@ -39,6 +39,9 @@ interface Snap {
   cash: number;
   kills: number;
   losses: number;
+  subKills: number;
+  subsLost: number;
+  subSeen: number;
   ops: number;
   won: number;
   aborted: number;
@@ -65,11 +68,25 @@ async function play(job: Job): Promise<Result> {
   const owner = g.sites.map((s) => s.owner);
   const snaps: Snap[][] = [[], []];
   const centre = g.map.islands[0]?.id ?? 0;
+  // Submarines: kills scored by each boat, boats lost, and how often the enemy holds a track on them.
+  const subKills = [new Map<number, number>(), new Map<number, number>()];
+  const subsLost = [new Set<number>(), new Set<number>()];
+  const seenSamples = [0, 0];
+  const seenHits = [0, 0];
   for (let i = 1; i <= job.minutes * 600 && !g.over; i++) {
     for (const b of bots) b.tick();
     g.step();
     g.flushEvents();
     if (i % 50 === 0) {
+      for (const pid of [0, 1]) for (const id of subKills[pid].keys()) if (!g.units.get(id) || g.units.get(id)!.dead) subsLost[pid].add(id);
+      for (const u of g.units.values()) {
+        if (u.type !== 'sub') continue;
+        subKills[u.owner].set(u.id, Math.max(subKills[u.owner].get(u.id) ?? 0, u.kills));
+        if (u.dead) continue;
+        seenSamples[u.owner]++;
+        const k = g.knowledge.get(1 - g.players[u.owner].team)?.get(u.id);
+        if (k && k.ident >= 1) seenHits[u.owner]++;
+      }
       g.sites.forEach((s, k) => {
         if (s.owner >= 0 && owner[k] >= 0 && owner[k] !== s.owner) fromEnemy[s.owner]++;
         owner[k] = s.owner;
@@ -92,6 +109,9 @@ async function play(job: Job): Promise<Result> {
           cash: Math.round(p.cash),
           kills: p.kills,
           losses: p.losses,
+          subKills: [...subKills[p.id].values()].reduce((a, b) => a + b, 0),
+          subsLost: subsLost[p.id].size,
+          subSeen: seenSamples[p.id] ? (100 * seenHits[p.id]) / seenSamples[p.id] : 0,
           ...structuredClone((bots[p.id] as Bot).stats ?? { ops: 0, won: 0, aborted: 0 }),
         });
       }
@@ -172,6 +192,9 @@ if (!isMainThread) {
     ['cash', (s) => s.cash],
     ['kills', (s) => s.kills],
     ['losses', (s) => s.losses],
+    ['sub kills', (s) => s.subKills ?? 0],
+    ['subs lost', (s) => s.subsLost ?? 0],
+    ['sub seen%', (s) => s.subSeen ?? 0],
     ['ops', (s) => s.ops ?? 0],
     ['ops won', (s) => s.won ?? 0],
     ['ops off', (s) => s.aborted ?? 0],
