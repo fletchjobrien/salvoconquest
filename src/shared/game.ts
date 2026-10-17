@@ -1029,11 +1029,14 @@ export class Game {
   private updateWeather(dt: number) {
     const info = THEME_INFO[this.theme];
     const S = this.map.size;
+    // Sizes were tuned on the 80 km map: cells grow with the map, drift a little faster so they
+    // still cross it in reasonable time.
+    const K = S / 80;
     const spawnCell = (kind: 0 | 1) => {
       // Enter from a random edge and drift across.
       const edge = this.rng.int(0, 3);
       const t = this.rng.range(0.1, 0.9) * S;
-      const r = kind === 0 ? this.rng.range(9, 16) : this.rng.range(8, 18);
+      const r = (kind === 0 ? this.rng.range(9, 16) : this.rng.range(8, 18)) * K;
       const pos = [
         [t, -r * 0.5],
         [S + r * 0.5, t],
@@ -1041,7 +1044,7 @@ export class Game {
         [-r * 0.5, t],
       ][edge];
       const ang = Math.atan2(S / 2 - pos[1], S / 2 - pos[0]) + this.rng.range(-0.6, 0.6);
-      const sp = kind === 0 ? this.rng.range(0.08, 0.15) : this.rng.range(0.04, 0.08);
+      const sp = (kind === 0 ? this.rng.range(0.08, 0.15) : this.rng.range(0.04, 0.08)) * Math.sqrt(K);
       this.weather.push({
         id: this.nextId++,
         kind,
@@ -1068,7 +1071,7 @@ export class Game {
       const fadeIn = Math.min(1, w.age / 25);
       const fadeOut = Math.min(1, (w.life - w.age) / 25);
       w.i = w.peak * Math.max(0, Math.min(fadeIn, fadeOut));
-      if (w.kind === 0 && w.i > 0.5 && this.rng.next() < dt * 0.25 * w.i) {
+      if (w.kind === 0 && w.i > 0.5 && this.rng.next() < dt * 0.25 * Math.sqrt(K) * w.i) {
         const [ox, oy] = this.rng.inDisc(w.r * 0.7);
         this.emit({ k: 'lightning', x: w.x + ox, y: w.y + oy }, w.x + ox, w.y + oy);
       }
