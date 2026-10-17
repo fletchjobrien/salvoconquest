@@ -258,7 +258,8 @@ export class CameraRig {
     let lx = 0;
     if (this.shake > 0.002) {
       // Salvo's shake: a jolt that dies away fast, moving the eye more than the aim point.
-      const s = this.shake * this.dist * 0.012;
+      // At most ~1% of the camera distance, so a jolt never throws the view around.
+      const s = this.shake * this.dist * 0.008;
       const t = time * 50;
       sx = Math.sin(t * 1.7) * s;
       sy = Math.sin(t * 2.3 + 1) * s * 0.7;

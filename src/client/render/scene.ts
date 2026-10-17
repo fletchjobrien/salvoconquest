@@ -375,7 +375,7 @@ export class GameScene {
     this.fx.setScale(this.r.height / this.r.pixelSize, this.r.camera.fov);
     this.fx.update(dt);
     // Effects ask for camera shake; the rig applies it.
-    rig.shake = Math.min(2.5, rig.shake + this.fx.shake);
+    rig.shake = Math.min(1, rig.shake + this.fx.shake);
     this.fx.shake = 0;
     this.fx.view = { x: rig.tx, y: rig.ty, dist: rig.dist };
   }
@@ -530,7 +530,7 @@ export class GameScene {
         if (warship || dom === 'sub') {
           // Salvo's sinking blast: a wide ring and three more explosions over two seconds.
           this.fx.ring(e.x, e.y, 150 * 0.014, 2.8, 0.4, 0xffd0a0);
-          this.fx.addShake(e.x, e.y, 2);
+          this.fx.addShake(e.x, e.y, 0.7);
           this.blastFlash(e.x, e.y, 1.6);
           for (const dt of [0.7, 1.4, 2.1]) {
             const ox = (Math.random() - 0.5) * 0.56;

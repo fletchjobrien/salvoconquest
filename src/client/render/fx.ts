@@ -267,11 +267,15 @@ export class Fx {
     f.light.position.set(x, alt, y);
   }
 
-  /** Camera shake, weaker the further from the centre of the view. */
+  /**
+   * Camera shake: only for blasts near the centre of the view (falls off within ~3 km), and only
+   * when zoomed in: full at 6 km camera distance, none beyond 30 km.
+   */
   addShake(x: number, y: number, amount: number) {
-    const ref = Math.max(4, this.view.dist * 0.3);
+    const zoom = Math.max(0, Math.min(1, (30 - this.view.dist) / 24));
+    if (zoom <= 0) return;
     const d = Math.hypot(x - this.view.x, y - this.view.y);
-    this.shake = Math.min(2.5, this.shake + amount / (1 + (d / ref) ** 2));
+    this.shake = Math.min(1, this.shake + (amount * zoom * zoom) / (1 + (d / 3) ** 2));
   }
 
   /** One tracer streak this frame, from (x1..) back toward (x0..). */
@@ -428,7 +432,7 @@ export class Fx {
       this.smoke.add({ x: x + fx * 4 * U, y: alt + 0.03, z: y + fy * 4 * U, vx: fx * v + rnd(-2, 2) * U, vy: rnd(1, 4) * U, vz: fy * v + rnd(-2, 2) * U, max: rnd(1.5, 3), s0: 4 * U * big, s1: 16 * U * big, r: 0.62, g: 0.62, b: 0.62, a0: 0.5, drag: 1.5, grav: -1 * U, sq: true });
     }
     if (big >= 1.5) this.light(x + fx * 0.05, alt + 0.1, y + fy * 0.05, 0xffc080, 6 * big, 2.5 * big, 0.12);
-    this.addShake(x, y, 0.06 * big);
+    if (big >= 1.5) this.addShake(x, y, 0.05 * big);
   }
 
   /** Missile launch: a hot flash and a big billowing cloud of white smoke (smaller for SAMs). */
@@ -441,7 +445,7 @@ export class Fx {
       this.smoke.add({ x, y: alt + 0.03, z: y, vx: Math.cos(a) * v, vy: rnd(0, 8) * U, vz: Math.sin(a) * v, max: rnd(2.5, 4.5), s0: rnd(4, 7) * U, s1: rnd(14, 24) * U, r: g, g, b: g * 0.98, a0: 0.7, drag: 0.9, grav: -1.2 * U, sq: true });
     }
     this.light(x, alt + 0.15, y, 0xffc080, sam ? 10 : 20, (sam ? 180 : 300) * U, 0.6);
-    this.addShake(x, y, sam ? 0.2 : 0.5);
+    if (!sam) this.addShake(x, y, 0.12);
   }
 
   /**
@@ -484,7 +488,7 @@ export class Fx {
       this.ring(x, y, 50 * s * U, 1.6, 0.3);
     }
     this.light(x, y0 + 10 * U, y, 0xffa860, 30 * s, 500 * s * U, 0.9);
-    this.addShake(x, y, 1.4 * s);
+    this.addShake(x, y, 0.5 * s);
   }
 
   /** A shell striking a hull: a hard flash, a spray of sparks and a few puffs of smoke. */
@@ -501,7 +505,7 @@ export class Fx {
       this.smoke.add({ x: x + rnd(-2, 2) * U, y: y0, z: y + rnd(-2, 2) * U, vx: rnd(-3, 3) * U, vy: rnd(4, 10) * U, vz: rnd(-3, 3) * U, max: rnd(2, 4), s0: 5 * U, s1: 22 * U, r: g, g, b: g, a0: 0.8, drag: 0.8, grav: -2 * U, sq: true });
     }
     this.light(x, y0 + 0.08, y, 0xffb070, 12, 160 * U, 0.35);
-    this.addShake(x, y, 0.25);
+    this.addShake(x, y, 0.08);
   }
 
   /** A column of white water thrown up and falling back, with a low skirt of spray. */
@@ -523,7 +527,7 @@ export class Fx {
   splash(x: number, y: number, scale = 0.35) {
     this.waterColumn(x, y, scale);
     this.ring(x, y, 34 * scale * U, 1.1, 0.3);
-    this.addShake(x, y, 0.1 * scale);
+
   }
 
   /** A torpedo hit: a towering column of water, a wide ring, a flash and a smoke pall. */
@@ -536,7 +540,7 @@ export class Fx {
       this.smoke.add({ x: x + rnd(-4, 4) * U, y: 0.05, z: y + rnd(-4, 4) * U, vx: rnd(-6, 6) * U, vy: rnd(8, 18) * U, vz: rnd(-6, 6) * U, max: rnd(4, 8), s0: 10 * U, s1: 50 * U, r: g, g, b: g, a0: 0.85, drag: 0.6, grav: -2 * U, sq: true });
     }
     this.light(x, 0.2, y, 0xffa860, 30, 400 * U, 0.6);
-    this.addShake(x, y, 1.6);
+    this.addShake(x, y, 0.6);
   }
 
   /**
@@ -601,7 +605,7 @@ export class Fx {
       this.glow.add({ x, y: alt, z: y, vx: Math.cos(a) * sp, vy: rnd(-10, 30) * U, vz: Math.sin(a) * sp, max: rnd(1, 2.2), s0: 2.4 * U, s1: 1.4 * U, r: 1, g: 0.85, b: 0.45, a0: 1, r2: 0.9, g2: 0.3, b2: 0.05, cl: 1, drag: 0.4, grav: 35 * U, floor: true, fade: 0.6 });
     }
     this.light(x, alt, y, 0xffb070, 25, 450 * U, 0.6);
-    this.addShake(x, y, 0.6);
+    this.addShake(x, y, 0.2);
   }
 
   /** A SAM that missed and self-destructed: a small black puff in the sky. */
