@@ -230,31 +230,65 @@ export function generateMap(seed: number, theme: Theme, occupied?: number[]): Ga
     return true;
   };
 
-  // Neutral islands: drawn separately for each quarter, so the map is uneven (different routes,
-  // straits and chokepoints) while every quarter still holds the same mix of buildings.
+  // Neutral islands: one quarter's layout is drawn, then copied (rotated) to all four quarters, so every
+  // home gets the same mix of buildings at about the same distances. Each copy is nudged a few km and
+  // gets its own shape and size, so the map stays a little asymmetrical. Slot 0 is always close to home.
   const roleSets: BuildingType[][] = [
     ['resource', 'battery'],
     ['resource', 'radar'],
     ['resource', 'dockyard'],
     ['airbase', 'barracks'],
   ];
-  let nameIdx = 0;
-  for (let k = 0; k < 4; k++) {
-    const base = (k * Math.PI) / 2;
-    for (const roles of roleSets) {
-      for (let t = 0; t < 600; t++) {
-        const a = base + rng.range(-0.25, Math.PI / 2 + 0.25);
-        const dist = rng.range(15 * K, 37 * K);
-        const r = rng.range(2.2, 4.4);
-        const x = C + Math.cos(a) * dist;
-        const y = C + Math.sin(a) * dist;
-        if (!free(x, y, r, 3.2)) continue;
-        specs.push({ x, y, r, rot: 0, seed: seed + 100 + islands.length * 13, peak: rng.range(0.25, 0.5) * peakScale, lobes: makeLobes(rng, r, rng.int(1, 3), 1.1, rng.range(0.6, 1.6)), warp: rng.range(0.5, 0.9) });
-        islands.push({ id: islands.length, name: names[nameIdx++ % names.length], x, y, r, home: -1, roles });
-        placed.push({ x, y, r: r * 1.4 });
-        break;
+  const homeDist = Math.hypot(homeOff, homeOff);
+  type Slot = { a: number; d: number; r: number };
+  // Quarter k's frame: angle measured from its home diagonal (pi/4 + k pi/2), distance from the centre.
+  const at = (sl: Slot, k: number) => {
+    const ang = Math.PI / 4 + (k * Math.PI) / 2 + sl.a;
+    return { x: C + Math.cos(ang) * sl.d, y: C + Math.sin(ang) * sl.d };
+  };
+  const nearHome = (sl: Slot) => {
+    const p = at(sl, 0);
+    return Math.hypot(p.x - (C + homeOff), p.y - (C + homeOff)) - sl.r - 5.6;
+  };
+  let template: Slot[] | null = null;
+  for (let attempt = 0; attempt < 2000 && !template; attempt++) {
+    const tpl: Slot[] = roleSets.map(() => ({ a: rng.range(-0.7, 0.7), d: rng.range(0.32, 0.95) * homeDist, r: rng.range(2.4, 4.2) }));
+    // Slot 0 sits 18-24 km off the home island's coast.
+    const g = rng.range(9, 12) * K;
+    const off = rng.range(-1.2, 1.2) + Math.PI;
+    const hx = C + homeOff + Math.cos(Math.PI / 4 + off) * (g + 5.6 + tpl[0].r);
+    const hy = C + homeOff + Math.sin(Math.PI / 4 + off) * (g + 5.6 + tpl[0].r);
+    tpl[0].d = Math.hypot(hx - C, hy - C);
+    tpl[0].a = Math.atan2(hy - C, hx - C) - Math.PI / 4;
+    // All sixteen copies must fit: inside the map, clear of the centre, the homes and each other.
+    const pts: { x: number; y: number; r: number }[] = [];
+    let ok = nearHome(tpl[0]) > 15 * (K / 2) && Math.abs(tpl[0].a) < 0.75;
+    for (let k = 0; k < 4 && ok; k++) {
+      for (const sl of tpl) {
+        const p = at(sl, k);
+        if (!free(p.x, p.y, sl.r * 1.15, 6)) ok = false;
+        for (const q of pts) if (Math.hypot(q.x - p.x, q.y - p.y) < q.r * 1.15 + sl.r * 1.15 + 9) ok = false;
+        pts.push({ x: p.x, y: p.y, r: sl.r });
       }
     }
+    if (ok) template = tpl;
+  }
+  let nameIdx = 0;
+  for (let k = 0; k < 4; k++) {
+    roleSets.forEach((roles, i) => {
+      const sl = template ? template[i] : { a: rng.range(-0.6, 0.6), d: rng.range(0.4, 0.9) * homeDist, r: 3 };
+      // A little asymmetry: nudge each copy and vary its size; fall back to the exact copy if crowded.
+      let r = sl.r * rng.range(0.85, 1.15);
+      let p = at({ ...sl, a: sl.a + rng.range(-0.05, 0.05), d: sl.d + rng.range(-3, 3) * K * 0.5 }, k);
+      if (!free(p.x, p.y, r, 3.2)) {
+        r = sl.r;
+        p = at(sl, k);
+      }
+      const { x, y } = p;
+      specs.push({ x, y, r, rot: 0, seed: seed + 100 + islands.length * 13, peak: rng.range(0.25, 0.5) * peakScale, lobes: makeLobes(rng, r, rng.int(1, 3), 1.1, rng.range(0.6, 1.6)), warp: rng.range(0.5, 0.9) });
+      islands.push({ id: islands.length, name: names[nameIdx++ % names.length], x, y, r, home: -1, roles });
+      placed.push({ x, y, r: r * 1.4 });
+    });
   }
 
   // Islet chains: rocky strings of small islands that funnel ships through straits.
@@ -266,13 +300,14 @@ export function generateMap(seed: number, theme: Theme, occupied?: number[]): Ga
     for (let t = 0; t < 60; t++) {
       x = rng.range(8, MAP_SIZE - 8);
       y = rng.range(8, MAP_SIZE - 8);
-      if (free(x, y, 1.5, 2.2)) break;
+      const nearAHome = islands.some((i) => i.home >= 0 && Math.hypot(i.x - x, i.y - y) < i.r + 8 * K);
+      if (!nearAHome && free(x, y, 1.5, 2.2)) break;
     }
     let dir = rng.range(0, Math.PI * 2);
     const n = rng.int(4, 6);
     for (let i = 0; i < n; i++) {
       const r = rng.range(0.9, 1.9);
-      if (free(x, y, r, 2.2)) {
+      if (free(x, y, r, 2.2) && !islands.some((i) => i.home >= 0 && Math.hypot(i.x - x, i.y - y) < i.r + 6 * K)) {
         specs.push({ x, y, r, rot: 0, seed: seed + 500 + islands.length * 7, peak: rng.range(0.2, 0.45) * peakScale, lobes: makeLobes(rng, r, rng.int(0, 2), 1.2, rng.range(0.8, 1.8)), warp: 0.7 });
         islands.push({ id: islands.length, name: '', x, y, r, home: -1, minor: true });
         placed.push({ x, y, r: r * 1.3 });

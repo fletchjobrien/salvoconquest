@@ -69,7 +69,9 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
   send subs after carriers, battleships and merchant lanes while dodging destroyers, strike only lightly
   defended ships, cover raided merchant lanes with fighters, seed sonobuoys from the AEW, ferry troops from
   any island they hold, and counter-build what they see.
-- **Map:** 160 × 160 km. Islands keep their size, so there is far more open water between them; merchants
+- **Map:** 160 × 160 km. Every home gets the same mix of neutral islands (one quarter's layout is copied, rotated, to
+  all four quarters, then each copy is nudged a few km and gets its own shape and size, so the map stays a little
+  asymmetrical): one building island 18–24 km off each home, one dockyard per quarter. Islands keep their size, so there is far more open water between them; merchants
   are paid more per trip (450) because the trips are longer.
 - **Automation:** ground units attack-move by default, idle troops engage enemies on their island, damaged units
   retreat to friendly buildings and come back when repaired, warships whose missiles, SAMs and torpedoes are all
