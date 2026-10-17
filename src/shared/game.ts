@@ -61,6 +61,7 @@ import {
   F_DAMAGED,
   F_FIRING,
   F_LANDED,
+  F_ABOARD,
   F_LOADING,
   F_MOVING,
   F_RETREAT,
@@ -683,6 +684,22 @@ export class Game {
             u.mission = null;
           }
         break;
+      case 'launch': {
+        // Every flight on this carrier's deck takes off for the point; one still rearming goes when ready.
+        const ship = this.units.get(Number(cmd.ship));
+        const x = num(cmd.x);
+        const y = num(cmd.y);
+        if (!ship || ship.dead || ship.owner !== pid || !UNITS[ship.type].deck || Number.isNaN(x) || Number.isNaN(y)) return;
+        for (const id of this.deckIds(ship)) {
+          const a = this.units.get(id)!;
+          if (!a.landed) continue;
+          const o: Order = { k: 'patrol', x, y };
+          a.mission = { ...o };
+          if (a.rearm > 0) a.resume = { ...o };
+          else this.setOrder(a, o);
+        }
+        break;
+      }
       case 'autoretreat':
         for (const u of own(cmd.ids)) u.autoRetreat = !!cmd.on;
         break;
@@ -1680,6 +1697,11 @@ export class Game {
         m.mtimer = 0;
       } else this.navTo(m, port.x, port.y);
     }
+  }
+
+  /** Aircraft stowed on its carrier's deck (landed there). */
+  aboard(u: Unit): boolean {
+    return u.landed && !!u.base && 'unit' in u.base;
   }
 
   /** Flights based on a carrier (landed or in the air). */
@@ -3072,6 +3094,7 @@ export class Game {
         if (x.firingUntil > this.time) flags |= F_FIRING;
         if (x.retreating) flags |= F_RETREAT;
         if (x.landed) flags |= F_LANDED;
+        if (this.aboard(x)) flags |= F_ABOARD;
         if (x.cargo.length) flags |= F_CARGO;
         if (x.hp < x.maxHp * 0.5) flags |= F_DAMAGED;
         if (x.type === 'merchant' && x.mstate === 'back') flags |= F_LOADING;
@@ -3102,7 +3125,7 @@ export class Game {
         }
         continue;
       }
-      if (x.inside >= 0) continue;
+      if (x.inside >= 0 || this.aboard(x)) continue;
       const k = know.get(x.id);
       if (!k) continue;
       let flags = 0;

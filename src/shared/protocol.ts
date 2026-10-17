@@ -24,7 +24,9 @@ export type Command =
   // Active radar on/off (emission control), hotkey G:
   | { c: 'radar'; ids: number[]; on: boolean }
   // Fire control: 0 hold fire, 1 weapons tight (2 missiles per target), 2 weapons free. Hotkey F:
-  | { c: 'firemode'; ids: number[]; mode: number };
+  | { c: 'firemode'; ids: number[]; mode: number }
+  // Carrier: launch every flight stowed aboard toward a point (fighters patrol, strike flights attack, AEW orbits). Hotkey L:
+  | { c: 'launch'; ship: number; x: number; y: number };
 
 export interface LobbySlot {
   slot: number;
@@ -165,6 +167,7 @@ export const F_PAINTED = 1024; // an enemy radar is tracking this unit right now
 export const F_DARK = 2048; // own radar switched off (emission control)
 export const F_HOLD = 4096; // fire control: hold fire
 export const F_FREE = 8192; // fire control: weapons free (neither bit: weapons tight)
+export const F_ABOARD = 16384; // aircraft stowed on a carrier: not drawn, launched with the carrier's LAUNCH order
 
 /** Ship systems that a hit can knock out (WARNO-style critical damage). */
 export type CritPart = 'engine' | 'rudder' | 'radar' | 'weapon' | 'fire' | 'flood' | 'stun';

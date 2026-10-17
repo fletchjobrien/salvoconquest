@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { UNITS, UNIT_TYPES, UnitType, MODULES } from '../../shared/defs';
 import { heightAt } from '../../shared/map';
 import type { GameEvent } from '../../shared/protocol';
-import { F_LANDED, F_FIRE } from '../../shared/protocol';
+import { F_LANDED, F_FIRE, F_ABOARD } from '../../shared/protocol';
 import type { World } from '../state';
 import { PALETTES, Palette } from '../theme';
 import { Renderer, CameraRig } from './renderer';
@@ -121,6 +121,8 @@ export class GameScene {
     // ---- units ----
     const seen = new Set<number>();
     for (const u of w.units.values()) {
+      // Flights stowed on a carrier are below deck: no model (it would clip through the carrier).
+      if (u.flags & F_ABOARD) continue;
       seen.add(u.id);
       let o = this.units.get(u.id);
       if (!o) {

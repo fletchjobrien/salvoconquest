@@ -6,6 +6,7 @@ import { SIDE } from '../theme';
 import { UNITS, UNIT_TYPES } from '../../shared/defs';
 import { sensorCoverage, unionOutline, COVER_COLORS, Disc, Loop } from '../sensors';
 import { deployZone } from '../../shared/game';
+import { F_ABOARD } from '../../shared/protocol';
 
 import type { Renderer, CameraRig } from '../render/renderer';
 
@@ -254,6 +255,7 @@ export class Minimap {
     ctx.globalAlpha = 1;
     // units
     for (const u of w.units.values()) {
+      if (u.flags & F_ABOARD) continue;
       const col = u.owner === w.me ? SIDE.own : w.teamOf(u.owner) === w.myTeam ? SIDE.ally : SIDE.hostile;
       ctx.fillStyle = col;
       const air = UNITS[u.type].domain === 'air';

@@ -4,7 +4,7 @@ import { canDeployAt, rallySite } from '../shared/game';
 import { islandAt } from '../shared/map';
 import { weatherStrength } from '../shared/weather';
 import type { Command, GameEvent, ServerMsg, StartInfo } from '../shared/protocol';
-import { F_DARK, F_LANDED } from '../shared/protocol';
+import { F_ABOARD, F_DARK, F_LANDED } from '../shared/protocol';
 import { Conn } from './net';
 import { World, UView } from './state';
 import { Renderer, CameraRig } from './render/renderer';
@@ -172,9 +172,14 @@ export class Match {
     if (this.keys.has('KeyE')) this.rig.rotate(dt * 1.2);
     this.rig.update(dt, w.map.size, w.clock);
     // Drop selections that no longer exist.
-    for (const id of this.selected) if (!w.units.has(id)) this.selected.delete(id);
+    // Gone, or stowed on a carrier (select the carrier to launch it).
+    for (const id of this.selected) if (!w.units.has(id) || w.units.get(id)!.flags & F_ABOARD) this.selected.delete(id);
     if (this.view.mode?.k === 'unload') {
       this.view.mode.ships = this.view.mode.ships.filter((s) => w.units.has(s.ship));
+      if (!this.view.mode.ships.length) this.view.mode = null;
+    }
+    if (this.view.mode?.k === 'launch') {
+      this.view.mode.ships = this.view.mode.ships.filter((id) => w.units.has(id));
       if (!this.view.mode.ships.length) this.view.mode = null;
     }
     if (this.view.mode?.k === 'deploy' && !w.setup) this.view.mode = null;
@@ -329,6 +334,15 @@ export class Match {
   private commandAt(x: number, y: number, hover: Hover | null, forceMove: boolean) {
     const w = this.world;
     const ids = this.ownSelectedIds();
+    if (this.view.mode?.k === 'launch') {
+      const ships = this.view.mode.ships;
+      for (const ship of ships) this.send({ c: 'launch', ship, x, y });
+      this.ping(x, y, 'move');
+      audio.play('order');
+      this.hud.log('AIR OPS', `Launching the air wing${ships.length > 1 ? `s of ${ships.length} carriers` : ''}. Fighters fly CAP, strike flights hunt, AEW orbits.`, 'good');
+      this.view.mode = null;
+      return;
+    }
     if (this.view.mode?.k === 'unload') {
       const mode = this.view.mode;
       if (islandAt(w.map, x, y) < 0) {
@@ -438,10 +452,27 @@ export class Match {
     this.hud.log('ORDERS', `Pick a landing point${ships.length > 1 ? ` for ${ships.length} ships` : ''} within ${UNLOAD_RANGE} km — ships close in if needed.`, 'good');
   }
 
-  private ability(a: 'mines' | 'rtb' | 'retreat' | 'stop' | 'siteFactory' | 'refund' | 'counter' | 'radar' | 'firemode') {
+  /** Carrier launch: the next click picks where the flights on deck go. */
+  private enterLaunch() {
+    const w = this.world;
+    const ships = [...this.selected].filter((id) => (w.details.get(id)?.[12] ?? []).some((a) => (w.units.get(a)?.flags ?? 0) & F_ABOARD));
+    if (!ships.length) {
+      audio.play('deny');
+      if ([...this.selected].some((id) => UNITS[w.units.get(id)?.type ?? 'merchant'].deck)) this.hud.log('AIR OPS', 'No flights on deck.', 'warn');
+      return;
+    }
+    this.view.mode = { k: 'launch', ships };
+    audio.play('click');
+    this.hud.log('AIR OPS', 'Pick the area to launch to. The dashed ring is the strike radius.', 'good');
+  }
+
+  private ability(a: 'mines' | 'rtb' | 'retreat' | 'stop' | 'siteFactory' | 'refund' | 'counter' | 'radar' | 'firemode' | 'launch') {
     const ids = this.ownSelectedIds();
     const w = this.world;
     switch (a) {
+      case 'launch':
+        this.enterLaunch();
+        break;
       case 'firemode': {
         // Cycle hold fire -> weapons tight -> weapons free; a mixed selection goes to tight.
         const us = ids.map((id) => w.units.get(id)).filter((u) => !!u);
@@ -765,7 +796,7 @@ export class Match {
         } else audio.play('deny');
         return;
       }
-      if (this.view.mode?.k === 'unload' && !d.moved) {
+      if ((this.view.mode?.k === 'unload' || this.view.mode?.k === 'launch') && !d.moved) {
         const m = this.view.mouse;
         if (m.valid) this.commandAt(m.wx, m.wy, null, false);
         return;
@@ -842,6 +873,7 @@ export class Match {
       if (e.code === 'KeyF') this.ability('firemode');
       if (e.code === 'KeyG') this.ability('radar');
       if (e.code === 'KeyU') this.enterUnload();
+      if (e.code === 'KeyL') this.enterLaunch();
       if (e.code === 'KeyM') this.ability('mines');
       if (e.code === 'KeyR') this.ability('rtb');
       if (e.code === 'KeyT') this.ability('retreat');

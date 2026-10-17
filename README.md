@@ -42,7 +42,7 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
   ships that sail cargo home and turn it into cash. Enemy subs love merchants.
 - Other buildings give bonuses: radar stations (24 km air / 18 km surface radar), airbases, barracks and dockyards (forward production, repair, rearm),
   missile batteries (fire for whoever owns them).
-- Ships carry troops (destroyer 2, battleship 3; a Troop Bay module adds 2). Carriers carry up to 4 air flights instead: right-click a carrier with aircraft selected to base them there. Aircraft are built at airbases only.
+- Ships carry troops (destroyer 2, battleship 3; a Troop Bay module adds 2). Carriers carry air flights instead (Coalition 5, Union 4): right-click a carrier with aircraft selected to base them there. Flights that land are stowed on deck (not drawn on the map); select the carrier and press **LAUNCH** (**L**), then click the area: fighters fly CAP there, strike flights hunt there, AEW orbits there. The dashed ring shows the strike radius. Aircraft are built at airbases only.
   RMB a ship with troops selected and they walk to the shore and ride landing craft out to it.
 - **Ship damage** (like WARNO tank combat): hits can knock out systems, not just hull points. An **engine** hit
   stops the ship dead for 8 s, then leaves it at 55% speed; **steering** jams (quarter turn rate), **radar** drops

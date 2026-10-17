@@ -1,6 +1,6 @@
 // DOM heads-up display: top bar, radio log, build bar, selection panel, tooltips, banners.
 import { BUILDABLE, BUILDINGS, CRIT, MODULES, UNITS, UnitType, unitBuildTime, unitCost, counterOf, unitDef, deriveStats, FACTION_MOD } from '../../shared/defs';
-import { ORDER_CODES, F_DARK, F_PAINTED, F_HOLD, F_FREE } from '../../shared/protocol';
+import { ORDER_CODES, F_ABOARD, F_DARK, F_PAINTED, F_HOLD, F_FREE } from '../../shared/protocol';
 import type { World, UView } from '../state';
 import { FACTION_STYLE, SIDE, unitName } from '../theme';
 import { SymDomain, glyphFor, symbolDataUrl, SITE_GLYPH } from '../render/symbols';
@@ -15,7 +15,7 @@ export interface HudActions {
   selectOnly(ids: number[]): void;
   unloadMode(ship: number, ids: number[]): void;
   toggleCargo(id: number): void;
-  ability(name: 'mines' | 'rtb' | 'retreat' | 'stop' | 'siteFactory' | 'refund' | 'counter' | 'radar' | 'firemode'): void;
+  ability(name: 'mines' | 'rtb' | 'retreat' | 'stop' | 'siteFactory' | 'refund' | 'counter' | 'radar' | 'firemode' | 'launch'): void;
   ready(on: boolean): void;
 }
 
@@ -497,11 +497,13 @@ export class Hud {
       }
       const deck = def.deck ?? 0;
       if (deck > 0) {
-        html += `<div class="status" style="margin-top:8px">AIR WING ${d[12].length}/${deck} · RMB SHIP WITH AIRCRAFT TO BASE THEM</div><div class="cargo">`;
+        const stowed = d[12].filter((id) => (w.units.get(id)?.flags ?? 0) & F_ABOARD).length;
+        html += `<div class="status" style="margin-top:8px">AIR WING ${d[12].length}/${deck} · ${stowed} ON DECK${stowed ? ' · L TO LAUNCH' : ''} · RMB SHIP WITH AIRCRAFT TO BASE THEM</div><div class="cargo">`;
         for (let i = 0; i < deck; i++) {
           const a = d[12][i] !== undefined ? w.units.get(d[12][i]) : undefined;
           const t = a?.type ?? this.world.cargoTypes.get(d[12][i] ?? -1);
-          if (d[12][i] !== undefined && t) html += `<div class="cs full" title="${a && a.alt < 0.05 ? 'On deck' : 'Airborne'}"><img src="${symbolDataUrl('own', 'air', glyphFor(t), 9)}"></div>`;
+          const below = !!a && (a.flags & F_ABOARD) !== 0;
+          if (d[12][i] !== undefined && t) html += `<div class="cs full" style="${below ? '' : 'opacity:.45'}" title="${below ? 'On deck' : 'Airborne'}"><img src="${symbolDataUrl('own', 'air', glyphFor(t), 9)}"></div>`;
           else html += `<div class="cs"></div>`;
         }
         html += `</div>`;
@@ -538,6 +540,8 @@ export class Hud {
     if (any((u) => matchLoadoutOf(u.type).includes('mines'))) b.push(`<button class="btn small" data-act="mines">DROP MINES<span class="kbd">M</span></button>`);
     if (any((u) => matchLoadoutOf(u.type).includes('sonobuoy'))) b.push(`<button class="btn small" data-act="mines">DROP BUOY<span class="kbd">M</span></button>`);
     if (any((u) => UNITS[u.type].domain === 'air')) b.push(`<button class="btn small" data-act="rtb">RTB<span class="kbd">R</span></button>`);
+    // Carriers with flights on deck: launch them at a point.
+    if (any((u) => (w.details.get(u.id)?.[12] ?? []).some((a) => (w.units.get(a)?.flags ?? 0) & F_ABOARD))) b.push(`<button class="btn small" data-act="launch">LAUNCH<span class="kbd">L</span></button>`);
     if (any((u) => UNITS[u.type].category === 'naval' || UNITS[u.type].category === 'ground')) {
       const on = sel.every((u) => ((w.details.get(u.id)?.[7] ?? 1) & 1) === 1);
       b.push(`<button class="btn small ${on ? 'on' : ''}" data-act="retreat">AUTO-RETREAT<span class="kbd">T</span></button>`);
@@ -605,7 +609,7 @@ const HELP = `<b>FIELD MANUAL</b> <span style="float:right;color:var(--faint)">[
 <span class="k">CTRL+RMB</span> force move (no fighting)<br>
 <span class="k">WASD · MMB drag</span> pan · <span class="k">Q/E</span> rotate · <span class="k">wheel</span> zoom<br>
 <span class="k">U</span> unload troops, then click land in the ring<br>
-<span class="k">C</span> chaff / smoke · <span class="k">G</span> radar on/off · <span class="k">F</span> fire control · <span class="k">M</span> mines / sonobuoy · <span class="k">R</span> aircraft RTB · <span class="k">X</span> stop<br>
+<span class="k">C</span> chaff / smoke · <span class="k">G</span> radar on/off · <span class="k">F</span> fire control · <span class="k">M</span> mines / sonobuoy · <span class="k">R</span> aircraft RTB · <span class="k">L</span> carrier launch · <span class="k">X</span> stop<br>
 <span class="k">CTRL+1-9</span> group · <span class="k">1-9</span> recall · <span class="k">SPACE</span> last alert<br>
 <span class="k">TAB</span> weapon ranges · <span class="k">V</span> sensor coverage<br>
 <span class="k">ENTER</span> chat · <span class="k">ESC</span> menu<br>

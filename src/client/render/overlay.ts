@@ -3,7 +3,7 @@ import { BUILDINGS, MODULES, UNITS, UNIT_TYPES, UNLOAD_RANGE, UnitType, unitCost
 import { canDeployAt, deployZone, rallySite } from '../../shared/game';
 import { cellOf } from '../../shared/map';
 import { sensorCoverage, unionOutline, COVER_COLORS, Disc, Loop } from '../sensors';
-import { ORDER_CODES, F_RETREAT, F_LANDED, F_FIRE, F_STOPPED, F_STUN, F_PAINTED, F_DARK, F_HOLD, F_FREE } from '../../shared/protocol';
+import { ORDER_CODES, F_ABOARD, F_RETREAT, F_LANDED, F_FIRE, F_STOPPED, F_STUN, F_PAINTED, F_DARK, F_HOLD, F_FREE } from '../../shared/protocol';
 import type { Renderer, CameraRig } from './renderer';
 import type { World, UView } from '../state';
 import { DOMAINS, GHOST_LIFE } from '../state';
@@ -25,7 +25,7 @@ export interface OverlayView {
   selected: Set<number>;
   hover: Hover | null;
   dragRect: { x0: number; y0: number; x1: number; y1: number } | null;
-  mode: { k: 'unload'; ships: { ship: number; ids: number[] }[] } | { k: 'deploy'; type: UnitType } | { k: 'build'; type: UnitType } | null;
+  mode: { k: 'unload'; ships: { ship: number; ids: number[] }[] } | { k: 'launch'; ships: number[] } | { k: 'deploy'; type: UnitType } | { k: 'build'; type: UnitType } | null;
   mouse: { x: number; y: number; wx: number; wy: number; valid: boolean };
   showRanges: boolean;
   showSensors: boolean;
@@ -249,6 +249,7 @@ export class Overlay {
     }
     if (selUnits.length && (v.showRanges || selUnits.length <= 12)) this.drawRanges(v, selUnits, selUnits.length > 6 ? 0.6 : 1);
     if (v.mode?.k === 'unload') this.drawUnloadMode(v);
+    if (v.mode?.k === 'launch') this.drawLaunchMode(v);
     if (w.setup) this.drawDeployZone(v);
     else this.drawBuildGhosts(v);
 
@@ -390,7 +391,7 @@ export class Overlay {
     }
 
     // ---- units ----
-    const list = [...w.units.values()].sort((a, b) => (UNITS[a.type].domain === 'air' ? 1 : 0) - (UNITS[b.type].domain === 'air' ? 1 : 0));
+    const list = [...w.units.values()].filter((u) => !(u.flags & F_ABOARD)).sort((a, b) => (UNITS[a.type].domain === 'air' ? 1 : 0) - (UNITS[b.type].domain === 'air' ? 1 : 0));
     for (const u of list) {
       const def = UNITS[u.type];
       const dom = def.domain;
@@ -1446,6 +1447,55 @@ export class Overlay {
         const n = ships.length > 1 ? `${ships.length} SHIPS · ` : '';
         ctx.fillText(n + (inRange ? 'LAND HERE' : ships.length > 1 ? 'WILL CLOSE IN' : 'SHIP WILL CLOSE IN'), P.x + 13, P.y - 6);
       }
+    }
+  }
+
+  /** Carrier launch: each carrier's strike radius (out and back on full fuel) and the chosen point. */
+  private drawLaunchMode(v: OverlayView) {
+    const w = v.world;
+    const m = v.mode;
+    if (m?.k !== 'launch') return;
+    const ctx = this.ctx;
+    const col = '#a6e6ff';
+    const reach: [UView, number][] = [];
+    for (const id of m.ships) {
+      const c = w.units.get(id);
+      if (!c) continue;
+      // The shortest-legged flight on deck sets the radius.
+      let r = Infinity;
+      for (const a of w.details.get(id)?.[12] ?? []) {
+        const t = w.units.get(a)?.type;
+        if (t && UNITS[t].fuel) r = Math.min(r, (UNITS[t].fuel! * UNITS[t].speed) / 2);
+      }
+      reach.push([c, Number.isFinite(r) ? r : 40]);
+    }
+    ctx.lineWidth = 1.5;
+    ctx.globalAlpha = 0.6;
+    ctx.strokeStyle = col;
+    ctx.setLineDash([8, 5]);
+    ctx.lineDashOffset = -w.clock * 10;
+    for (const [c, r] of reach) if (this.circle(v, c.x, c.y, r, 0, 128)) ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.lineDashOffset = 0;
+    ctx.globalAlpha = 1;
+    if (!v.mouse.valid) return;
+    const ok = reach.every(([c, r]) => Math.hypot(v.mouse.wx - c.x, v.mouse.wy - c.y) <= r);
+    const tint = ok ? col : '#ffc94a';
+    // Flight path from each carrier to the point.
+    ctx.strokeStyle = tint;
+    ctx.globalAlpha = 0.5;
+    ctx.setLineDash([3, 4]);
+    ctx.beginPath();
+    for (const [c] of reach) this.polyline(v, [[c.x, c.y], [v.mouse.wx, v.mouse.wy]], 0.9, 12);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+    if (this.circle(v, v.mouse.wx, v.mouse.wy, 3, 0.9, 40)) ctx.stroke();
+    if (this.proj(v, v.mouse.wx, 0.9, v.mouse.wy)) {
+      ctx.fillStyle = tint;
+      ctx.font = `600 9px ${FONT}`;
+      ctx.textAlign = 'left';
+      ctx.fillText(ok ? 'LAUNCH HERE' : 'BEYOND RANGE: FLIGHTS RETURN ON BINGO FUEL', P.x + 13, P.y - 6);
     }
   }
 }
