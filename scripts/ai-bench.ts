@@ -4,17 +4,19 @@
 //   npm run bench:ai                       self-play: current AI vs itself
 //   VS=HEAD~1 npm run bench:ai             head-to-head: current AI vs the AI at a git revision
 //   GAMES=16 MIN=20 CHECK=5 npm run bench:ai
+//   STYLE=salvo-training.json VS=HEAD npm run bench:ai   current AI playing a recorded human style
 //
 // Each pairing is played with the AIs swapping sides and factions, so map and faction luck cancel out.
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 import { cpus } from 'node:os';
 import { execSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Game } from '../src/shared/game';
 import { Bot } from '../src/shared/ai';
 import { THEMES, islandAt } from '../src/shared/map';
 import type { Faction } from '../src/shared/defs';
+import { deriveProfile, type StyleProfile } from '../src/shared/style';
 
 interface Job {
   seed: number;
@@ -25,6 +27,7 @@ interface Job {
   minutes: number;
   check: number;
   baseline?: string;
+  style?: StyleProfile | null;
 }
 
 interface Snap {
@@ -62,7 +65,7 @@ async function play(job: Job): Promise<Result> {
     { name: 'B', faction: job.factions[1], team: 1, slot: 2, bot: true },
   ]);
   const Old = job.baseline ? ((await import(job.baseline)) as { Bot: typeof Bot }).Bot : Bot;
-  const bots = g.players.map((p) => (job.ais[p.id] === 'old' ? new Old(g, p.id) : new Bot(g, p.id)));
+  const bots = g.players.map((p) => (job.ais[p.id] === 'old' ? new Old(g, p.id) : new Bot(g, p.id, job.style ?? null)));
   // Captures from the enemy: count sites whose owner flips from one player to the other.
   const fromEnemy = [0, 0];
   const owner = g.sites.map((s) => s.owner);
@@ -139,6 +142,13 @@ if (!isMainThread) {
     esbuild.buildSync({ entryPoints: [`${dir}/ai-baseline.ts`], bundle: true, platform: 'node', format: 'esm', outfile: `${dir}/ai-baseline.mjs`, logLevel: 'warning' });
     baseline = `${dir}/ai-baseline.mjs`;
   }
+  // A training file from the game (Download training file): the current AI plays that style.
+  let style: StyleProfile | null = null;
+  if (process.env.STYLE) {
+    const f = JSON.parse(readFileSync(process.env.STYLE, 'utf8'));
+    style = deriveProfile(f.games ?? [f]);
+    console.log('style profile:', JSON.stringify(style));
+  }
   const jobs: Job[] = [];
   for (let k = 0; jobs.length < GAMES; k++) {
     const theme = THEMES[k % THEMES.length];
@@ -153,6 +163,7 @@ if (!isMainThread) {
       minutes: MIN,
       check: CHECK,
       baseline,
+      style,
     });
   }
   const t0 = Date.now();

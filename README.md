@@ -197,6 +197,23 @@ not seen the defenders of an enemy island, it assumes that there is a garrison.
    stronger, the whole force goes back to port. It does not start new fights on the way. The AI does not attack
    that island again for 4 minutes.
 
+Submarines raid the rear. Radar cannot see a submerged boat; only sonar can. So each AI sub plans its route
+around the enemy destroyers, subs and AEW aircraft it knows of, goes for merchant lanes and capital ships in
+port, strikes, and slips away.
+
+### Training the AI on your play
+
+On the **Skirmish** screen, under **AI training**:
+
+- **Record my game**: the game records your orders, every unit you build, what you place in the deployment
+  phase, and every 10 s a snapshot of your money, forces, islands and how far forward your fleet and subs are.
+  Recordings stay in your browser (the last 12 games).
+- **AI copies my style**: the AI players use a profile made from your recordings. They copy your opening buys,
+  your unit mix in each phase of the game (first 5 min, 5–15 min, after 15 min), when you first attack an enemy
+  island, how hard you push (it attacks with less margin if you do), and how far forward you keep your fleet.
+- **Download training file**: one JSON file with all recorded games and the profile. Send it, and it can be
+  used to improve the built-in AI. `STYLE=<file> npm run bench:ai` runs the benchmark with that style.
+
 ### Theatres
 
 - **Operation Sandglass:** desert, Strait of Hormuz / Eastern Mediterranean
