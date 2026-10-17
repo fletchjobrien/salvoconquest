@@ -1,6 +1,6 @@
 // Owns all 3D objects for a match: terrain, units, sites, wrecks, lights, weather visuals, effects.
 import * as THREE from 'three';
-import { UNITS, UNIT_TYPES, UnitType, MODULES } from '../../shared/defs';
+import { UNITS, UNIT_TYPES, UnitType, MODULES, FACTIONS } from '../../shared/defs';
 import { heightAt } from '../../shared/map';
 import type { GameEvent } from '../../shared/protocol';
 import { F_LANDED, F_FIRE, F_ABOARD, PROJ_KINDS } from '../../shared/protocol';
@@ -374,6 +374,7 @@ export class GameScene {
 
     this.fx.setScale(this.r.height / this.r.pixelSize, this.r.camera.fov);
     this.fx.update(dt);
+    if (!this.prewarmed) this.prewarm();
     // Effects ask for camera shake; the rig applies it.
     rig.shake = Math.min(1, rig.shake + this.fx.shake);
     this.fx.shake = 0;
@@ -390,6 +391,39 @@ export class GameScene {
       else fog = Math.max(fog, f);
     }
     return { storm, fog };
+  }
+
+  private prewarmed = false;
+
+  /**
+   * Compile every shader the battle can need, once, before play: effects that are hidden until
+   * the first explosion, lightning or wreck, and every unit model. Otherwise each first use
+   * compiles mid-game, a visible hitch (worst when panning reveals new things).
+   */
+  private prewarm() {
+    this.prewarmed = true;
+    const scene = this.r.scene;
+    const hidden: THREE.Object3D[] = [];
+    scene.traverse((o) => {
+      if (!o.visible) {
+        hidden.push(o);
+        o.visible = true;
+      }
+    });
+    const extra = new THREE.Group();
+    for (const f of FACTIONS) for (const t of UNIT_TYPES) extra.add(makeUnitModel(t, f, this.pal).root);
+    const wreck = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1), WRECK_MAT);
+    extra.add(wreck);
+    extra.position.set(this.world.map.size / 2, -50, this.world.map.size / 2);
+    scene.add(extra);
+    this.weatherView.lightning(-100, -100);
+    try {
+      this.r.gl.compile(scene, this.r.camera);
+    } finally {
+      scene.remove(extra);
+      wreck.geometry.dispose();
+      for (const o of hidden) o.visible = false;
+    }
   }
 
   private pendingKills = new Map<number, GameEvent & { k: 'kill' }>();

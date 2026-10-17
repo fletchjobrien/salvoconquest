@@ -484,8 +484,14 @@ export class Audio {
     this.startMusic();
   }
 
+  private weatherAt = 0;
+
   setWeather(storm: number, zoom: number) {
     if (!this.ctx || !this.ocean) return;
+    // Called every frame: re-aim the fades 4 times a second at most, or the audio thread piles
+    // up thousands of scheduled ramps.
+    if (this.ctx.currentTime - this.weatherAt < 0.25) return;
+    this.weatherAt = this.ctx.currentTime;
     if (!Number.isFinite(storm)) storm = 0;
     if (!Number.isFinite(zoom)) zoom = 30;
     const t = this.ctx.currentTime;

@@ -137,6 +137,8 @@ export class WeatherView {
   private bolts: Bolt[] = [];
   private flash = new THREE.Vector4(0, 0, 4, 0);
   private sun = new THREE.Vector2(1, 0);
+  /** Bolts that have faded, kept with their material for reuse. */
+  private spareBolts: THREE.LineSegments[] = [];
   private boltMat = new THREE.LineBasicMaterial({ color: 0xf2f5ff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
 
   constructor(sunDir: [number, number, number]) {
@@ -250,9 +252,10 @@ export class WeatherView {
     }
     this.bolts = this.bolts.filter((b) => {
       if (b.t < 0.4) return true;
-      this.group.remove(b.line);
-      b.line.geometry.dispose();
-      (b.line.material as THREE.Material).dispose();
+      // Hide and keep for the next strike: disposing the material would free its shader, and the
+      // next bolt would compile it again (a visible hitch every few seconds in a storm).
+      b.line.visible = false;
+      this.spareBolts.push(b.line);
       return false;
     });
     this.flash.w = Math.max(0, this.flash.w - dt * 3);
@@ -282,12 +285,18 @@ export class WeatherView {
     };
     const top = CLOUD_Y[0];
     branch(x + (Math.random() - 0.5) * 1.2, top, y + (Math.random() - 0.5) * 1.2, x, 0, y, 14, 0.7, 0);
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
-    const line = new THREE.LineSegments(g, this.boltMat.clone());
-    line.renderOrder = 30;
-    line.frustumCulled = false;
-    this.group.add(line);
+    let line = this.spareBolts.pop();
+    if (line) {
+      line.geometry.dispose();
+      line.geometry = new THREE.BufferGeometry();
+      line.visible = true;
+    } else {
+      line = new THREE.LineSegments(new THREE.BufferGeometry(), this.boltMat.clone());
+      line.renderOrder = 30;
+      line.frustumCulled = false;
+      this.group.add(line);
+    }
+    line.geometry.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
     this.bolts.push({ line, t: 0 });
     this.flash.set(x, y, 2.6, 0.7);
   }
