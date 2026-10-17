@@ -1031,7 +1031,7 @@ export class Game {
     const S = this.map.size;
     // Sizes were tuned on the 80 km map: cells grow with the map, drift a little faster so they
     // still cross it in reasonable time.
-    const K = S / 80;
+    const K = (S / 80) * 0.75;
     const spawnCell = (kind: 0 | 1) => {
       // Enter from a random edge and drift across.
       const edge = this.rng.int(0, 3);

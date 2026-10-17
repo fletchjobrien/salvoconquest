@@ -2,7 +2,7 @@
 import { BUILDINGS, MODULES, UNITS, UNIT_TYPES, UNLOAD_RANGE, UnitType, unitCost, unitDef } from '../../shared/defs';
 import { canDeployAt, deployZone, rallySite } from '../../shared/game';
 import { cellOf } from '../../shared/map';
-import { sensorCoverage, unionOutline, COVER_COLORS, Disc } from '../sensors';
+import { sensorCoverage, unionOutline, COVER_COLORS, Disc, Loop } from '../sensors';
 import { ORDER_CODES, F_RETREAT, F_LANDED, F_FIRE, F_STOPPED, F_STUN, F_PAINTED, F_DARK, F_HOLD, F_FREE } from '../../shared/protocol';
 import type { Renderer, CameraRig } from './renderer';
 import type { World, UView } from '../state';
@@ -148,6 +148,39 @@ export class Overlay {
       started = true;
     }
     return any;
+  }
+
+  /**
+   * Add closed map-space outlines (coverage loops) to the current path. A point that cannot be
+   * projected (behind the camera) is pulled toward the view centre until it can, so the loop stays
+   * closed and fills correctly.
+   */
+  private loops(v: OverlayView, loops: Loop[], g: CanvasRenderingContext2D) {
+    const cx = v.rig.tx;
+    const cy = v.rig.ty;
+    for (const L of loops) {
+      for (let i = 0; i < L.length; i += 2) {
+        let x = L[i];
+        let y = L[i + 1];
+        v.r.project(x, 0, y, P);
+        if (P.z >= 1) {
+          let lo = 0;
+          let hi = 1;
+          for (let k = 0; k < 10; k++) {
+            const m = (lo + hi) / 2;
+            v.r.project(cx + (x - cx) * m, 0, cy + (y - cy) * m, P);
+            if (P.z < 1) lo = m;
+            else hi = m;
+          }
+          x = cx + (x - cx) * lo;
+          y = cy + (y - cy) * lo;
+          v.r.project(x, 0, y, P);
+        }
+        if (i === 0) g.moveTo(P.x, P.y);
+        else g.lineTo(P.x, P.y);
+      }
+      g.closePath();
+    }
   }
 
   /**
@@ -876,14 +909,24 @@ export class Overlay {
       this.circle(v, x, y, r, 0, 72);
       this.ctx = real;
     };
-    const fillUnion = (discs: Disc[]) => {
+    // Coverage outlines already are the merged edge (weather bites included): fill even-odd, stroke as is.
+    const fillUnion = (loops: Loop[]) => {
       mask.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
       mask.ctx.clearRect(0, 0, this.w, this.h);
       mask.ctx.fillStyle = '#000';
-      for (const d of discs) {
-        disc(mask.ctx, d);
-        mask.ctx.fill();
-      }
+      mask.ctx.beginPath();
+      this.loops(v, loops, mask.ctx);
+      mask.ctx.fill('evenodd');
+    };
+    const strokeLoops = (loops: Loop[], col: string, width: number) => {
+      mask.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+      mask.ctx.clearRect(0, 0, this.w, this.h);
+      mask.ctx.strokeStyle = col;
+      mask.ctx.lineWidth = width;
+      mask.ctx.lineJoin = 'round';
+      mask.ctx.beginPath();
+      this.loops(v, loops, mask.ctx);
+      mask.ctx.stroke();
     };
     // 1. The veil: dark everywhere, half cleared under air radar, fully cleared under the surface picture.
     const vg = veil.ctx;
@@ -910,9 +953,7 @@ export class Overlay {
     if (!full) {
       // A thin, faint edge where the surface picture ends.
       if (cov.surf.length) {
-        mask.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-        mask.ctx.clearRect(0, 0, this.w, this.h);
-        unionOutline(mask.ctx, cov.surf, COVER_COLORS.surf, 0.75, (g, d) => disc(g, d));
+        strokeLoops(cov.surf, COVER_COLORS.surf, 0.75);
         real.globalAlpha = 0.4;
         real.drawImage(mask.canvas, 0, 0);
         real.globalAlpha = 1;
@@ -921,16 +962,18 @@ export class Overlay {
       return;
     }
     // 2. Merged outlines per sensor kind.
-    const kinds: [Disc[], string, number][] = [
+    const kinds: [Loop[] | Disc[], string, number][] = [
       [cov.air, COVER_COLORS.air, 0.45],
       [cov.surf, COVER_COLORS.surf, 0.9],
       [cov.sonar, COVER_COLORS.sonar, 0.9],
     ];
-    for (const [discs, col, alpha] of kinds) {
-      if (!discs.length) continue;
-      mask.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-      mask.ctx.clearRect(0, 0, this.w, this.h);
-      unionOutline(mask.ctx, discs, col, 1.25, (g, d) => disc(g, d));
+    for (const [shapes, col, alpha] of kinds) {
+      if (!shapes.length) continue;
+      if (shapes === cov.sonar) {
+        mask.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+        mask.ctx.clearRect(0, 0, this.w, this.h);
+        unionOutline(mask.ctx, cov.sonar, col, 1.25, (g, d) => disc(g, d));
+      } else strokeLoops(shapes as Loop[], col, 1.25);
       real.globalAlpha = alpha;
       real.drawImage(mask.canvas, 0, 0);
       real.globalAlpha = 1;

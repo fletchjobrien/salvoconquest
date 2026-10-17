@@ -4,7 +4,7 @@ import { WEATHER_AXES, WIND_ANGLE } from '../../shared/weather';
 import type { World } from '../state';
 import { SIDE } from '../theme';
 import { UNITS, UNIT_TYPES } from '../../shared/defs';
-import { sensorCoverage, unionOutline, COVER_COLORS, Disc } from '../sensors';
+import { sensorCoverage, unionOutline, COVER_COLORS, Disc, Loop } from '../sensors';
 import { deployZone } from '../../shared/game';
 
 import type { Renderer, CameraRig } from '../render/renderer';
@@ -129,21 +129,38 @@ export class Minimap {
     g.clearRect(0, 0, R, R);
     const sc = this.scratch.getContext('2d')!;
     const circle = (c: CanvasRenderingContext2D, [x, y, r]: Disc) => c.arc(x * k, y * k, r * k, 0, Math.PI * 2);
-    // A faint wash inside the surface picture, so "seen" reads at a glance.
+    const path = (c: CanvasRenderingContext2D, loops: Loop[]) => {
+      c.beginPath();
+      for (const L of loops) {
+        c.moveTo(L[0] * k, L[1] * k);
+        for (let i = 2; i < L.length; i += 2) c.lineTo(L[i] * k, L[i + 1] * k);
+        c.closePath();
+      }
+    };
+    // A faint wash inside the surface picture, so "seen" reads at a glance. Weather bites show as gaps.
     g.fillStyle = COVER_COLORS.surf;
     g.globalAlpha = 0.07;
-    for (const d of cov.surf) {
-      g.beginPath();
-      circle(g, d);
-      g.fill();
-    }
+    path(g, cov.surf);
+    g.fill('evenodd');
     g.globalAlpha = 1;
-    const kinds: [Disc[], string, number, number][] = [
+    const dpr = R / this.size;
+    const loopKinds: [Loop[], string, number, number][] = [
       [cov.air, COVER_COLORS.air, 0.45, 1],
       [cov.surf, COVER_COLORS.surf, 0.95, 1.3],
+    ];
+    for (const [loops, col, alpha, wdt] of loopKinds) {
+      if (!loops.length) continue;
+      g.globalAlpha = alpha;
+      g.strokeStyle = col;
+      g.lineWidth = wdt * dpr;
+      g.lineJoin = 'round';
+      path(g, loops);
+      g.stroke();
+      g.globalAlpha = 1;
+    }
+    const kinds: [Disc[], string, number, number][] = [
       [cov.sonar, COVER_COLORS.sonar, 0.95, 1.3],
     ];
-    const dpr = R / this.size;
     for (const [discs, col, alpha, wdt] of kinds) {
       if (!discs.length) continue;
       sc.clearRect(0, 0, R, R);
