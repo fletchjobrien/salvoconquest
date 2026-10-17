@@ -124,6 +124,12 @@ and more ships close to the target raise the quality.
 **Sonobuoys (M).** The AEW carries 8 sonobuoys. Press M to drop one below it (only over water). Each buoy
 listens for 150 s: it hears submarines within 6 km, and ships further away, and shows as a small purple ring.
 
+**Markers.** Every contact is drawn where the unit really is; the quality of the track only decides whether it is
+identified (and can be targeted). A contact our sensors lose disappears after 1.5 s and leaves a faint
+last-known-position marker for 8 s. A unit we only **hear** (its radar is on, none of our sensors sees it) is shown
+as a small pulsing **ESM** emitter mark, not a track symbol: it stays as long as its radar stays on, even after it
+leaves your radar range or you switch your own radar off, and it cannot be targeted.
+
 **Radar on/off (G).** Every unit with a radar (warships, AEW, radar trucks) can switch it off. Radar on: you see
 far, but enemy electronic support measures (ESM) hear your radar out to 1.5× its range and get a rough,
 unidentified position for you (marker only, cannot be targeted). Radar off (tag **DARK**): your unit sees only by

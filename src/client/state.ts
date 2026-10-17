@@ -35,6 +35,8 @@ export interface CView {
   tr: number;
   born: number;
   seen: number;
+  /** Held only by ESM: we hear its radar, none of our sensors sees it. */
+  esm: boolean;
 }
 
 export interface Ghost {
@@ -77,6 +79,8 @@ export interface SiteView {
 }
 
 export const DOMAINS: Domain[] = ['sea', 'sub', 'air', 'land'];
+/** Seconds a last-known-position marker stays after a track is lost. */
+export const GHOST_LIFE = 8;
 
 export class World {
   map: GameMap;
@@ -199,11 +203,11 @@ export class World {
       }
     }
     const seenC = new Set<number>();
-    for (const [id, kind, x, y, r] of s.c) {
+    for (const [id, kind, x, y, r, f] of s.c) {
       seenC.add(id);
       const c = this.contacts.get(id);
       if (!c) {
-        this.contacts.set(id, { id, kind, x, y, r, tx: x, ty: y, tr: r, born: now, seen: now });
+        this.contacts.set(id, { id, kind, x, y, r, tx: x, ty: y, tr: r, born: now, seen: now, esm: (f & 1) === 1 });
         this.ghosts.delete(id);
       } else {
         c.tx = x;
@@ -211,6 +215,7 @@ export class World {
         c.tr = r;
         c.kind = kind;
         c.seen = now;
+        c.esm = (f & 1) === 1;
       }
     }
     for (const [id, c] of this.contacts) {
@@ -271,8 +276,9 @@ export class World {
       p.ry = p.py + (p.y - p.py) * f;
       p.ralt = p.palt + (p.alt - p.palt) * f;
     }
-    for (const [id, g] of this.ghosts) if (this.clock - g.t > 30) this.ghosts.delete(id);
-    const ck = Math.min(1, dt * 2);
+    for (const [id, g] of this.ghosts) if (this.clock - g.t > GHOST_LIFE) this.ghosts.delete(id);
+    // Contacts sit on the unit: follow the 2 Hz sensor updates closely so fast movers don't trail.
+    const ck = Math.min(1, dt * 6);
     for (const c of this.contacts.values()) {
       c.x += (c.tx - c.x) * ck;
       c.y += (c.ty - c.y) * ck;

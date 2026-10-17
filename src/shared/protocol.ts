@@ -62,8 +62,8 @@ export interface StartInfo {
 
 /** Unit row: id, type index, owner, x, y, alt, heading, hp 0-100, flags. */
 export type UnitRow = [number, number, number, number, number, number, number, number, number];
-/** Contact row: id, kind (domain index 0-3 or 10+type index when classified), x, y, error radius. */
-export type ContactRow = [number, number, number, number, number];
+/** Contact row: id, kind (domain index 0-3 or 10+type index when classified), x, y, error radius, flags (1 = ESM only). */
+export type ContactRow = [number, number, number, number, number, number];
 /** Projectile row: id, kind index, x, y, alt, team-relative owner (1 = friendly, 0 = hostile). */
 export type ProjRow = [number, number, number, number, number, number];
 /** Site row: id, owner, capture progress 0-100, capturing player. */

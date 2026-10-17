@@ -6,7 +6,7 @@ import { sensorCoverage, unionOutline, COVER_COLORS, Disc } from '../sensors';
 import { ORDER_CODES, F_RETREAT, F_LANDED, F_FIRE, F_STOPPED, F_STUN, F_PAINTED, F_DARK, F_HOLD, F_FREE } from '../../shared/protocol';
 import type { Renderer, CameraRig } from './renderer';
 import type { World, UView } from '../state';
-import { DOMAINS } from '../state';
+import { DOMAINS, GHOST_LIFE } from '../state';
 import { Affil, FONT, SITE_GLYPH, SymDomain, glyphFor, sideColor, symbolCanvas } from './symbols';
 import { SIDE, unitName } from '../theme';
 import { matchLoadoutOf } from '../loadouts';
@@ -289,7 +289,7 @@ export class Overlay {
     // ---- ghosts (last known positions) ----
     for (const g of w.ghosts.values()) {
       const age = w.clock - g.t;
-      const a = Math.max(0, 1 - age / 30) * 0.5;
+      const a = Math.max(0, 1 - age / GHOST_LIFE) * 0.4;
       if (!this.proj(v, g.x, 0, g.y)) continue;
       const img = symbolCanvas(g.type ? 'hostile' : 'unknown', g.domain as SymDomain, glyphFor(g.type), symSize - 2);
       ctx.globalAlpha = a;
@@ -313,6 +313,37 @@ export class Overlay {
       const fadeIn = Math.min(1, (w.clock - c.born) / 0.8);
       const hov = v.hover?.kind === 'contact' && v.hover.id === c.id;
       if (!this.proj(v, c.x, 0, c.y)) continue;
+      if (c.esm) {
+        // ESM-only: we hear its radar but no sensor of ours sees it. A faint emitter mark (a dot with
+        // two pulsing wave arcs) instead of a track symbol, so it reads as "heard", not "seen".
+        const k = (w.clock * 0.9 + c.id * 0.13) % 1;
+        ctx.strokeStyle = SIDE.unknown;
+        ctx.fillStyle = SIDE.unknown;
+        ctx.lineWidth = 1;
+        ctx.globalAlpha = fadeIn * 0.7;
+        ctx.beginPath();
+        ctx.arc(P.x, P.y, 1.6, 0, Math.PI * 2);
+        ctx.fill();
+        for (const s of [1, -1]) {
+          for (const [rr, a] of [
+            [4 + k * 3, 0.6 * (1 - k)],
+            [7 + k * 3, 0.35 * (1 - k)],
+          ]) {
+            ctx.globalAlpha = fadeIn * a;
+            ctx.beginPath();
+            ctx.arc(P.x, P.y, rr, s > 0 ? -0.6 : Math.PI - 0.6, s > 0 ? 0.6 : Math.PI + 0.6);
+            ctx.stroke();
+          }
+        }
+        ctx.globalAlpha = fadeIn * (hov ? 0.9 : 0.5);
+        ctx.textAlign = 'left';
+        ctx.font = `500 8px ${FONT}`;
+        ctx.fillText('ESM', P.x + symSize + 2, P.y + 3);
+        if (hov) ctx.fillText('RADAR HEARD · NOT SEEN · CANNOT TARGET', P.x + symSize + 2, P.y + 12);
+        ctx.globalAlpha = 1;
+        this.items.push({ kind: 'contact', id: c.id, sx: P.x, sy: P.y, own: false, type });
+        continue;
+      }
       ctx.globalAlpha = fadeIn * 0.9;
       this.blit(symbolCanvas(affil, domain, glyphFor(type), symSize - 2, hov), P.x, P.y);
       ctx.globalAlpha = fadeIn * (hov ? 0.9 : 0.6);
@@ -320,7 +351,7 @@ export class Overlay {
       ctx.textAlign = 'left';
       ctx.font = `500 8px ${FONT}`;
       ctx.fillText(type ? UNITS[type].short : domain === 'sub' ? 'SONAR' : domain === 'air' ? 'AIR' : domain === 'land' ? 'GROUND' : 'SURFACE', P.x + symSize + 2, P.y + 3);
-      if (hov) ctx.fillText(type ? '±' + c.r.toFixed(1) + ' km' : 'UNIDENTIFIED · CANNOT TARGET', P.x + symSize + 2, P.y + 12);
+      if (hov) ctx.fillText(type ? 'IDENTIFIED · NO FIRM TRACK' : 'UNIDENTIFIED · CANNOT TARGET', P.x + symSize + 2, P.y + 12);
       ctx.globalAlpha = 1;
       this.items.push({ kind: 'contact', id: c.id, sx: P.x, sy: P.y, own: false, type });
     }

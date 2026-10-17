@@ -308,6 +308,8 @@ export interface Contact {
   oy: number;
   /** Not detected on the last sweep: shown at the last estimate, never fired upon. */
   lost: boolean;
+  /** Held only by ESM (we hear its radar, no sensor of ours sees it). */
+  esm?: boolean;
   seen: number;
 }
 
@@ -3005,6 +3007,7 @@ export class Game {
           rec.r = 0;
           rec.q = 1;
           rec.ident = 2;
+          rec.esm = false;
           continue;
         }
         const maxErr = viaEsm ? ESM.err : viaSonar ? 3 : dom === 'air' ? 4 : 5;
@@ -3014,13 +3017,15 @@ export class Game {
         if (rec.r < 0.45) rec.r = 0;
         rec.q = q;
         rec.ident = rec.r === 0 ? 2 : q > 0.4 ? 1 : Math.min(rec.ident, 1) as 0 | 1;
-        rec.x = e.x + rec.ox * rec.r;
-        rec.y = e.y + rec.oy * rec.r;
+        // The marker sits on the unit; uncertainty (r) only decides identification and targeting.
+        rec.x = e.x;
+        rec.y = e.y;
+        rec.esm = viaEsm;
       }
       // Brief dropouts keep the track (frozen, not targetable); after 4 s it is lost.
       for (const [id, k] of know) {
         if (seen.has(id)) continue;
-        if (this.time - k.seen > 4 || !this.units.get(id) || this.units.get(id)!.dead) {
+        if (this.time - k.seen > 1.5 || !this.units.get(id) || this.units.get(id)!.dead) {
           know.delete(id);
           continue;
         }
@@ -3107,7 +3112,7 @@ export class Game {
       } else {
         const dom = UNITS[x.type].domain;
         const kind = k.ident === 1 ? 10 + UNIT_TYPES.indexOf(x.type) : DOMAIN_IDX[dom];
-        c.push([x.id, kind, r2(k.x), r2(k.y), r2(k.r)]);
+        c.push([x.id, kind, r2(k.x), r2(k.y), r2(k.r), k.esm ? 1 : 0]);
       }
     }
     for (const s of this.sites) if (s.owner >= 0 && this.team(s.owner) === team) assets.push({ x: s.x, y: s.y });
