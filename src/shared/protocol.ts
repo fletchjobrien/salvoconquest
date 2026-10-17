@@ -126,7 +126,7 @@ export type GameEvent =
   | { k: 'built'; id: number; ty: number; o: number }
   | { k: 'land'; id: number; x: number; y: number }
   | { k: 'board'; id: number; ship: number }
-  | { k: 'retreat'; id: number }
+  | { k: 'retreat'; id: number; ammo?: boolean }
   | { k: 'vampire'; x: number; y: number }
   | { k: 'lightning'; x: number; y: number }
   | { k: 'mine'; x: number; y: number }

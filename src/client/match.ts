@@ -610,7 +610,10 @@ export class Match {
       }
       case 'retreat': {
         const u = w.units.get(e.id);
-        if (u && u.owner === w.me) void voices.say(fac, this.voiceCat(u.type), 'retreat', unitName(fac, u.type, u.id));
+        if (u && u.owner === w.me) {
+          void voices.say(fac, this.voiceCat(u.type), 'retreat', unitName(fac, u.type, u.id));
+          if (e.ammo) this.hud.log(unitName(fac, u.type, u.id), 'Winchester: magazines empty, returning to port to rearm.', 'warn');
+        }
         break;
       }
       case 'boom': {

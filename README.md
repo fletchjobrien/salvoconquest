@@ -72,7 +72,9 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
 - **Map:** 160 × 160 km. Islands keep their size, so there is far more open water between them; merchants
   are paid more per trip (450) because the trips are longer.
 - **Automation:** ground units attack-move by default, idle troops engage enemies on their island, damaged units
-  retreat to friendly buildings and come back when repaired, aircraft fly their mission, return to rearm and
+  retreat to friendly buildings and come back when repaired, warships whose missiles, SAMs and torpedoes are all
+  spent sail to the nearest naval base or dockyard, rearm and return to their task (both follow the auto-retreat
+  toggle, T), aircraft fly their mission, return to rearm and
   go back on station. Ships close the distance on their own when you order an unload out of range.
 
 ### Ship counters

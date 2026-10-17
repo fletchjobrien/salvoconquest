@@ -203,6 +203,8 @@ export interface Unit {
   rearm: number;
   autoRetreat: boolean;
   retreating: boolean;
+  /** Retreated because its magazines ran dry: stays in port until rearmed, not only repaired. */
+  rearming?: boolean;
   revealUntil: number;
   firingUntil: number;
   stillFor: number;
@@ -729,6 +731,7 @@ export class Game {
     u.path = null;
     u.pathGoal = null;
     u.retreating = false;
+    u.rearming = false;
     if (!keepResume) u.resume = null;
     if (UNITS[u.type].domain === 'air' && u.landed && o.k !== 'rtb') this.launch(u);
   }
@@ -1205,8 +1208,9 @@ export class Game {
       u.lastThink -= 1;
       this.considerRetreat(u);
       if (def.domain === 'land' && u.order.k === 'idle') this.autoAggro(u);
-      if (u.retreating && u.hp >= u.maxHp * 0.85) {
+      if (u.retreating && u.hp >= u.maxHp * 0.85 && (!u.rearming || this.magazinesFull(u))) {
         u.retreating = false;
+        u.rearming = false;
         u.order = u.resume ?? { k: 'idle' };
         u.resume = null;
         u.path = null;
@@ -1333,9 +1337,32 @@ export class Game {
     return sum;
   }
 
+  /** Every limited magazine (missiles, SAMs, torpedoes) is empty; unlimited guns don't count. */
+  private winchester(u: Unit): boolean {
+    const mags = u.weapons.filter((w) => w.max > 0 && !w.mod.ability);
+    return mags.length > 0 && mags.every((w) => w.ammo < 1);
+  }
+
+  private magazinesFull(u: Unit): boolean {
+    return u.weapons.every((w) => w.max <= 0 || !!w.mod.ability || w.ammo >= w.max - 0.01);
+  }
+
   private considerRetreat(u: Unit) {
     if (!u.autoRetreat || u.retreating) return;
     const dom = UNITS[u.type].domain;
+    // Warships out of missiles, SAMs and torpedoes sail home to rearm, then go back to their task.
+    const ship = (dom === 'sea' || dom === 'sub') && u.type !== 'merchant' && u.type !== 'lander';
+    if (ship && this.winchester(u)) {
+      const port = this.nearestPort(u);
+      if (!port || Math.hypot(port.x - u.x, port.y - u.y) < 2.5) return;
+      if (u.order.k !== 'retreat') u.resume = u.order.k === 'idle' ? null : u.order;
+      u.order = { k: 'retreat', x: port.x, y: port.y };
+      u.retreating = true;
+      u.rearming = true;
+      u.path = null;
+      this.emit({ k: 'retreat', id: u.id, ammo: true }, u.x, u.y, u.team);
+      return;
+    }
     const thr = dom === 'land' ? 0.4 : 0.3;
     if (u.hp > u.maxHp * thr) return;
     const r = dom === 'land' ? 4 : 18;
@@ -1372,6 +1399,22 @@ export class Game {
     u.retreating = true;
     u.path = null;
     this.emit({ k: 'retreat', id: u.id }, u.x, u.y, u.team);
+  }
+
+  /** Dock of the nearest friendly naval base or dockyard. */
+  private nearestPort(u: Unit): { x: number; y: number } | null {
+    let best: { x: number; y: number } | null = null;
+    let bd = 1e9;
+    for (const s of this.sites) {
+      if (s.owner < 0 || this.team(s.owner) !== u.team || !s.dock) continue;
+      if (s.type !== 'navalbase' && s.type !== 'dockyard') continue;
+      const d = Math.hypot(s.dock.x - u.x, s.dock.y - u.y);
+      if (d < bd) {
+        bd = d;
+        best = s.dock;
+      }
+    }
+    return best;
   }
 
   private autoAggro(u: Unit) {
