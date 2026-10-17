@@ -23,7 +23,8 @@ void main() {
   vec3 p = mv.xyz + normalize(-mv.xyz) * min(size * 0.5, -mv.z * 0.5) * pull;
   // Sub-pixel particles fade instead of popping.
   if (ps < 1.0) { vColor.a *= ps; ps = 1.0; }
-  gl_PointSize = min(ps, 400.0);
+  // Capped: up close, huge soft puffs would flood the screen with overdraw.
+  gl_PointSize = min(ps, 180.0);
   gl_Position = projectionMatrix * vec4(p, 1.0);
 }
 `;
@@ -230,7 +231,8 @@ export class Fx {
       this.group.add(mesh);
       this.rings.push({ mesh, t: 1, life: 1, size: 1, alpha: 0 });
     }
-    for (let i = 0; i < 6; i++) {
+    // Every point light costs every lit pixel (land, ships) every frame, lit or not: keep two.
+    for (let i = 0; i < 2; i++) {
       const light = new THREE.PointLight(0xffaa66, 0, 10, 1.6);
       this.group.add(light);
       this.flashes.push({ light, t: 1, life: 1, peak: 0 });
@@ -256,8 +258,9 @@ export class Fx {
     r.mesh.visible = true;
   }
 
-  /** A point-light flash; the pooled light with the least time left is reused. */
+  /** A point-light flash; the pooled light with the least time left is reused (small flashes skip it). */
   light(x: number, alt: number, y: number, color: number, peak: number, range: number, life: number) {
+    if (peak < 10) return;
     const f = this.flashes.reduce((a, b) => (b.life - b.t < a.life - a.t ? b : a));
     f.t = 0;
     f.life = life;

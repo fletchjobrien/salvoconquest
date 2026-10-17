@@ -32,11 +32,13 @@ uniform vec2 uSun;   // sun direction on the ground plane
 varying vec3 vW;
 void main() {
   vec2 p = vW.xz;
+  // Opaque from high up; thins out as you zoom in so the battle below stays readable. Checked
+  // first: zoomed in, the deck is invisible and the noise below is skipped entirely.
+  float fade = smoothstep(vW.y + 6.0, vW.y + 60.0, cameraPosition.y) * (uLayer < 0.5 ? 0.55 : 0.16);
+  if (fade < 0.02) discard;
   float d = stormCover(uCell, p, uLayer);
   // Capped opacity: the cloud tops read clearly but ships and islands always show through.
-  float a = smoothstep(0.06, 0.5, d) * (uLayer < 0.5 ? 0.55 : 0.16);
-  // Opaque from high up; thins out as you zoom in so the battle below stays readable.
-  a *= smoothstep(vW.y + 6.0, vW.y + 60.0, cameraPosition.y);
+  float a = smoothstep(0.06, 0.5, d) * fade;
   if (a < 0.02) discard;
   // Fake sunlight: sides facing the sun are bright, lee sides and cores fall into shadow.
   float d2 = stormCover(uCell, p + uSun * 0.35, uLayer);
@@ -71,9 +73,10 @@ void main() {
   float vert = mix(0.55, 1.0, vUv.y) * smoothstep(0.0, 0.08, vUv.y);
   // Hide shafts right next to the camera; the screen-space rain covers that case.
   float camD = length(cameraPosition.xz - vW.xz);
-  // Rain only falls where there is cloud overhead.
-  float under = smoothstep(0.15, 0.6, stormCover(uCell, vW.xz, 0.0) / max(uCell.w, 0.01));
-  float a = uStrength * 0.2 * veil * side * vert * under * smoothstep(2.0, 6.0, camD);
+  float a = uStrength * 0.2 * veil * side * vert * smoothstep(2.0, 6.0, camD);
+  if (a < 0.01) discard;
+  // Rain only falls where there is cloud overhead (the costly test comes last).
+  a *= smoothstep(0.15, 0.6, stormCover(uCell, vW.xz, 0.0) / max(uCell.w, 0.01));
   if (a < 0.01) discard;
   gl_FragColor = vec4(vec3(0.36, 0.4, 0.45), a);
   #include <colorspace_fragment>
@@ -206,7 +209,8 @@ export class WeatherView {
           d.visible = inten > 0.02;
           d.position.x = x;
           d.position.z = y;
-          d.scale.set(r * 4, 1, r * 4);
+          // Cover is zero beyond 1.75 radii: no need to rasterise further out.
+          d.scale.set(r * 3.6, 1, r * 3.6);
           d.material.uniforms.uCell.value.set(x, y, r, inten);
         }
         s.shafts.forEach((m, k) => {
@@ -230,7 +234,7 @@ export class WeatherView {
           l.visible = inten > 0.02;
           l.position.x = x;
           l.position.z = y;
-          l.scale.set(r * 4.2, 1, r * 4.2);
+          l.scale.set(r * 3.6, 1, r * 3.6);
           l.material.uniforms.uCell.value.set(x, y, r, inten);
         }
       }

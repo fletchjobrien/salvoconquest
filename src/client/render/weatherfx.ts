@@ -64,8 +64,10 @@ float cellAmount(vec4 c, vec2 p) {
 // in cell-relative coordinates, so it travels with the storm, and seeded per cell (from its
 // radius), so no two storms look alike. layer 1 is the anvil: a fibrous sheet blown downwind.
 float stormCover(vec4 c, vec2 p, float layer) {
-  float seed = fract(c.z * 7.137) * 61.0;
   vec2 rel = (p - c.xy) / c.z;
+  // Beyond 1.75 radii both layers are zero whatever the noise: skip it (most of every quad).
+  if (c.w <= 0.0 || dot(rel, rel) > 3.06) return 0.0;
+  float seed = fract(c.z * 7.137) * 61.0;
   vec2 w = normalize(wWind);
   vec2 pw = vec2(-w.y, w.x);
   float evo = wTime * 0.006;
@@ -93,8 +95,9 @@ float stormCover(vec4 c, vec2 p, float layer) {
 }
 // Fog: sprawling patches with fingers and holes, combed along the wind, no clean outline.
 float fogCover(vec4 c, vec2 p, float layer) {
-  float seed = fract(c.z * 5.313) * 47.0;
   vec2 rel = (p - c.xy) / c.z;
+  if (c.w <= 0.0 || dot(rel, rel) > 3.06) return 0.0;
+  float seed = fract(c.z * 5.313) * 47.0;
   vec2 w = normalize(wWind);
   vec2 rs = vec2(dot(rel, w) * 0.6, dot(rel, vec2(-w.y, w.x)) * 1.5);
   vec2 q = rs * 2.6 + seed + vec2(layer * 3.7, layer * 1.3) - vec2(wTime * 0.004, 0.0);
