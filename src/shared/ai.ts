@@ -4,6 +4,43 @@ import { canDeployAt, deployZone } from './game';
 import type { Contact, Game, Unit, SiteState } from './game';
 import { islandAt } from './map';
 
+/** How dangerous a unit is to a fleet (hp-weighted when it is ours). */
+const NAVAL_POWER: Partial<Record<UnitType, number>> = { battleship: 8, destroyer: 5, sub: 3, carrier: 3, coastal: 4, strike: 3 };
+/** What an island's buildings are worth to us. */
+const SITE_VALUE: Partial<Record<string, number>> = { resource: 3, hq: 8, dockyard: 2.5, navalbase: 2.5, airbase: 2, barracks: 2, battery: 2, radar: 1.5 };
+
+interface IslandPlan {
+  island: number;
+  x: number;
+  y: number;
+  /** Most valuable site still to take there. */
+  target: SiteState;
+  value: number;
+  dist: number;
+  naval: number;
+  ground: number;
+  enemyHeld: boolean;
+  centre: boolean;
+  contested: boolean;
+}
+
+interface Operation {
+  island: number;
+  x: number;
+  y: number;
+  /** Landing objective (a site) and the staging point on our side. */
+  tx: number;
+  ty: number;
+  sx: number;
+  sy: number;
+  ships: number[];
+  escorts: number[];
+  state: 'load' | 'sail' | 'land' | 'hold';
+  since: number;
+  startPower: number;
+  need: number;
+}
+
 interface Transport {
   ship: number;
   island: number;
@@ -27,6 +64,18 @@ export class Bot {
   private raided: { x: number; y: number; t: number }[] = [];
   /** Enemy warships our side has identified (id -> type), for counter-building. */
   private spotted = new Map<number, UnitType>();
+  private intel = new Map<number, { type: UnitType; x: number; y: number; t: number }>();
+  private op: Operation | null = null;
+  /** Counters for the benchmark: operations started, won, called off; ships ordered to break off. */
+  readonly stats = { ops: 0, won: 0, aborted: 0, breakoffs: 0, why: {} as Record<string, number> };
+  private opCooldown = 0;
+  /** Troops wanted in one place for the next operation. */
+  private troopGoal = 0;
+  private opOrderAt = 0;
+  /** Islands we were beaten back from, until when. */
+  private avoid = new Map<number, number>();
+  /** Ships ordered to break off: no new engagements until then. */
+  private noEngage = new Map<number, number>();
 
   constructor(
     private game: Game,
@@ -52,8 +101,10 @@ export class Bot {
     }
     if (g.time < this.nextThink) return;
     this.nextThink = g.time + 2;
+    this.updateIntel();
     this.produce();
-    this.expand();
+    this.operation();
+    this.grabs();
     this.fleet();
     this.air();
     this.groundIdle();
@@ -152,6 +203,8 @@ export class Bot {
     const mine = this.mine();
     const known = this.contacts();
     const busy = new Set(this.transports.map((t) => t.ship));
+    for (const [id, until] of this.noEngage) if (until > g.time) busy.add(id);
+    if (this.op) for (const id of this.op.ships) busy.add(id);
     // Remember where merchants died: those lanes need air cover.
     const alive = new Set<number>();
     for (const u of mine) if (u.type === 'merchant') alive.add(u.id);
@@ -262,14 +315,14 @@ export class Bot {
           .filter(({ e, k }) => UNITS[e.type].domain === 'air' && mine.some((m) => m.inside < 0 && UNITS[m.type].domain !== 'air' && Math.hypot(m.x - k.x, m.y - k.y) < 25))
           .sort((a, b) => Math.hypot(a.k.x - pl.x, a.k.y - pl.y) - Math.hypot(b.k.x - pl.x, b.k.y - pl.y))[0];
         // Intercept only over friendly water: never chase into enemy SAM cover.
-        const front = this.targetIslands()[0];
+        const front = this.frontPoint();
         const raid = this.raided[this.raided.length - 1];
         const cap = raid ? { x: raid.x, y: raid.y } : hq && front ? { x: (hq.x * 2 + front.x) / 3, y: (hq.y * 2 + front.y) / 3 } : anchor;
         if (t && Math.hypot(t.k.x - pl.x, t.k.y - pl.y) < 70 && samThreat(t.k.x, t.k.y) === 0) attack(pl, t.e);
         else if (pl.order.k !== 'patrol' || Math.hypot(pl.order.x - cap.x, pl.order.y - cap.y) > 8) g.command(this.pid, { c: 'move', ids: [pl.id], x: cap.x, y: cap.y });
       } else if (pl.type === 'recon') {
         // Orbit over the fleet, a little toward the enemy; drop a sonobuoy every 20 s over water.
-        const front = this.targetIslands()[0];
+        const front = this.frontPoint();
         const fx = hq ? anchor.x + (hq.x - anchor.x) * 0.25 : anchor.x;
         const fy = hq ? anchor.y + (hq.y - anchor.y) * 0.25 : anchor.y;
         void front;
@@ -289,19 +342,26 @@ export class Bot {
     const count = new Map<UnitType, number>();
     for (const u of this.mine()) count.set(u.type, (count.get(u.type) ?? 0) + 1);
     for (const cat of ['naval', 'ground', 'air'] as const) for (const it of p.queues[cat]) count.set(it.type, (count.get(it.type) ?? 0) + 1);
-    // Rich bots field bigger forces.
-    const rich = 1 + Math.min(3, p.cash / 6000);
+    // The navy comes first: it carries the troops and decides every landing. Troops are built only
+    // as far as we can ship them, so cash does not pile up in idle infantry at home.
+    const rich = 1 + Math.min(2, p.cash / 5000);
+    let lift = 0;
+    for (const u of this.mine()) if (u.holdCap > 0 && UNITS[u.type].category === 'naval') lift += u.holdCap;
+    const spare = this.spareTroops().filter((u) => u.type === 'infantry').length + p.queues.ground.filter((it) => it.type === 'infantry').length;
+    // Two troops per free hull is a full load; more only waits at home.
+    const free = this.freeTransports().reduce((a, u) => a + u.holdCap - u.cargo.length, 0);
+    const short = spare < Math.max(Math.min(2, lift), this.troopGoal);
     const want: Record<UnitType, number> = {
-      infantry: Math.min(12 * rich, (4 + Math.floor(t / 90)) * rich),
-      coastal: t > 150 ? Math.min(4, 1 + Math.floor(t / 400)) : 0,
-      sam: t > 120 ? Math.min(4, 1 + Math.floor(t / 400)) : 0,
-      destroyer: Math.min(6 * rich, (2 + Math.floor(t / 120)) * rich),
-      sub: t > 180 ? Math.min(4, Math.floor(t / 240) * rich) : 0,
-      battleship: t > 360 ? Math.floor(rich) : 0,
-      carrier: t > 540 ? 1 : 0,
-      fighter: Math.min(3 * rich, (1 + Math.floor(t / 240)) * rich),
-      strike: t > 150 ? Math.min(3 * rich, (1 + Math.floor(t / 300)) * rich) : 0,
-      recon: t > 200 ? 1 : 0,
+      infantry: spare < Math.max(2, free, this.troopGoal) ? (count.get('infantry') ?? 0) + 1 : 0,
+      coastal: t > 150 ? (t > 600 ? 2 : 1) : 0,
+      sam: t > 120 ? (t > 600 ? 2 : 1) : 0,
+      destroyer: Math.min(10, (3 + t / 150) * rich),
+      sub: t > 300 ? Math.min(3, Math.floor(t / 400)) : 0,
+      battleship: t > 600 ? (t > 1200 ? 2 : 1) * Math.floor(rich) : 0,
+      carrier: t > 720 && p.cash > 3000 ? 1 : 0,
+      fighter: Math.min(3, 1 + Math.floor(t / 240)),
+      strike: t > 240 ? Math.min(3, 1 + Math.floor(t / 360)) : 0,
+      recon: t > 180 ? 1 : 0,
       merchant: 0,
       lander: 0,
     };
@@ -323,8 +383,11 @@ export class Bot {
     want.fighter += Math.min(3, seen.strike);
     want.sub += Math.min(3, seen.battleship + seen.carrier);
     if (seen.destroyer >= 3 && t > 240) want.battleship = Math.max(want.battleship, 1);
-    for (const cat of ['ground', 'naval', 'air'] as const) {
-      if (p.queues[cat].length >= (p.cash > 6000 ? 3 : 2)) continue;
+    // Save up for the warship we want: cheaper ground and air units only spend what is left over,
+    // except when we have nothing to land with at all.
+    let reserve = 0;
+    for (const cat of ['naval', 'ground', 'air'] as const) {
+      if (p.queues[cat].length >= (p.cash > 4000 ? 3 : 2)) continue;
       let best: UnitType | null = null;
       let bestNeed = 0;
       for (const type of BUILDABLE[cat]) {
@@ -334,145 +397,422 @@ export class Bot {
           best = type;
         }
       }
+      // Short of troops to land: that comes before batteries.
+      if (cat === 'ground' && short) best = 'infantry';
       if (!best) continue;
       const cost = unitCost(best, p.faction);
-      if (p.cash >= cost) {
+      const urgent = best === 'infantry' && short;
+      if (p.cash - (urgent ? 0 : reserve) >= cost) {
         g.command(this.pid, { c: 'build', cat, type: best });
         count.set(best, (count.get(best) ?? 0) + 1);
-      }
+      } else if (cat === 'naval' && bestNeed >= 0.3) reserve = cost;
     }
   }
 
-  private targetIslands(): { island: number; x: number; y: number; d: number }[] {
+  // ------------------------------------------------------------------ strategy
+  //
+  // The bot plans in islands. Every island with buildings gets a value (resource sites most), a
+  // distance from our ports and a threat estimate from what we have seen there. Uncontested islands
+  // are taken by single transports ("grabs"): money islands first, a stake in the middle island
+  // early. Contested or enemy-held islands are taken by one planned operation at a time: troops
+  // load while the escorts gather, the fleet sails ahead of the transports, troops land only once
+  // the sea around the island is ours, and the whole force backs off to port if the fight turns
+  // against it, to regroup and try again later.
+
+  /** Enemy units we have identified, remembered for a while after they drop off our sensors. */
+  private updateIntel() {
     const g = this.game;
-    const myTeam = g.players[this.pid].team;
+    for (const { e, k } of this.contacts()) this.intel.set(e.id, { type: e.type, x: k.x, y: k.y, t: g.time });
+    for (const [id, m] of this.intel) {
+      const u = g.units.get(id);
+      if (!u || u.dead || g.time - m.t > 240) this.intel.delete(id);
+    }
+  }
+
+  /** Enemy strength against ships around a point: warships, coastal batteries, strike flights, missile-battery buildings. */
+  private navalThreat(x: number, y: number, r: number, maxAge = 240): number {
+    const g = this.game;
+    let p = 0;
+    for (const m of this.intel.values()) if (g.time - m.t <= maxAge && Math.hypot(m.x - x, m.y - y) < r) p += NAVAL_POWER[m.type] ?? 0;
+    const team = g.players[this.pid].team;
+    for (const s of g.sites) if (s.type === 'battery' && s.owner >= 0 && g.team(s.owner) !== team && Math.hypot(s.x - x, s.y - y) < r) p += 5;
+    return p;
+  }
+
+  /** Enemy ground strength on an island (troops, batteries we have seen there). */
+  private groundThreat(island: number): number {
+    let p = 0;
+    for (const m of this.intel.values()) if (UNITS[m.type].domain === 'land' && islandAt(this.game.map, m.x, m.y) === island) p += m.type === 'infantry' ? 2 : 1;
+    return p;
+  }
+
+  private shipPower(u: Unit): number {
+    return (NAVAL_POWER[u.type] ?? 0) * (u.hp / u.maxHp);
+  }
+
+  /** Every island with buildings that is not fully ours, scored. */
+  private islandPlans(): IslandPlan[] {
+    const g = this.game;
+    const team = g.players[this.pid].team;
     const hq = this.home();
     if (!hq) return [];
-    const best = new Map<number, { island: number; x: number; y: number; d: number }>();
-    const neutralLeft = g.sites.some((s) => s.owner < 0 && s.island !== hq.island);
-    // Late game (or nothing neutral left): go for the throat.
-    const assault = !neutralLeft || g.time > 900;
-    for (const s of g.sites) {
-      if (s.owner >= 0 && g.team(s.owner) === myTeam) continue;
-      if (s.island === hq.island) continue;
-      let d = Math.hypot(s.x - hq.x, s.y - hq.y);
-      if (s.type === 'resource') d -= 8;
-      if (s.type === 'hq') d += assault ? -40 : 30;
-      if (s.owner >= 0 && !assault) d += 15;
-      const cur = best.get(s.island);
-      if (!cur || d < cur.d) best.set(s.island, { island: s.island, x: s.x, y: s.y, d });
+    const ports = g.sites.filter((s) => s.owner >= 0 && g.team(s.owner) === team && s.dock).map((s) => s.dock!);
+    if (!ports.length) ports.push({ x: hq.x, y: hq.y });
+    const byIsland = new Map<number, SiteState[]>();
+    for (const s of g.sites) byIsland.set(s.island, [...(byIsland.get(s.island) ?? []), s]);
+    const out: IslandPlan[] = [];
+    for (const [island, sites] of byIsland) {
+      const open = sites.filter((s) => !(s.owner >= 0 && g.team(s.owner) === team));
+      if (!open.length) continue;
+      const x = sites.reduce((a, s) => a + s.x, 0) / sites.length;
+      const y = sites.reduce((a, s) => a + s.y, 0) / sites.length;
+      let value = 0;
+      for (const s of open) value += SITE_VALUE[s.type] ?? 1;
+      const centre = island === 0;
+      if (centre) value *= 1.3;
+      const enemyHeld = open.some((s) => s.owner >= 0);
+      const dist = Math.min(...ports.map((p) => Math.hypot(p.x - x, p.y - y)));
+      // What we have not seen we assume: a garrison per enemy building, and the enemy fleet near its home.
+      const enemySites = open.filter((s) => s.owner >= 0).length;
+      const enemyHome = open.some((s) => s.type === 'hq' && s.owner >= 0);
+      const naval = Math.max(this.navalThreat(x, y, 18), enemyHome ? 10 : 0);
+      const ground = Math.max(this.groundThreat(island), enemySites * 1.5 + (enemyHome ? 4 : 0));
+      out.push({ island, x, y, target: open.slice().sort((a, b) => (SITE_VALUE[b.type] ?? 1) - (SITE_VALUE[a.type] ?? 1))[0], value, dist, naval, ground, enemyHeld, centre, contested: enemyHeld || naval > 0 || ground > 0 });
     }
-    return [...best.values()].sort((a, b) => a.d - b.d);
+    return out;
   }
 
-  private expand() {
+  /** Ships with a hold, not busy, healthy. */
+  private freeTransports(): Unit[] {
+    const busy = this.busyShips();
+    return this.mine().filter((u) => (u.type === 'destroyer' || u.type === 'battleship') && u.holdCap > u.cargo.length && u.inside < 0 && !u.retreating && u.hp > u.maxHp * 0.5 && !busy.has(u.id));
+  }
+
+  /** Ships tied to a grab or the operation. */
+  private busyShips(): Set<number> {
+    const s = new Set(this.transports.map((t) => t.ship));
+    if (this.op) for (const id of [...this.op.ships, ...this.op.escorts]) s.add(id);
+    return s;
+  }
+
+  /** Idle troops free to ship out: on home, or on an island with nothing left to take (keeping one there as garrison). */
+  private spareTroops(): Unit[] {
     const g = this.game;
+    const team = g.players[this.pid].team;
     const hq = this.home();
-    if (!hq) return;
-    const units = this.mine();
-    // Clean up finished/broken transports.
+    const byIsland = new Map<number, Unit[]>();
+    for (const u of this.mine()) {
+      if (UNITS[u.type].domain !== 'land' || u.inside >= 0 || u.order.k !== 'idle') continue;
+      const isl = islandAt(g.map, u.x, u.y);
+      if (isl < 0) continue;
+      byIsland.set(isl, [...(byIsland.get(isl) ?? []), u]);
+    }
+    const out: Unit[] = [];
+    for (const [isl, us] of byIsland) {
+      if (g.sites.some((s) => s.island === isl && !(s.owner >= 0 && g.team(s.owner) === team))) continue; // still work here
+      const keep = hq && isl === hq.island ? 0 : 1;
+      // Infantry ships out first; batteries stay as garrison where possible.
+      us.sort((a, b) => (a.type === 'infantry' ? 0 : 1) - (b.type === 'infantry' ? 0 : 1));
+      out.push(...us.slice(0, Math.max(0, us.length - keep)));
+    }
+    return out;
+  }
+
+  /** Uncontested islands: one transport each, best value per distance first. */
+  private grabs() {
+    const g = this.game;
     this.transports = this.transports.filter((tr) => {
       const s = g.units.get(tr.ship);
       if (!s || s.dead) return false;
       if (tr.state === 'sailing' && s.cargo.length === 0 && s.order.k !== 'unload') return false;
-      return true;
+      return tr.state !== 'done';
     });
-    const all = this.targetIslands();
-    const hqIslands = new Set(g.sites.filter((x) => x.type === 'hq').map((x) => x.island));
-    // Up to three transports may converge on an enemy home island; one per other island.
-    const targets = all.filter((t) => this.transports.filter((tr) => tr.island === t.island).length < (hqIslands.has(t.island) ? 3 : 1));
-    // Start new transports: idle troops on any island with nothing left to take there (home, or
-    // an island we already hold) are grouped by island; the nearest free ship comes to collect them.
-    const myTeam = g.players[this.pid].team;
-    const workLeft = (isl: number) => g.sites.some((x) => x.island === isl && !(x.owner >= 0 && g.team(x.owner) === myTeam));
+    let plans = this.islandPlans().filter((p) => !p.contested && !this.transports.some((t) => t.island === p.island));
+    const hq = this.home();
+    // Troops grouped by the island they wait on. Home groups wait for a full load; an outpost
+    // sends what it has.
     const groups = new Map<number, Unit[]>();
-    for (const u of units) {
-      if (UNITS[u.type].domain !== 'land' || u.inside >= 0 || u.order.k !== 'idle') continue;
+    for (const u of this.spareTroops()) {
       const isl = islandAt(g.map, u.x, u.y);
-      if (isl < 0 || (isl !== hq.island && workLeft(isl))) continue;
       groups.set(isl, [...(groups.get(isl) ?? []), u]);
     }
+    // After the opening, keep two warships out of ferry work for the next operation.
+    const hulls = this.mine().filter((u) => u.type === 'destroyer' || u.type === 'battleship').length;
+    const opWanted = !this.op && g.time > 300 && hulls >= 4 && this.islandPlans().some((p) => p.contested && !(this.avoid.get(p.island)! > g.time));
+    const maxGrabs = Math.min(6, opWanted ? Math.max(1, hulls - 2) : hulls);
+    // The largest group is the landing force being gathered: grabs leave it enough troops.
+    const largest = [...groups.keys()].sort((a, b) => groups.get(b)!.length - groups.get(a)!.length)[0];
+    if (largest !== undefined && this.troopGoal > 0) groups.get(largest)!.splice(0, this.troopGoal);
     for (const [isl, troops] of groups) {
-      if (!targets.length || this.transports.length >= 6) break;
-      if (troops.length < 2 && isl === hq.island) continue;
-      const gx = troops.reduce((a, u) => a + u.x, 0) / troops.length;
-      const gy = troops.reduce((a, u) => a + u.y, 0) / troops.length;
-      const used = new Set(this.transports.map((t) => t.ship));
-      const ship = units
-        .filter((u) => (u.type === 'destroyer' || u.type === 'battleship') && !used.has(u.id) && u.holdCap > u.cargo.length && u.inside < 0 && !u.retreating && u.hp > u.maxHp * 0.5)
-        .sort((a, b) => Math.hypot(a.x - gx, a.y - gy) - Math.hypot(b.x - gx, b.y - gy))[0];
-      if (!ship) break;
-      // Nearest objective to these troops, not to home.
-      const tgt = targets.slice().sort((a, b) => Math.hypot(a.x - gx, a.y - gy) - Math.hypot(b.x - gx, b.y - gy))[0];
-      this.transports.push({ ship: ship.id, island: tgt.island, tx: tgt.x, ty: tgt.y, state: 'loading', since: g.time });
-      const n = Math.min(ship.holdCap - ship.cargo.length, troops.length);
-      g.command(this.pid, { c: 'board', ids: troops.slice(0, n).map((u) => u.id), ship: ship.id });
-      if (Math.hypot(ship.x - gx, ship.y - gy) > 6) g.command(this.pid, { c: 'move', ids: [ship.id], x: gx, y: gy, mode: 'move' });
+      while (plans.length && this.transports.length < maxGrabs) {
+        const atHome = hq && isl === hq.island;
+        if (troops.length < (atHome && g.time > 90 ? 2 : 1)) break;
+        const gx = troops.reduce((a, u) => a + u.x, 0) / troops.length;
+        const gy = troops.reduce((a, u) => a + u.y, 0) / troops.length;
+        const ships = this.freeTransports();
+        if (!ships.length) break;
+        const ship = ships.sort((a, b) => Math.hypot(a.x - gx, a.y - gy) - Math.hypot(b.x - gx, b.y - gy))[0];
+        // Best value for the trip from these troops: money islands near us first.
+        // One squad takes one or two sites, so a big island is worth no more than a rich small one to it:
+        // nearby money first, then a stake in the middle.
+        const score = (p: IslandPlan) => Math.min(p.value, p.centre ? 9 : 7) / (1 + Math.hypot(p.x - gx, p.y - gy) / 15);
+        const plan = plans.slice().sort((a, b) => score(b) - score(a))[0];
+        plans = plans.filter((p) => p !== plan);
+        const squad = troops.splice(0, Math.min(ship.holdCap - ship.cargo.length, plan.centre ? 3 : 2));
+        // The loading clock starts when the ship can be there.
+        const trip = Math.hypot(ship.x - gx, ship.y - gy) / UNITS[ship.type].speed;
+        this.transports.push({ ship: ship.id, island: plan.island, tx: plan.target.x, ty: plan.target.y, state: 'loading', since: g.time + trip });
+        g.command(this.pid, { c: 'board', ids: squad.map((u) => u.id), ship: ship.id });
+        // Always re-order the ship: it may still carry an old fleet order away from the troops.
+        g.command(this.pid, { c: 'move', ids: [ship.id], x: gx, y: gy, mode: 'move' });
+      }
     }
     for (const tr of this.transports) {
       const ship = g.units.get(tr.ship)!;
-      if (tr.state === 'loading') {
-        const boarding = units.some((u) => u.order.k === 'board' && u.order.ship === ship.id) || [...g.units.values()].some((l) => l.type === 'lander' && l.ferry?.ship === ship.id);
-        if ((!boarding && ship.cargo.length > 0) || (g.time - tr.since > 110 && ship.cargo.length > 0)) {
-          tr.state = 'sailing';
-          g.command(this.pid, { c: 'unload', ship: ship.id, ids: [], x: tr.tx, y: tr.ty });
-        } else if (g.time - tr.since > 130) {
-          tr.state = 'done';
-        }
-      }
+      // Troops that boarded after the unload order are still aboard: land them too.
+      if (tr.state === 'sailing' && ship.order.k === 'idle' && ship.cargo.length > 0) g.command(this.pid, { c: 'unload', ship: ship.id, ids: [], x: tr.tx, y: tr.ty });
+      if (tr.state !== 'loading') continue;
+      const boarding = this.mine().some((u) => u.order.k === 'board' && u.order.ship === ship.id) || [...g.units.values()].some((l) => l.type === 'lander' && l.ferry?.ship === ship.id);
+      if ((!boarding && ship.cargo.length > 0) || (g.time - tr.since > 110 && ship.cargo.length > 0)) {
+        tr.state = 'sailing';
+        g.command(this.pid, { c: 'unload', ship: ship.id, ids: [], x: tr.tx, y: tr.ty });
+      } else if (g.time - tr.since > 130) tr.state = 'done';
     }
-    this.transports = this.transports.filter((t) => t.state !== 'done');
   }
 
+  /** One planned, escorted assault at a time on a contested or enemy-held island. */
+  private operation() {
+    const g = this.game;
+    const hq = this.home();
+    if (!hq) return;
+    const op = this.op;
+    const alive = (id: number) => {
+      const u = g.units.get(id);
+      return u && !u.dead ? u : null;
+    };
+    if (!op) {
+      if (g.time < this.opCooldown) return;
+      const plans = this.islandPlans();
+      // Open grabs come first, except the middle island, which is worth fighting for early.
+      const easy = plans.filter((p) => !p.contested).length;
+      const fleet = this.mine().filter((u) => (u.type === 'destroyer' || u.type === 'battleship') && u.inside < 0 && !u.retreating && !this.transports.some((t) => t.ship === u.id));
+      const power = fleet.reduce((a, u) => a + this.shipPower(u), 0);
+      // Troops for the landing come from one island, so the transports make one pick-up.
+      const groups = new Map<number, Unit[]>();
+      for (const u of this.spareTroops()) {
+        const isl = islandAt(g.map, u.x, u.y);
+        groups.set(isl, [...(groups.get(isl) ?? []), u]);
+      }
+      const group = [...groups.values()].sort((a, b) => b.length - a.length)[0] ?? [];
+      const troops = group.length;
+      const lift = fleet.reduce((a, u) => a + u.holdCap - u.cargo.length, 0);
+      const needFor = (p: IslandPlan) => Math.min(6, lift, Math.ceil(p.ground * 0.75) + 2);
+      // Only fights we expect to win: clear naval superiority at the target.
+      const best = plans
+        .filter((p) => p.contested && !(this.avoid.get(p.island)! > g.time))
+        .filter((p) => g.time > 300 || p.centre || easy === 0)
+        .filter((p) => power >= p.naval * 1.4 + 4)
+        .sort((a, b) => b.value / (1 + b.dist / 25) / (1 + b.naval / 10) - a.value / (1 + a.dist / 25) / (1 + a.naval / 10))[0];
+      // Build up the landing force first; production reads this.
+      this.troopGoal = best && fleet.length >= 2 ? needFor(best) : 0;
+      if (!best || fleet.length < 2 || this.troopGoal < 2 || troops < this.troopGoal) return;
+      const need = this.troopGoal;
+      this.troopGoal = 0;
+      // Staging: off our nearest held coast toward the target.
+      const sx = hq.x + (best.x - hq.x) * 0.35;
+      const sy = hq.y + (best.y - hq.y) * 0.35;
+      const holds = fleet.filter((u) => u.holdCap > u.cargo.length).sort((a, b) => b.holdCap - a.holdCap);
+      const ships: number[] = [];
+      let cap = 0;
+      for (const s of holds) {
+        if (cap >= need) break;
+        ships.push(s.id);
+        cap += s.holdCap - s.cargo.length;
+      }
+      const escorts = fleet.filter((u) => !ships.includes(u.id)).map((u) => u.id);
+      this.stats.ops++;
+      this.op = { island: best.island, x: best.x, y: best.y, tx: best.target.x, ty: best.target.y, sx, sy, ships, escorts, state: 'load', since: g.time, startPower: power, need };
+      // Board the group; the transports come to it.
+      const gx = group.reduce((a, u) => a + u.x, 0) / group.length;
+      const gy = group.reduce((a, u) => a + u.y, 0) / group.length;
+      let k = 0;
+      let trip = 0;
+      for (const id of ships) {
+        const s = alive(id)!;
+        const n = s.holdCap - s.cargo.length;
+        const ids = group.slice(k, k + n).map((u) => u.id);
+        k += n;
+        if (ids.length) g.command(this.pid, { c: 'board', ids, ship: id });
+        g.command(this.pid, { c: 'move', ids: [id], x: gx, y: gy, mode: 'move' });
+        trip = Math.max(trip, Math.hypot(s.x - gx, s.y - gy) / UNITS[s.type].speed);
+      }
+      this.op.since = g.time + trip;
+      if (escorts.length) g.command(this.pid, { c: 'move', ids: escorts, x: sx, y: sy, mode: 'move' });
+      return;
+    }
+    // Live members only.
+    op.ships = op.ships.filter((id) => alive(id));
+    op.escorts = op.escorts.filter((id) => alive(id));
+    const all = [...op.ships, ...op.escorts].map((id) => alive(id)!).filter((u) => !u.retreating);
+    const power = all.reduce((a, u) => a + this.shipPower(u), 0);
+    const cx = all.length ? all.reduce((a, u) => a + u.x, 0) / all.length : op.sx;
+    const cy = all.length ? all.reduce((a, u) => a + u.y, 0) / all.length : op.sy;
+    const end = (success: boolean, why = 'won') => {
+      this.op = null;
+      if (success) this.stats.won++;
+      else this.stats.aborted++;
+      this.stats.why[why] = (this.stats.why[why] ?? 0) + 1;
+      this.opCooldown = g.time + (success ? 20 : 120);
+      if (!success) this.avoid.set(op.island, g.time + 240);
+    };
+    // Back out when the fight turns against us; regroup at port and come back later.
+    if (op.state !== 'load' && (power < op.startPower * 0.4 || this.navalThreat(cx, cy, 20, 30) > power * 1.15)) {
+      const port = this.nearestOwnPort(cx, cy) ?? { x: hq.x, y: hq.y };
+      const ids = all.map((u) => u.id);
+      if (ids.length) g.command(this.pid, { c: 'move', ids, x: port.x, y: port.y, mode: 'move' });
+      for (const id of ids) this.noEngage.set(id, g.time + 45);
+      this.stats.breakoffs++;
+      end(false, 'beaten');
+      return;
+    }
+    if (!all.length) {
+      end(false, 'no ships');
+      return;
+    }
+    const transports = op.ships.map((id) => alive(id)!);
+    const cargo = transports.reduce((a, s) => a + s.cargo.length, 0);
+    // Assault point: off the island's coast on our side; transports wait 5 km behind it.
+    const dx = op.sx - op.x;
+    const dy = op.sy - op.y;
+    const dl = Math.hypot(dx, dy) || 1;
+    const ax = op.x + (dx / dl) * 6;
+    const ay = op.y + (dy / dl) * 6;
+    const bx = op.x + (dx / dl) * 11;
+    const by = op.y + (dy / dl) * 11;
+    const reorder = g.time >= this.opOrderAt;
+    if (reorder) this.opOrderAt = g.time + 8;
+    const idleOrMoving = (u: Unit) => u.order.k !== 'attack' && u.order.k !== 'unload';
+    switch (op.state) {
+      case 'load': {
+        const boarding = this.mine().some((u) => u.order.k === 'board' && op.ships.includes(u.order.ship)) || [...g.units.values()].some((l) => l.type === 'lander' && !!l.ferry && op.ships.includes(l.ferry.ship));
+        if ((!boarding && cargo >= Math.min(op.need, 2)) || (g.time - op.since > 120 && cargo > 0)) {
+          op.state = 'sail';
+          op.since = g.time;
+          // Sail from where the force is now.
+          op.sx = cx;
+          op.sy = cy;
+        } else if (g.time - op.since > 150) end(false, 'load timeout');
+        break;
+      }
+      case 'sail': {
+        if (reorder) {
+          const esc = op.escorts.map((id) => alive(id)!).filter(idleOrMoving).map((u) => u.id);
+          if (esc.length) g.command(this.pid, { c: 'move', ids: esc, x: ax, y: ay });
+          g.command(this.pid, { c: 'move', ids: op.ships, x: bx, y: by, mode: 'move' });
+        }
+        // Land once the transports are off the island, the escorts are on station and the sea is ours.
+        const near = transports.length > 0 && transports.every((s) => Math.hypot(s.x - bx, s.y - by) < 6);
+        const escorted = op.escorts.length === 0 || op.escorts.some((id) => Math.hypot(alive(id)!.x - ax, alive(id)!.y - ay) < 8);
+        if (near && escorted && this.navalThreat(ax, ay, 15, 60) <= power * 0.7) {
+          op.state = 'land';
+          op.since = g.time;
+          for (const s of transports) if (s.cargo.length) g.command(this.pid, { c: 'unload', ship: s.id, ids: [], x: op.tx, y: op.ty });
+        } else if (g.time - op.since > 120 + (Math.hypot(op.sx - op.x, op.sy - op.y) / 0.25) * 1.5) end(false, 'sail timeout');
+        break;
+      }
+      case 'land': {
+        if (reorder) {
+          const esc = op.escorts.map((id) => alive(id)!).filter(idleOrMoving).map((u) => u.id);
+          if (esc.length) g.command(this.pid, { c: 'move', ids: esc, x: ax, y: ay });
+        }
+        if (cargo === 0) {
+          op.state = 'hold';
+          op.since = g.time;
+        } else if (g.time - op.since > 120) {
+          for (const s of transports) if (s.cargo.length && s.order.k !== 'unload') g.command(this.pid, { c: 'unload', ship: s.id, ids: [], x: op.tx, y: op.ty });
+          if (g.time - op.since > 200) end(false, 'land timeout');
+        }
+        break;
+      }
+      case 'hold': {
+        // Escorts cover the island until it is ours or our troops there are gone.
+        if (reorder) {
+          const esc = all.filter(idleOrMoving).map((u) => u.id);
+          if (esc.length) g.command(this.pid, { c: 'move', ids: esc, x: ax, y: ay });
+        }
+        const team = g.players[this.pid].team;
+        const left = g.sites.filter((s) => s.island === op.island && !(s.owner >= 0 && g.team(s.owner) === team)).length;
+        const ours = this.mine().some((u) => UNITS[u.type].domain === 'land' && u.inside < 0 && islandAt(g.map, u.x, u.y) === op.island);
+        if (left === 0) end(true);
+        // Troops may still be in the landing craft for a while.
+        else if ((!ours && g.time - op.since > 40) || g.time - op.since > 240) end(false, 'hold lost');
+        break;
+      }
+    }
+  }
+
+  private nearestOwnPort(x: number, y: number): { x: number; y: number } | null {
+    const g = this.game;
+    const team = g.players[this.pid].team;
+    let best: { x: number; y: number } | null = null;
+    let bd = 1e9;
+    for (const s of g.sites) {
+      if (!s.dock || s.owner < 0 || g.team(s.owner) !== team) continue;
+      const d = Math.hypot(s.dock.x - x, s.dock.y - y);
+      if (d < bd) {
+        bd = d;
+        best = s.dock;
+      }
+    }
+    return best;
+  }
+
+  /** Where the action is: the operation's target, else the best open island. */
+  private frontPoint(): { x: number; y: number } {
+    if (this.op) return { x: this.op.x, y: this.op.y };
+    const best = this.islandPlans().sort((a, b) => b.value / (1 + b.dist / 20) - a.value / (1 + a.dist / 20))[0];
+    return best ? { x: best.x, y: best.y } : { x: this.game.map.size / 2, y: this.game.map.size / 2 };
+  }
+
+  /** Warships not on a grab or the operation: defend what we hold, fight only winnable battles. */
   private fleet() {
     const g = this.game;
     if (g.time < this.fleetOrderAt) return;
-    this.fleetOrderAt = g.time + 18;
+    this.fleetOrderAt = g.time + 12;
     const hq = this.home();
     if (!hq) return;
-    const busy = new Set(this.transports.map((t) => t.ship));
-    const ships = this.mine().filter((u) => (UNITS[u.type].domain === 'sea' || u.type === 'sub') && u.type !== 'merchant' && u.type !== 'lander' && !busy.has(u.id) && !u.retreating && u.inside < 0);
+    const busy = this.busyShips();
+    const ships = this.mine().filter((u) => (u.type === 'destroyer' || u.type === 'battleship' || u.type === 'carrier' || u.type === 'sub') && !busy.has(u.id) && !u.retreating && u.inside < 0);
     if (!ships.length) return;
-    const know = g.knowledge.get(g.players[this.pid].team)!;
-    // Nearest known enemy ship to our home.
-    let target: { x: number; y: number } | null = null;
-    let bd = 1e9;
-    for (const [id, k] of know) {
-      const e = g.units.get(id);
-      if (!e || e.dead) continue;
-      const dom = UNITS[e.type].domain;
-      if (dom !== 'sea' && dom !== 'sub') continue;
-      const d = Math.hypot(k.x - hq.x, k.y - hq.y) + (e.type === 'merchant' ? 10 : 0);
-      if (d < bd) {
-        bd = d;
-        target = { x: k.x, y: k.y };
+    const myTeam = g.players[this.pid].team;
+    const surface = ships.filter((s) => s.type !== 'sub' && s.type !== 'carrier' && s.order.k !== 'attack');
+    const power = surface.reduce((a, u) => a + this.shipPower(u), 0);
+    // Threatened island of ours that we can relieve?
+    let rally: { x: number; y: number } | null = null;
+    let worst = 0;
+    for (const s of g.sites) {
+      if (s.owner < 0 || g.team(s.owner) !== myTeam) continue;
+      const th = this.navalThreat(s.x, s.y, 20);
+      if (th > worst && th * 1.1 <= power) {
+        worst = th;
+        rally = { x: s.x, y: s.y };
       }
     }
-    const islands = this.targetIslands();
-    // Escort a landing on an enemy-held island; otherwise hunt nearby ships or screen the next objective.
-    const myTeam = g.players[this.pid].team;
-    const contested = this.transports.find((tr) => tr.state === 'sailing' && g.sites.some((x) => x.island === tr.island && x.owner >= 0 && g.team(x.owner) !== myTeam));
-    const rally = contested
-      ? { x: contested.tx, y: contested.ty }
-      : target && bd < 45 * (g.map.size / 80)
-        ? target
-        : islands[0]
-          ? { x: (islands[0].x + hq.x) / 2, y: (islands[0].y + hq.y) / 2 }
-          : { x: g.map.size / 2, y: g.map.size / 2 };
-    const engaged = (s: Unit) => s.order.k === 'attack' && !!g.units.get(s.order.target) && !g.units.get(s.order.target)!.dead;
-    const surface = ships.filter((s) => s.type !== 'sub' && s.type !== 'carrier' && !engaged(s));
-    const subs = ships.filter((s) => s.type === 'sub' && !engaged(s));
+    if (!rally) {
+      // Screen the next objective from our side, or join the operation's staging point.
+      const f = this.op ? { x: this.op.sx, y: this.op.sy } : this.frontPoint();
+      rally = { x: hq.x + (f.x - hq.x) * 0.5, y: hq.y + (f.y - hq.y) * 0.5 };
+    }
     if (surface.length) g.command(this.pid, { c: 'move', ids: surface.map((s) => s.id), x: rally.x, y: rally.y });
-    // Carriers stay 10 km behind the screen, toward home.
     const cvs = ships.filter((s) => s.type === 'carrier');
     if (cvs.length) {
       const dx = hq.x - rally.x;
       const dy = hq.y - rally.y;
       const dl = Math.hypot(dx, dy) || 1;
-      g.command(this.pid, { c: 'move', ids: cvs.map((s) => s.id), x: rally.x + (dx / dl) * Math.min(10, dl), y: rally.y + (dy / dl) * Math.min(10, dl) });
+      g.command(this.pid, { c: 'move', ids: cvs.map((s) => s.id), x: rally.x + (dx / dl) * Math.min(12, dl), y: rally.y + (dy / dl) * Math.min(12, dl) });
     }
-    // Subs prowl further out toward enemy homes.
     // Subs without prey lie in wait on the enemy's shipping lanes (resource site -> home port).
+    const subs = ships.filter((s) => s.type === 'sub' && s.order.k !== 'attack');
     if (subs.length) {
       const enemyHq = g.sites.find((s) => s.type === 'hq' && s.owner >= 0 && g.team(s.owner) !== myTeam);
       const lanes = g.sites.filter((s) => s.type === 'resource' && s.owner >= 0 && g.team(s.owner) !== myTeam);
@@ -489,17 +829,25 @@ export class Bot {
     }
   }
 
+  /** Strike flights support the operation (enemy ground units and soft ships at the target); otherwise loiter at the front. */
   private air() {
     const g = this.game;
     if (g.time < this.airOrderAt) return;
-    this.airOrderAt = g.time + 25;
-    const hq = this.home();
-    if (!hq) return;
-    const planes = this.mine().filter((u) => UNITS[u.type].domain === 'air' && !u.landed && u.order.k === 'patrol');
-    const islands = this.targetIslands();
-    const front = islands[0] ?? { x: g.map.size / 2, y: g.map.size / 2 };
-    // Fighters and the AEW are handled in tactics(); idle strike flights loiter over the front.
-    for (const pl of planes) if (pl.type === 'strike') g.command(this.pid, { c: 'move', ids: [pl.id], x: front.x, y: front.y });
+    this.airOrderAt = g.time + 15;
+    const planes = this.mine().filter((u) => u.type === 'strike' && !u.landed && u.order.k !== 'attack' && u.order.k !== 'rtb' && u.fuel > u.fuelMax * 0.4);
+    const front = this.frontPoint();
+    for (const pl of planes) {
+      if (this.op && this.op.state !== 'load') {
+        const t = this.contacts()
+          .filter(({ e, k }) => (UNITS[e.type].domain === 'land' || e.type === 'merchant') && Math.hypot(k.x - this.op!.x, k.y - this.op!.y) < 12 && e.type !== 'sam')
+          .sort((a, b) => (b.e.type === 'coastal' ? 1 : 0) - (a.e.type === 'coastal' ? 1 : 0))[0];
+        if (t) {
+          g.command(this.pid, { c: 'attack', ids: [pl.id], target: t.e.id });
+          continue;
+        }
+      }
+      g.command(this.pid, { c: 'move', ids: [pl.id], x: front.x, y: front.y });
+    }
   }
 
   private groundIdle() {

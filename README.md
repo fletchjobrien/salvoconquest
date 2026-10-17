@@ -179,6 +179,24 @@ Every unit has slots (deck mount, VLS, torpedo room, auxiliary, hardpoints, pods
 menu, pick the faction, and drag modules into slots: e.g. give destroyers **Mine Rails**, swap a VLS for land-attack missiles, add a Troop Bay,
 or swap the AEW's sonobuoys for a drop tank. The defaults are the recommended fit.
 
+### Computer opponent
+
+The AI (`src/shared/ai.ts`) plans in islands. It gives each island a value (resource sites count most, the
+middle island gets a bonus) and estimates the enemy strength there from what its sensors have seen. If it has
+not seen the defenders of an enemy island, it assumes that there is a garrison.
+
+1. **Money first.** Single transports take open islands near the waiting troops: resource islands first, then
+   a stake in the middle island.
+2. **Navy first.** The AI saves for warships. It builds infantry only to fill the holds of its free transports,
+   or to gather the troops for the next landing. It does not fill its home island with idle troops.
+3. **Planned landings.** The AI attacks an enemy-held or contested island only when its fleet is at least 1.4×
+   the threat there. The troops board on one island while the escorts gather. The fleet sails ahead and the
+   transports follow. The troops land when the transports are off the island and the sea there is clear. The
+   escorts stay until the island is taken.
+4. **Back off and regroup.** If the force falls below 40% of its starting strength, or the enemy near it becomes
+   stronger, the whole force goes back to port. It does not start new fights on the way. The AI does not attack
+   that island again for 4 minutes.
+
 ### Theatres
 
 - **Operation Sandglass:** desert, Strait of Hormuz / Eastern Mediterranean
@@ -206,6 +224,17 @@ npm run dev        # client only at http://localhost:5173 (skirmish vs AI works)
 npm run local      # wrangler dev (builds first): full game incl. online rooms at http://localhost:8787
 npm test           # headless bot-vs-bot simulation on all three maps
 npm run typecheck
+npm run bench:ai   # many short headless AI games in parallel (no full playthrough needed)
+```
+
+`bench:ai` plays bot games on all cores (a 20-minute game takes about 10 s) and prints the averages every few
+minutes: islands, resource sites, middle-island sites, ships, idle troops, and planned landings started, won and
+called off. Settings: `GAMES` (default 8), `MIN` (game length, default 20), `CHECK` (minutes between rows,
+default 5). `VS=<git revision>` plays the current AI against the AI at that revision, with sides and factions
+swapped so that map and faction luck cancel out:
+
+```bash
+VS=HEAD GAMES=16 MIN=25 npm run bench:ai   # did my change make the AI better?
 ```
 
 ## Deploy to Cloudflare from GitHub
