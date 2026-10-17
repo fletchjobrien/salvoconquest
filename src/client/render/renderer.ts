@@ -14,6 +14,7 @@ uniform vec2 res;
 uniform float cNear;
 uniform float cFar;
 uniform float flash;
+uniform vec3 flashColor;
 uniform float levels;
 uniform float vignette;
 uniform float fogVeil;
@@ -63,7 +64,7 @@ void main() {
   c = pow(max(c, vec3(0.0)), vec3(1.0 / 2.2));
   float b = bayer4(cell) - 0.5;
   c = floor(c * levels + 0.5 + b * 0.9) / levels;
-  c += flash;
+  c += flash * flashColor;
   gl_FragColor = vec4(c, 1.0);
 }
 `;
@@ -80,6 +81,8 @@ export class Renderer {
   width = 1;
   height = 1;
   flash = 0;
+  /** Colour of the screen flash: white for lightning, warm for blasts. */
+  flashColor = new THREE.Color(1, 1, 1);
 
   constructor(readonly canvas: HTMLCanvasElement) {
     this.gl = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', preserveDrawingBuffer: false });
@@ -100,6 +103,7 @@ export class Renderer {
         cNear: { value: this.camera.near },
         cFar: { value: this.camera.far },
         flash: { value: 0 },
+        flashColor: { value: new THREE.Color(1, 1, 1) },
         levels: { value: 28 },
         vignette: { value: 0.55 },
         fogVeil: { value: 0 },
@@ -150,6 +154,7 @@ export class Renderer {
     this.post.uniforms.cNear.value = this.camera.near;
     this.post.uniforms.cFar.value = this.camera.far;
     this.post.uniforms.flash.value = this.flash;
+    this.post.uniforms.flashColor.value.copy(this.flashColor);
     this.post.uniforms.time.value = time;
     this.gl.setRenderTarget(this.rt);
     this.gl.render(this.scene, this.camera);
@@ -249,13 +254,20 @@ export class CameraRig {
     const fy = Math.cos(this.yaw);
     let sx = 0;
     let sy = 0;
-    if (this.shake > 0) {
-      sx = (Math.sin(time * 91) + Math.sin(time * 57)) * this.shake * 0.02 * this.dist;
-      sy = (Math.cos(time * 77) + Math.sin(time * 43)) * this.shake * 0.02 * this.dist;
-      this.shake = Math.max(0, this.shake - dt * 2.5);
-    }
-    this.cam.position.set(this.tx + fx * back + sx, h, this.ty + fy * back + sy);
-    this.cam.lookAt(this.tx + sx, 0, this.ty + sy);
+    let sh = 0;
+    let lx = 0;
+    if (this.shake > 0.002) {
+      // Salvo's shake: a jolt that dies away fast, moving the eye more than the aim point.
+      const s = this.shake * this.dist * 0.012;
+      const t = time * 50;
+      sx = Math.sin(t * 1.7) * s;
+      sy = Math.sin(t * 2.3 + 1) * s * 0.7;
+      sh = Math.sin(t * 2.9 + 2) * s * 0.7;
+      lx = Math.sin(t * 1.3 + 2) * s * 0.5;
+      this.shake *= Math.exp(-4 * dt);
+    } else this.shake = 0;
+    this.cam.position.set(this.tx + fx * back + sx, h + sh, this.ty + fy * back + sy);
+    this.cam.lookAt(this.tx + lx, 0, this.ty);
     this.cam.near = Math.max(0.03, this.dist * 0.02);
     this.cam.far = this.dist * 6 + 120;
     this.cam.updateProjectionMatrix();

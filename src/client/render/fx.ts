@@ -1,16 +1,30 @@
 // GPU point particles: wakes, smoke, fire, trails, splashes, rain. Point sprites look great pixelated.
+//
+// The combat effects follow the author's earlier game Salvo: fireballs that grow and rise, sparks that
+// arc and die on the water, long black smoke, tall water columns with a foam ring, billowing launch
+// clouds, tracer streaks, flash lights and camera shake. Salvo's presets are in its own units (a
+// destroyer is 62 long there); U converts them to km here, a little larger so they read at RTS zoom.
 import * as THREE from 'three';
+
+/** km per Salvo effect unit. */
+const U = 0.014;
 
 const VERT = /* glsl */ `
 attribute float size;
 attribute vec4 color;
 varying vec4 vColor;
 uniform float scale;
+uniform float pull;
 void main() {
   vColor = color;
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
-  gl_PointSize = size * scale / -mv.z;
-  gl_Position = projectionMatrix * mv;
+  float ps = size * scale / -mv.z;
+  // Pull big puffs toward the camera so the sea surface does not cut them in half.
+  vec3 p = mv.xyz + normalize(-mv.xyz) * min(size * 0.5, -mv.z * 0.5) * pull;
+  // Sub-pixel particles fade instead of popping.
+  if (ps < 1.0) { vColor.a *= ps; ps = 1.0; }
+  gl_PointSize = min(ps, 400.0);
+  gl_Position = projectionMatrix * vec4(p, 1.0);
 }
 `;
 const FRAG = /* glsl */ `
@@ -48,6 +62,12 @@ interface P {
   b2: number;
   /** How much the particle fades over its life (1 = fully, 0 = stays bright, e.g. tracer rounds). */
   fade: number;
+  /** Size grows with the square root of age (fast burst, slow spread), as in Salvo. */
+  sq: boolean;
+  /** Dies when it falls back to the sea (sparks, debris, spray). */
+  floor: boolean;
+  /** Colour reaches (r2,g2,b2) at this fraction of life (0.5 default; 1 = over the whole life). */
+  cl: number;
 }
 
 class Pool {
@@ -63,6 +83,7 @@ class Pool {
     readonly max: number,
     additive: boolean,
     soft = 1,
+    pull = 0,
   ) {
     this.pos = new Float32Array(max * 3);
     this.col = new Float32Array(max * 4);
@@ -74,7 +95,7 @@ class Pool {
     this.mat = new THREE.ShaderMaterial({
       vertexShader: VERT,
       fragmentShader: FRAG,
-      uniforms: { scale: { value: 300 }, soft: { value: soft } },
+      uniforms: { scale: { value: 300 }, soft: { value: soft }, pull: { value: pull } },
       transparent: true,
       depthWrite: false,
       blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
@@ -103,6 +124,9 @@ class Pool {
       g2: 0,
       b2: 0,
       fade: 1,
+      sq: false,
+      floor: false,
+      cl: 0.5,
       ...p,
     };
     this.ps.push(q);
@@ -123,6 +147,7 @@ class Pool {
       p.x += p.vx * dt;
       p.y += p.vy * dt;
       p.z += p.vz * dt;
+      if (p.floor && p.y < 0 && p.vy < 0) continue;
       ps[w++] = p;
     }
     ps.length = w;
@@ -136,7 +161,7 @@ class Pool {
       let g = p.g;
       let b = p.b;
       if (p.r2 >= 0) {
-        const k = Math.min(1, t * 2);
+        const k = Math.min(1, t / p.cl);
         r += (p.r2 - r) * k;
         g += (p.g2 - g) * k;
         b += (p.b2 - b) * k;
@@ -145,7 +170,7 @@ class Pool {
       this.col[i * 4 + 1] = g;
       this.col[i * 4 + 2] = b;
       this.col[i * 4 + 3] = p.a0 * (1 - t * p.fade) * Math.min(1, p.life * 12);
-      this.size[i] = p.s0 + (p.s1 - p.s0) * t;
+      this.size[i] = p.s0 + (p.s1 - p.s0) * (p.sq ? Math.sqrt(t) : t);
     }
     this.geo.setDrawRange(0, w);
     (this.geo.attributes.position as THREE.BufferAttribute).needsUpdate = true;
@@ -156,18 +181,105 @@ class Pool {
 
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
 
+const RING_GEO = new THREE.RingGeometry(0.94, 1, 64).rotateX(-Math.PI / 2);
+
+/** Expanding foam/shock rings flat on the water (pooled). */
+interface Ring {
+  mesh: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>;
+  t: number;
+  life: number;
+  size: number;
+  alpha: number;
+}
+
+/** Short point-light flashes from muzzles, launches and explosions (pooled). */
+interface Flash {
+  light: THREE.PointLight;
+  t: number;
+  life: number;
+  peak: number;
+}
+
 export class Fx {
   group = new THREE.Group();
-  smoke = new Pool(5000, false);
-  foam = new Pool(5000, false);
-  glow = new Pool(3000, true);
+  smoke = new Pool(9000, false, 0.7, 1);
+  foam = new Pool(6000, false, 1, 0.5);
+  glow = new Pool(6000, true, 1, 1);
   rain = new Pool(2500, false, 0);
+  private rings: Ring[] = [];
+  private flashes: Flash[] = [];
+  /** Shell tracers: line segments rebuilt every frame (head bright, tail fading to dark red). */
+  private streakPos = new Float32Array(800 * 6);
+  private streakCol = new Float32Array(800 * 8);
+  private streakN = 0;
+  private streaks: THREE.LineSegments;
+  /** Camera shake requested by effects this frame (the scene hands it to the camera rig). */
+  shake = 0;
+  /** Where the camera looks and how far it is: shake falls off with distance from the view centre. */
+  view = { x: 0, y: 0, dist: 40 };
 
   constructor() {
     this.group.add(this.foam.points, this.smoke.points, this.glow.points, this.rain.points);
     this.foam.points.renderOrder = 1;
     this.smoke.points.renderOrder = 2;
     this.glow.points.renderOrder = 3;
+    for (let i = 0; i < 28; i++) {
+      const mesh = new THREE.Mesh(RING_GEO, new THREE.MeshBasicMaterial({ color: 0xd8ecff, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending }));
+      mesh.visible = false;
+      mesh.renderOrder = 1;
+      this.group.add(mesh);
+      this.rings.push({ mesh, t: 1, life: 1, size: 1, alpha: 0 });
+    }
+    for (let i = 0; i < 6; i++) {
+      const light = new THREE.PointLight(0xffaa66, 0, 10, 1.6);
+      this.group.add(light);
+      this.flashes.push({ light, t: 1, life: 1, peak: 0 });
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(this.streakPos, 3).setUsage(THREE.DynamicDrawUsage));
+    g.setAttribute('color', new THREE.BufferAttribute(this.streakCol, 4).setUsage(THREE.DynamicDrawUsage));
+    this.streaks = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
+    this.streaks.frustumCulled = false;
+    this.streaks.renderOrder = 4;
+    this.group.add(this.streaks);
+  }
+
+  /** An expanding ring on the water (size = final radius, km). */
+  ring(x: number, y: number, size: number, life: number, alpha: number, color = 0xd8ecff) {
+    const r = this.rings.reduce((a, b) => (b.t / b.life > a.t / a.life ? b : a));
+    r.t = 0;
+    r.life = life;
+    r.size = size;
+    r.alpha = alpha;
+    r.mesh.material.color.setHex(color);
+    r.mesh.position.set(x, 0.012, y);
+    r.mesh.visible = true;
+  }
+
+  /** A point-light flash; the pooled light with the least time left is reused. */
+  light(x: number, alt: number, y: number, color: number, peak: number, range: number, life: number) {
+    const f = this.flashes.reduce((a, b) => (b.life - b.t < a.life - a.t ? b : a));
+    f.t = 0;
+    f.life = life;
+    f.peak = peak;
+    f.light.color.setHex(color);
+    f.light.distance = range;
+    f.light.position.set(x, alt, y);
+  }
+
+  /** Camera shake, weaker the further from the centre of the view. */
+  addShake(x: number, y: number, amount: number) {
+    const ref = Math.max(4, this.view.dist * 0.3);
+    const d = Math.hypot(x - this.view.x, y - this.view.y);
+    this.shake = Math.min(2.5, this.shake + amount / (1 + (d / ref) ** 2));
+  }
+
+  /** One tracer streak this frame, from (x1..) back toward (x0..). */
+  streak(x0: number, a0: number, y0: number, x1: number, a1: number, y1: number, r: number, g: number, b: number) {
+    if (this.streakN >= 800) return;
+    const i = this.streakN++;
+    this.streakPos.set([x1, a1, y1, x0, a0, y0], i * 6);
+    this.streakCol.set([r, g, b, 1, r * 0.4, g * 0.25, b * 0.2, 0], i * 8);
   }
 
   setScale(viewportHeight: number, fovDeg: number) {
@@ -176,19 +288,23 @@ export class Fx {
   }
 
   private clock = 0;
-  private later: { t: number; fn: () => void }[] = [];
+  private queued: { t: number; fn: () => void }[] = [];
 
-  /** Run an emitter a little later (staggered bursts of fire). */
+  /** Run an emitter a little later (staggered bursts of fire, delayed blasts). */
+  later(delay: number, fn: () => void) {
+    this.at(delay, fn);
+  }
+
   private at(delay: number, fn: () => void) {
-    this.later.push({ t: this.clock + delay, fn });
+    this.queued.push({ t: this.clock + delay, fn });
   }
 
   update(dt: number) {
     this.clock += dt;
-    if (this.later.length) {
-      const due = this.later.filter((l) => l.t <= this.clock);
+    if (this.queued.length) {
+      const due = this.queued.filter((l) => l.t <= this.clock);
       if (due.length) {
-        this.later = this.later.filter((l) => l.t > this.clock);
+        this.queued = this.queued.filter((l) => l.t > this.clock);
         for (const l of due) l.fn();
       }
     }
@@ -196,6 +312,25 @@ export class Fx {
     this.foam.update(dt);
     this.glow.update(dt);
     this.rain.update(dt);
+    for (const r of this.rings) {
+      if (r.t >= r.life) continue;
+      r.t += dt;
+      const t = Math.min(1, r.t / r.life);
+      const k = r.size * (0.15 + Math.sqrt(t));
+      r.mesh.scale.set(k, 1, k);
+      r.mesh.material.opacity = (1 - t) * r.alpha;
+      r.mesh.visible = t < 1;
+    }
+    for (const f of this.flashes) {
+      f.t = Math.min(f.life, f.t + dt);
+      const k = 1 - f.t / f.life;
+      f.light.intensity = f.peak * k * k;
+    }
+    const sg = this.streaks.geometry;
+    sg.setDrawRange(0, this.streakN * 2);
+    (sg.attributes.position as THREE.BufferAttribute).needsUpdate = true;
+    (sg.attributes.color as THREE.BufferAttribute).needsUpdate = true;
+    this.streakN = 0;
   }
 
   // ---- emitters ----
@@ -235,65 +370,187 @@ export class Fx {
     this.foam.add({ x: x + rnd(-0.03, 0.03), y: 0.008, z: y + rnd(-0.03, 0.03), max: 2.5, s0: 0.05, s1: 0.15, a0: 0.25 });
   }
 
-  missileTrail(x: number, alt: number, y: number, hostile: boolean) {
-    this.smoke.add({ x: x + rnd(-0.006, 0.006), y: alt, z: y + rnd(-0.006, 0.006), vy: 0.008, max: rnd(3, 4.5), s0: 0.035, s1: 0.15, r: 0.7, g: 0.7, b: 0.7, a0: 0.5, drag: 1 });
-    this.glow.add({ x, y: alt, z: y, max: 0.12, s0: 0.07, s1: 0.03, r: 1, g: hostile ? 0.55 : 0.85, b: hostile ? 0.25 : 0.5, a0: 1 });
-  }
-
-  /** Anti-air missiles: a thin, quick-fading white streak and an ice-blue motor, unlike the
-   *  heavy grey smoke and orange flame of an anti-ship missile. */
-  samTrail(x: number, alt: number, y: number) {
-    this.smoke.add({ x, y: alt, z: y, max: rnd(0.7, 1.1), s0: 0.012, s1: 0.035, r: 1, g: 1, b: 1, a0: 0.55, drag: 1 });
-    this.glow.add({ x, y: alt, z: y, max: 0.09, s0: 0.06, s1: 0.02, r: 0.55, g: 0.85, b: 1, a0: 1 });
+  /**
+   * Missile smoke laid down by distance travelled (one puff every ~80 m, so fast missiles leave
+   * unbroken trails at any frame rate), plus the motor flame at the head. Returns leftover distance.
+   */
+  missileTrail(x0: number, a0: number, y0: number, x1: number, a1: number, y1: number, carry: number, sam: boolean, hostile: boolean): number {
+    const d = Math.hypot(x1 - x0, a1 - a0, y1 - y0);
+    const step = (sam ? 3.5 : 4) * U;
+    let acc = carry + d;
+    const n = Math.min(12, Math.floor(acc / step));
+    acc -= n * step;
+    const g = sam ? 0.92 : 0.82;
+    for (let i = 0; i < n; i++) {
+      const t = (i + 1) / (n + 1);
+      this.smoke.add({
+        x: x0 + (x1 - x0) * t,
+        y: a0 + (a1 - a0) * t,
+        z: y0 + (y1 - y0) * t,
+        vx: rnd(-1, 1) * U,
+        vy: rnd(0.5, 2.5) * U,
+        vz: rnd(-1, 1) * U,
+        max: sam ? rnd(1.4, 2.4) : rnd(2.2, 3.5),
+        s0: (sam ? 2.5 : 3) * U,
+        s1: (sam ? 6 : 9) * U,
+        r: g,
+        g,
+        b: g,
+        a0: 0.42,
+        drag: 0.4,
+        grav: -0.6 * U,
+        sq: true,
+      });
+    }
+    if (d > 1e-5) {
+      const k = (3 * U) / d;
+      const flame = sam ? [1, 0.95, 0.85] : hostile ? [1, 0.6, 0.25] : [1, 0.85, 0.5];
+      this.glow.add({ x: x1 - (x1 - x0) * k, y: a1 - (a1 - a0) * k, z: y1 - (y1 - y0) * k, max: 0.06, s0: (sam ? 5 : 7) * U, s1: 3 * U, r: flame[0], g: flame[1], b: flame[2], a0: 1, r2: 1, g2: 0.35, b2: 0.06, cl: 1 });
+    }
+    return acc;
   }
 
   torpedoTrail(x: number, y: number) {
     this.foam.add({ x, y: 0.006, z: y, max: 3, s0: 0.02, s1: 0.07, a0: 0.45 });
   }
 
-  shellDot(x: number, alt: number, y: number) {
-    this.glow.add({ x, y: alt, z: y, max: 0.08, s0: 0.035, s1: 0.02, r: 1, g: 0.85, b: 0.5, a0: 0.9 });
-  }
-
-  muzzle(x: number, alt: number, y: number, big: number) {
-    this.glow.add({ x, y: alt + 0.03, z: y, max: 0.15, s0: 0.12 * big, s1: 0.3 * big, r: 1, g: 0.85, b: 0.5, a0: 1 });
+  /**
+   * Gun firing: a flash blown forward along the barrel, smoke puffs pushed out the same way, and a
+   * brief light. (dx, dy) points at the target.
+   */
+  muzzle(x: number, alt: number, y: number, big: number, dx = 0, dy = 0) {
+    const l = Math.hypot(dx, dy) || 1;
+    const fx = dx / l;
+    const fy = dy / l;
+    this.glow.add({ x: x + fx * 4 * U, y: alt + 0.03, z: y + fy * 4 * U, vx: fx * 20 * U, vz: fy * 20 * U, max: 0.12, s0: 9 * U * big, s1: 14 * U * big, r: 1, g: 0.9, b: 0.65, a0: 1, r2: 1, g2: 0.35, b2: 0.05, cl: 1, sq: true });
     for (let i = 0; i < 4 * big; i++) {
-      this.smoke.add({ x, y: alt + 0.03, z: y, vx: rnd(-0.04, 0.04), vy: rnd(0.02, 0.05), vz: rnd(-0.04, 0.04), max: rnd(1.0, 1.8), s0: 0.03 * big, s1: 0.14 * big, r: 0.8, g: 0.8, b: 0.8, a0: 0.45, drag: 1.5 });
+      const v = rnd(10, 25) * U;
+      this.smoke.add({ x: x + fx * 4 * U, y: alt + 0.03, z: y + fy * 4 * U, vx: fx * v + rnd(-2, 2) * U, vy: rnd(1, 4) * U, vz: fy * v + rnd(-2, 2) * U, max: rnd(1.5, 3), s0: 4 * U * big, s1: 16 * U * big, r: 0.62, g: 0.62, b: 0.62, a0: 0.5, drag: 1.5, grav: -1 * U, sq: true });
     }
+    if (big >= 1.5) this.light(x + fx * 0.05, alt + 0.1, y + fy * 0.05, 0xffc080, 6 * big, 2.5 * big, 0.12);
+    this.addShake(x, y, 0.06 * big);
   }
 
-  launch(x: number, alt: number, y: number) {
-    for (let i = 0; i < 9; i++) {
-      this.smoke.add({ x, y: alt + 0.03, z: y, vx: rnd(-0.05, 0.05), vy: rnd(0.02, 0.12), vz: rnd(-0.05, 0.05), max: rnd(1.8, 3.2), s0: 0.04, s1: 0.2, r: 0.9, g: 0.9, b: 0.88, a0: 0.5, drag: 1.4 });
-    }
-    this.glow.add({ x, y: alt + 0.05, z: y, max: 0.22, s0: 0.18, s1: 0.06, r: 1, g: 0.8, b: 0.4, a0: 1 });
-  }
-
-  explosion(x: number, alt: number, y: number, size: number, onWater: boolean) {
-    const s = Math.max(0.3, size);
-    this.glow.add({ x, y: alt + 0.05, z: y, max: 0.35, s0: 0.9 * s, s1: 0.2 * s, r: 1, g: 0.95, b: 0.8, a0: 1 });
-    for (let i = 0; i < 18 * s; i++) {
+  /** Missile launch: a hot flash and a big billowing cloud of white smoke (smaller for SAMs). */
+  launch(x: number, alt: number, y: number, sam = false) {
+    this.glow.add({ x, y: alt + 0.05, z: y, max: 0.25, s0: (sam ? 16 : 26) * U, s1: (sam ? 24 : 40) * U, r: 1, g: 0.92, b: 0.7, a0: 1, r2: 1, g2: 0.3, b2: 0.04, cl: 1, sq: true });
+    for (let i = 0; i < (sam ? 10 : 20); i++) {
       const a = Math.random() * Math.PI * 2;
-      const v = rnd(0.05, 0.35) * s;
-      this.glow.add({ x, y: alt + 0.03, z: y, vx: Math.cos(a) * v, vy: rnd(0.05, 0.3) * s, vz: Math.sin(a) * v, max: rnd(0.3, 0.8), s0: 0.12 * s, s1: 0.02, r: 1, g: rnd(0.45, 0.8), b: 0.15, a0: 1, drag: 2.5, grav: 0.3, r2: 0.6, g2: 0.15, b2: 0.05 });
+      const v = rnd(6, 22) * U;
+      const g = rnd(0.75, 0.85);
+      this.smoke.add({ x, y: alt + 0.03, z: y, vx: Math.cos(a) * v, vy: rnd(0, 8) * U, vz: Math.sin(a) * v, max: rnd(2.5, 4.5), s0: rnd(4, 7) * U, s1: rnd(14, 24) * U, r: g, g, b: g * 0.98, a0: 0.7, drag: 0.9, grav: -1.2 * U, sq: true });
+    }
+    this.light(x, alt + 0.15, y, 0xffc080, sam ? 10 : 20, (sam ? 180 : 300) * U, 0.6);
+    this.addShake(x, y, sam ? 0.2 : 0.5);
+  }
+
+  /**
+   * A hit that blows up (missile, big shell, ship lost). Salvo's recipe: a flash that grows, rising
+   * fireball blobs, glowing cores that linger, long black smoke, sparks and debris that arc and die
+   * on the water, a water column and foam ring, a light and camera shake.
+   */
+  explosion(x: number, alt: number, y: number, scale: number, onWater: boolean) {
+    const s = Math.max(0.3, scale);
+    const y0 = alt + 0.02;
+    this.glow.add({ x, y: y0, z: y, max: 0.18, s0: 45 * s * U, s1: 80 * s * U, r: 1, g: 0.85, b: 0.6, a0: 0.85, r2: 1, g2: 0.45, b2: 0.1, cl: 1, sq: true });
+    for (let i = 0; i < 40 * s; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const u = rnd(-0.3, 1);
+      const sp = rnd(12, 48) * s * U;
+      const rr = Math.sqrt(1 - u * u);
+      this.glow.add({ x, y: y0, z: y, vx: Math.cos(a) * rr * sp, vy: u * sp + 10 * U, vz: Math.sin(a) * rr * sp, max: rnd(0.6, 1.6), s0: rnd(10, 18) * s * U, s1: rnd(26, 46) * s * U, r: 1, g: 0.55, b: 0.15, a0: 0.55, r2: 0.4, g2: 0.06, b2: 0.01, cl: 1, drag: 2.2, grav: -7 * U, sq: true });
+    }
+    for (let i = 0; i < 8; i++) {
+      this.glow.add({ x: x + rnd(-6, 6) * s * U, y: y0 + rnd(0, 8) * s * U, z: y + rnd(-6, 6) * s * U, vy: rnd(4, 10) * U, max: rnd(1.4, 2.4), s0: 22 * s * U, s1: 34 * s * U, r: 1, g: 0.42, b: 0.08, a0: 0.55, r2: 0.2, g2: 0.03, b2: 0, cl: 1, drag: 1, grav: -3 * U, sq: true });
+    }
+    for (let i = 0; i < 22 * s; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = rnd(4, 16) * s * U;
+      const g = rnd(0.08, 0.2);
+      this.smoke.add({ x: x + rnd(-4, 4) * U, y: y0 + rnd(0, 6) * U, z: y + rnd(-4, 4) * U, vx: Math.cos(a) * sp, vy: rnd(6, 18) * U, vz: Math.sin(a) * sp, max: rnd(4, 9), s0: rnd(8, 14) * s * U, s1: rnd(36, 64) * s * U, r: g, g, b: g, a0: 0.85, r2: g * 2.2, g2: g * 2.2, b2: g * 2.2, cl: 1, drag: 0.6, grav: -2.5 * U, sq: true });
+    }
+    for (let i = 0; i < 30 * s; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = rnd(25, 80) * s * U;
+      this.glow.add({ x, y: y0 + 2 * U, z: y, vx: Math.cos(a) * sp * 0.6, vy: rnd(20, 70) * s * U, vz: Math.sin(a) * sp * 0.6, max: rnd(0.8, 2), s0: 2.6 * U, s1: 1.6 * U, r: 1, g: 0.85, b: 0.45, a0: 1, r2: 0.9, g2: 0.3, b2: 0.05, cl: 1, drag: 0.4, grav: 40 * U, floor: true, fade: 0.6 });
     }
     for (let i = 0; i < 10 * s; i++) {
-      this.smoke.add({ x: x + rnd(-0.05, 0.05) * s, y: alt + 0.05, z: y + rnd(-0.05, 0.05) * s, vx: rnd(-0.04, 0.04), vy: rnd(0.04, 0.12), vz: rnd(-0.04, 0.04), max: rnd(3, 6), s0: 0.15 * s, s1: 0.7 * s, r: 0.22, g: 0.21, b: 0.2, a0: 0.75, drag: 0.8 });
+      const a = Math.random() * Math.PI * 2;
+      const sp = rnd(15, 45) * s * U;
+      this.smoke.add({ x, y: y0 + 2 * U, z: y, vx: Math.cos(a) * sp * 0.6, vy: rnd(20, 50) * U, vz: Math.sin(a) * sp * 0.6, max: rnd(1.2, 2.2), s0: 2.6 * U, s1: 2.4 * U, r: 0.03, g: 0.03, b: 0.03, a0: 1, fade: 0, drag: 0.3, grav: 40 * U, floor: true });
     }
-    if (onWater) this.splash(x, y, s * 0.8);
+    if (onWater) {
+      this.waterColumn(x, y, 0.6 * s);
+      this.ring(x, y, 50 * s * U, 1.6, 0.3);
+    }
+    this.light(x, y0 + 10 * U, y, 0xffa860, 30 * s, 500 * s * U, 0.9);
+    this.addShake(x, y, 1.4 * s);
   }
 
-  splash(x: number, y: number, size = 0.6) {
-    // A narrow column of spray that rises and collapses.
-    for (let i = 0; i < 14 * size + 4; i++) {
-      this.foam.add({ x: x + rnd(-0.02, 0.02), y: 0.01, z: y + rnd(-0.02, 0.02), vx: rnd(-0.03, 0.03) * size, vy: rnd(0.15, 0.45) * size, vz: rnd(-0.03, 0.03) * size, max: rnd(0.9, 1.6), s0: 0.025 * size + 0.01, s1: 0.07 * size + 0.02, a0: 0.9, grav: 0.45, drag: 0.6 });
+  /** A shell striking a hull: a hard flash, a spray of sparks and a few puffs of smoke. */
+  shellHit(x: number, alt: number, y: number) {
+    const y0 = alt + 0.03;
+    this.glow.add({ x, y: y0, z: y, max: 0.15, s0: 18 * U, s1: 26 * U, r: 1, g: 0.92, b: 0.75, a0: 1, r2: 1, g2: 0.4, b2: 0.05, cl: 1, sq: true });
+    for (let i = 0; i < 12; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = rnd(15, 50) * U;
+      this.glow.add({ x, y: y0, z: y, vx: Math.cos(a) * sp, vy: rnd(15, 45) * U, vz: Math.sin(a) * sp, max: rnd(0.6, 1.4), s0: 2.4 * U, s1: 1.4 * U, r: 1, g: 0.85, b: 0.45, a0: 1, r2: 0.9, g2: 0.3, b2: 0.05, cl: 1, drag: 0.4, grav: 40 * U, floor: true, fade: 0.6 });
     }
-    this.foam.add({ x, y: 0.005, z: y, max: 1.6, s0: 0.04 * size, s1: 0.22 * size, a0: 0.35 });
+    for (let i = 0; i < 6; i++) {
+      const g = rnd(0.12, 0.25);
+      this.smoke.add({ x: x + rnd(-2, 2) * U, y: y0, z: y + rnd(-2, 2) * U, vx: rnd(-3, 3) * U, vy: rnd(4, 10) * U, vz: rnd(-3, 3) * U, max: rnd(2, 4), s0: 5 * U, s1: 22 * U, r: g, g, b: g, a0: 0.8, drag: 0.8, grav: -2 * U, sq: true });
+    }
+    this.light(x, y0 + 0.08, y, 0xffb070, 12, 160 * U, 0.35);
+    this.addShake(x, y, 0.25);
   }
 
+  /** A column of white water thrown up and falling back, with a low skirt of spray. */
+  waterColumn(x: number, y: number, scale: number) {
+    for (let i = 0; i < 40 * scale; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = rnd(0, 4) * scale * U;
+      const out = rnd(2, 9) * U;
+      this.foam.add({ x: x + Math.cos(a) * r, y: 0.01, z: y + Math.sin(a) * r, vx: Math.cos(a) * out, vy: rnd(30, 70) * Math.sqrt(scale) * U, vz: Math.sin(a) * out, max: rnd(1.4, 2.6), s0: rnd(4, 7) * scale * U, s1: rnd(12, 22) * scale * U, r: 0.95, g: 0.97, b: 1, a0: 0.95, drag: 0.5, grav: 32 * U, sq: true });
+    }
+    for (let i = 0; i < 16 * scale; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const v = rnd(8, 20) * U;
+      this.foam.add({ x, y: 0.01, z: y, vx: Math.cos(a) * v, vy: rnd(1, 4) * U, vz: Math.sin(a) * v, max: rnd(2, 4), s0: 6 * scale * U, s1: 26 * scale * U, r: 0.9, g: 0.95, b: 1, a0: 0.7, drag: 1.2, sq: true });
+    }
+  }
+
+  /** A round landing in the sea: a water column and a foam ring (scale 0.35 small gun ... 0.8 heavy). */
+  splash(x: number, y: number, scale = 0.35) {
+    this.waterColumn(x, y, scale);
+    this.ring(x, y, 34 * scale * U, 1.1, 0.3);
+    this.addShake(x, y, 0.1 * scale);
+  }
+
+  /** A torpedo hit: a towering column of water, a wide ring, a flash and a smoke pall. */
+  torpedoHit(x: number, y: number) {
+    this.waterColumn(x, y, 2.2);
+    this.ring(x, y, 110 * U, 2.2, 0.35);
+    this.glow.add({ x, y: 0.05, z: y, max: 0.25, s0: 40 * U, s1: 60 * U, r: 1, g: 0.9, b: 0.7, a0: 1, r2: 1, g2: 0.4, b2: 0.05, cl: 1, sq: true });
+    for (let i = 0; i < 20; i++) {
+      const g = rnd(0.1, 0.22);
+      this.smoke.add({ x: x + rnd(-4, 4) * U, y: 0.05, z: y + rnd(-4, 4) * U, vx: rnd(-6, 6) * U, vy: rnd(8, 18) * U, vz: rnd(-6, 6) * U, max: rnd(4, 8), s0: 10 * U, s1: 50 * U, r: g, g, b: g, a0: 0.85, drag: 0.6, grav: -2 * U, sq: true });
+    }
+    this.light(x, 0.2, y, 0xffa860, 30, 400 * U, 0.6);
+    this.addShake(x, y, 1.6);
+  }
+
+  /**
+   * A fire on deck: licking flames and a tall column of black smoke drifting downwind (Salvo's
+   * ship fire). Called many times a second while something burns.
+   */
   fire(x: number, alt: number, y: number, size: number) {
-    this.glow.add({ x: x + rnd(-0.03, 0.03) * size, y: alt + 0.04, z: y + rnd(-0.03, 0.03) * size, vy: rnd(0.02, 0.06), max: rnd(0.3, 0.7), s0: 0.08 * size, s1: 0.02, r: 1, g: rnd(0.4, 0.7), b: 0.1, a0: 0.9 });
-    this.smoke.add({ x: x + rnd(-0.03, 0.03) * size, y: alt + 0.08, z: y + rnd(-0.03, 0.03) * size, vx: 0.03, vy: rnd(0.08, 0.14), vz: 0.01, max: rnd(4, 7), s0: 0.08 * size, s1: 0.6 * size, r: 0.16, g: 0.15, b: 0.15, a0: 0.65, drag: 0.3 });
+    if (Math.random() < 0.7) {
+      this.glow.add({ x: x + rnd(-1.5, 1.5) * size * U, y: alt + 0.02, z: y + rnd(-1.5, 1.5) * size * U, vy: rnd(6, 14) * U, max: rnd(0.4, 0.8), s0: rnd(4, 7) * size * U, s1: rnd(2, 4) * size * U, r: 1, g: 0.6, b: 0.2, a0: 0.95, r2: 0.6, g2: 0.15, b2: 0.02, cl: 1, grav: -4 * U });
+    }
+    if (Math.random() < 0.5) {
+      const g = rnd(0.05, 0.09);
+      this.smoke.add({ x: x + rnd(-1, 1) * U, y: alt + 0.04, z: y + rnd(-1, 1) * U, vx: 2 * U, vy: rnd(8, 14) * U, vz: 0.6 * U, max: rnd(6, 11), s0: rnd(6, 10) * size * U, s1: rnd(40, 80) * size * U, r: g, g, b: g, a0: 0.85, r2: 0.18, g2: 0.18, b2: 0.18, cl: 1, drag: 0.3, grav: -1.5 * U, sq: true });
+    }
   }
 
   /** Chaff: a launcher thump, then a glittering cloud of foil that spreads, drifts and slowly falls. */
@@ -324,12 +581,37 @@ export class Fx {
     this.smoke.add({ x, y: alt + 0.02, z: y, vx: rnd(-0.02, 0.02) + 0.01, vy: rnd(0.01, 0.04), vz: rnd(-0.02, 0.02), max: rnd(3.5, 5.5), s0: size * 0.4, s1: size, r: 0.84, g: 0.85, b: 0.83, a0, drag: 0.5 });
   }
 
+  /** A missile killed in the air: a real explosion with black smoke, not a spark. */
   intercept(x: number, alt: number, y: number) {
-    this.glow.add({ x, y: alt, z: y, max: 0.3, s0: 0.5, s1: 0.1, r: 1, g: 1, b: 0.85, a0: 1 });
-    for (let i = 0; i < 10; i++) {
-      this.glow.add({ x, y: alt, z: y, vx: rnd(-0.3, 0.3), vy: rnd(-0.1, 0.3), vz: rnd(-0.3, 0.3), max: rnd(0.3, 0.6), s0: 0.04, s1: 0.01, r: 1, g: 0.8, b: 0.4, a0: 1, grav: 0.4 });
+    this.glow.add({ x, y: alt, z: y, max: 0.2, s0: 34 * U, s1: 50 * U, r: 1, g: 0.95, b: 0.8, a0: 1, r2: 1, g2: 0.4, b2: 0.05, cl: 1, sq: true });
+    for (let i = 0; i < 18; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const u = rnd(-1, 1);
+      const rr = Math.sqrt(1 - u * u);
+      const sp = rnd(10, 30) * U;
+      this.glow.add({ x, y: alt, z: y, vx: Math.cos(a) * rr * sp, vy: u * sp, vz: Math.sin(a) * rr * sp, max: rnd(0.4, 0.9), s0: 6 * U, s1: 16 * U, r: 1, g: 0.6, b: 0.2, a0: 0.95, r2: 0.4, g2: 0.06, b2: 0.01, cl: 1, drag: 2.5, grav: -2 * U, sq: true });
     }
-    this.smoke.add({ x, y: alt, z: y, max: 4, s0: 0.12, s1: 0.5, r: 0.5, g: 0.5, b: 0.5, a0: 0.4 });
+    for (let i = 0; i < 14; i++) {
+      const g = rnd(0.07, 0.12);
+      this.smoke.add({ x: x + rnd(-3, 3) * U, y: alt, z: y + rnd(-3, 3) * U, vx: rnd(-4, 4) * U, vy: rnd(0, 4) * U, vz: rnd(-4, 4) * U, max: rnd(4, 7), s0: 8 * U, s1: 34 * U, r: g, g, b: g, a0: 0.85, r2: 0.2, g2: 0.2, b2: 0.2, cl: 1, drag: 0.8, sq: true });
+    }
+    for (let i = 0; i < 18; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = rnd(20, 60) * U;
+      this.glow.add({ x, y: alt, z: y, vx: Math.cos(a) * sp, vy: rnd(-10, 30) * U, vz: Math.sin(a) * sp, max: rnd(1, 2.2), s0: 2.4 * U, s1: 1.4 * U, r: 1, g: 0.85, b: 0.45, a0: 1, r2: 0.9, g2: 0.3, b2: 0.05, cl: 1, drag: 0.4, grav: 35 * U, floor: true, fade: 0.6 });
+    }
+    this.light(x, alt, y, 0xffb070, 25, 450 * U, 0.6);
+    this.addShake(x, y, 0.6);
+  }
+
+  /** A SAM that missed and self-destructed: a small black puff in the sky. */
+  airburst(x: number, alt: number, y: number) {
+    this.glow.add({ x, y: alt, z: y, max: 0.15, s0: 20 * U, s1: 30 * U, r: 1, g: 0.9, b: 0.7, a0: 1, r2: 1, g2: 0.4, b2: 0.05, cl: 1, sq: true });
+    for (let i = 0; i < 8; i++) {
+      const g = rnd(0.1, 0.18);
+      this.smoke.add({ x: x + rnd(-2, 2) * U, y: alt, z: y + rnd(-2, 2) * U, vx: rnd(-3, 3) * U, vy: rnd(0, 3) * U, vz: rnd(-3, 3) * U, max: rnd(3, 5), s0: 5 * U, s1: 22 * U, r: g, g, b: g, a0: 0.8, drag: 0.8, sq: true });
+    }
+    this.light(x, alt, y, 0xffb070, 8, 200 * U, 0.3);
   }
 
   /** One visible round: a bright head with a short fading tail, flying from muzzle to target. */

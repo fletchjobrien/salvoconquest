@@ -57,7 +57,7 @@ export class Match {
     this.overlay.resize(r.width, r.height);
     this.scene = new GameScene(r, this.world);
     this.scene.overlay = this.overlay;
-    this.scene.onSound = (n, x, y, v) => audio.play(n as Sfx, x, y, v);
+    this.scene.onSound = (n, x, y, v, size) => audio.play(n as Sfx, x, y, v, size);
     this.view = {
       world: this.world,
       r,
@@ -674,9 +674,7 @@ export class Match {
         break;
       }
       case 'boom': {
-        // Shake when something blows up close to the camera.
-        const d = Math.hypot(e.x - this.rig.tx, e.y - this.rig.ty);
-        if (d < this.rig.dist * 0.6 && e.s > 0.5) this.rig.shake = Math.max(this.rig.shake, Math.min(0.6, e.s * 0.4 * (1 - d / (this.rig.dist * 0.6))));
+        // (Camera shake comes from the effects themselves, Fx.addShake.)
         if (e.s > 0.3 && this.nearMine(e.x, e.y, this.fightRange * 1.5)) this.warm(0.06 * Math.min(2, e.s));
         // Under fire callout.
         if (w.clock - this.lastUnderFire > 20) {

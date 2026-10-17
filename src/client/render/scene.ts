@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { UNITS, UNIT_TYPES, UnitType, MODULES } from '../../shared/defs';
 import { heightAt } from '../../shared/map';
 import type { GameEvent } from '../../shared/protocol';
-import { F_LANDED, F_FIRE, F_ABOARD } from '../../shared/protocol';
+import { F_LANDED, F_FIRE, F_ABOARD, PROJ_KINDS } from '../../shared/protocol';
 import type { World } from '../state';
 import { PALETTES, Palette } from '../theme';
 import { Renderer, CameraRig } from './renderer';
@@ -41,6 +41,9 @@ interface Wreck {
   vy: number;
   dom: string;
   emit: number;
+  /** Which way the hulk rolls and pitches as it sinks (+1 / -1). */
+  side: number;
+  nose: number;
 }
 
 const WRECK_MAT = new THREE.MeshLambertMaterial({ color: 0x1e1c1a, flatShading: true });
@@ -63,7 +66,7 @@ export class GameScene {
   private weatherEmit = 0;
   private smokeEmit = 0;
   overlay: Overlay | null = null;
-  onSound: (name: string, x: number, y: number, vol?: number) => void = () => {};
+  onSound: (name: string, x: number, y: number, vol?: number, size?: number) => void = () => {};
 
   constructor(
     readonly r: Renderer,
@@ -189,8 +192,10 @@ export class GameScene {
           }
         }
         if (u.flags & F_FIRE) {
-          // A fire on board: steady flames and a thick smoke column, whatever the hull state.
-          if (Math.random() < 0.8) this.fx.fire(u.x + (Math.random() - 0.5) * 0.08, y3 + 0.05, u.y + (Math.random() - 0.5) * 0.08, 1.5);
+          // A fire on board, at its own spot along the deck: flames and a tall black smoke column.
+          const len = VIS_LEN[u.type] ?? 0.3;
+          const along = (((u.id * 0.618) % 1) - 0.5) * len * 0.6;
+          if (Math.random() < 0.5) this.fx.fire(u.x + Math.cos(u.h) * along, y3 + 0.03, u.y + Math.sin(u.h) * along, 1.4);
         } else if (u.hp < 50) {
           const s = dom === 'air' ? 0.5 : dom === 'land' ? 0.7 : 1.2;
           if (Math.random() < (1 - u.hp / 50) * 0.9 + 0.1) this.fx.fire(u.x, y3 + (dom === 'sea' ? 0.04 : 0), u.y, s);
@@ -215,13 +220,31 @@ export class GameScene {
       wr.emit -= dt;
       const o = wr.obj;
       if (wr.dom === 'sea' || wr.dom === 'sub') {
-        const k = Math.min(1, wr.t / 14);
-        o.position.y = -k * k * 0.5;
-        o.rotation.z = Math.min(0.5, wr.t * 0.05) * (wr.h > 0 ? 1 : -1);
-        o.rotation.x = Math.min(0.35, wr.t * 0.03);
+        // Salvo's sinking: the hulk drifts on, settles ever faster and rolls onto its side; magazines
+        // cook off for the first ten seconds and the deck burns until the sea closes over it.
+        const k = Math.min(1, wr.t / 26);
+        wr.vx *= Math.exp(-dt * 0.35);
+        wr.x += Math.cos(wr.h) * wr.vx * dt;
+        wr.y += Math.sin(wr.h) * wr.vx * dt;
+        o.position.x = wr.x;
+        o.position.z = wr.y;
+        o.position.y = -Math.pow(k, 1.4) * 0.6;
+        o.rotation.z = Math.min(0.9, wr.t * 0.05) * wr.side;
+        o.rotation.x = Math.min(0.45, wr.t * 0.02) * wr.nose;
+        const len = VIS_LEN[wr.type] ?? 0.3;
+        const deck = () => {
+          const a = (Math.random() - 0.5) * len * 0.8;
+          return [wr.x + Math.cos(wr.h) * a, wr.y + Math.sin(wr.h) * a] as const;
+        };
         if (wr.emit <= 0 && k < 0.85) {
-          wr.emit = 0.12;
-          this.fx.fire(wr.x, Math.max(0, o.position.y + 0.04), wr.y, 1.4 * (1 - k));
+          wr.emit = 0.04;
+          const [fx, fy] = deck();
+          this.fx.fire(fx, Math.max(0, o.position.y + 0.04), fy, 1.4 * (1 - k));
+        }
+        if (wr.t < 10 && wr.dom === 'sea' && Math.random() < dt * 0.6) {
+          const [bx, by] = deck();
+          this.fx.explosion(bx, Math.max(0, o.position.y + 0.03), by, 0.6, false);
+          this.onSound('boom_s', bx, by, 0.8);
         }
       } else if (wr.dom === 'air') {
         wr.vy -= dt * 0.8;
@@ -249,20 +272,37 @@ export class GameScene {
       }
     }
     this.wrecks = this.wrecks.filter((wr) => {
-      const done = wr.t > (wr.dom === 'land' ? 40 : 16);
+      const done = wr.t > (wr.dom === 'land' ? 40 : wr.dom === 'air' ? 16 : 30);
       if (done) scene.remove(wr.obj);
       return !done;
     });
 
     // ---- projectiles ----
+    // Tracer streaks scale with zoom so they read like Salvo's at any distance.
+    const streakLen = Math.max(0.12, rig.dist * 0.012);
     for (const p of w.projs.values()) {
-      const ma = p.kind === 'missile' || p.kind === 'sam' ? weaponY(map, p.kind, p.air, p.rx, p.ry, p.ralt, p.alt0, w.clock - p.born) : 0;
-      if (p.kind === 'missile') this.fx.missileTrail(p.rx, ma, p.ry, !p.mine);
-      else if (p.kind === 'sam') this.fx.samTrail(p.rx, ma, p.ry);
-      else if (p.kind === 'torpedo') {
+      const ma = p.kind === 'missile' || p.kind === 'sam' ? weaponY(map, p.kind, p.air, p.rx, p.ry, p.ralt, p.alt0, w.clock - p.born) : p.ralt;
+      const prev = this.trails.get(p.id);
+      if (p.kind === 'missile' || p.kind === 'sam') {
+        const carry = prev ? this.fx.missileTrail(prev.x, prev.a, prev.y, p.rx, ma, p.ry, prev.carry, p.kind === 'sam', !p.mine) : 0;
+        this.trails.set(p.id, { x: p.rx, a: ma, y: p.ry, carry, seen: this.time });
+      } else if (p.kind === 'torpedo') {
         if (Math.random() < 0.5) this.fx.torpedoTrail(p.rx, p.ry);
-      } else if (p.kind === 'shell' || p.kind === 'bomb') this.fx.shellDot(p.rx, p.ralt, p.ry);
+      } else if (p.kind === 'shell' || p.kind === 'bomb') {
+        if (prev) {
+          const dx = p.rx - prev.x;
+          const da = ma - prev.a;
+          const dy = p.ry - prev.y;
+          const d = Math.hypot(dx, da, dy);
+          if (d > 1e-4) {
+            const k = streakLen / d;
+            this.fx.streak(p.rx - dx * k, ma - da * k, p.ry - dy * k, p.rx, ma, p.ry, 1, 0.75, 0.35);
+          }
+        }
+        this.trails.set(p.id, { x: p.rx, a: ma, y: p.ry, carry: 0, seen: this.time });
+      }
     }
+    for (const [id, t] of this.trails) if (t.seen !== this.time) this.trails.delete(id);
 
     // ---- sites ----
     for (let i = 0; i < this.sites.length; i++) {
@@ -334,6 +374,10 @@ export class GameScene {
 
     this.fx.setScale(this.r.height / this.r.pixelSize, this.r.camera.fov);
     this.fx.update(dt);
+    // Effects ask for camera shake; the rig applies it.
+    rig.shake = Math.min(2.5, rig.shake + this.fx.shake);
+    this.fx.shake = 0;
+    this.fx.view = { x: rig.tx, y: rig.ty, dist: rig.dist };
   }
 
   private weatherAt(x: number, y: number) {
@@ -349,6 +393,16 @@ export class GameScene {
   }
 
   private pendingKills = new Map<number, GameEvent & { k: 'kill' }>();
+  /** Last drawn position of each missile and shell (trails are laid by distance travelled). */
+  private trails = new Map<number, { x: number; a: number; y: number; carry: number; seen: number }>();
+
+  /** A warm screen flash for a big blast, fading with distance from the centre of the view. */
+  private blastFlash(x: number, y: number, k: number) {
+    const ref = this.fx.view.dist * 0.25 + 2;
+    const d = Math.hypot(x - this.fx.view.x, y - this.fx.view.y);
+    this.r.flashColor.setRGB(1, 0.7, 0.4);
+    this.r.flash = Math.max(this.r.flash, (k * 0.16) / (1 + (d / ref) ** 2));
+  }
 
   private startWreck(o: UnitObj, e: GameEvent & { k: 'kill' }) {
     const dom = UNITS[o.type].domain;
@@ -367,6 +421,8 @@ export class GameScene {
       vy: 0,
       dom,
       emit: 0,
+      side: Math.random() < 0.5 ? -1 : 1,
+      nose: Math.random() < 0.5 ? -1 : 1,
     });
   }
 
@@ -382,11 +438,11 @@ export class GameScene {
           this.fx.launch(e.x, alt, e.y);
           this.onSound('launch', e.x, e.y);
         } else if (m.proj === 'sam') {
-          this.fx.launch(e.x, alt, e.y);
+          this.fx.launch(e.x, alt, e.y, true);
           this.onSound('sam', e.x, e.y);
         } else if (m.proj === 'shell') {
           const big = m.id === 'gun406' ? 2.2 : m.id === 'railgun' ? 1.6 : m.id === 'mortar' ? 0.6 : 1;
-          this.fx.muzzle(e.x, alt, e.y, big);
+          this.fx.muzzle(e.x, alt, e.y, big, e.tx - e.x, e.ty - e.y);
           this.onSound(big > 1.5 ? 'bigGun' : 'gun', e.x, e.y, m.id === 'mortar' ? 0.5 : 1);
         } else if (m.proj === 'bullet') {
           // The event carries the target's height, so take the shooter's own height from the unit.
@@ -414,18 +470,37 @@ export class GameScene {
       }
       case 'boom': {
         const water = heightAt(map, e.x, e.y) < 0;
-        const alt = e.a && e.a > 0.1 ? airY(map, e.x, e.y, e.a) : groundY(map, e.x, e.y);
-        this.fx.explosion(e.x, alt, e.y, e.s, water && alt < 0.1);
+        const inAir = !!e.a && e.a > 0.1;
+        const alt = inAir ? airY(map, e.x, e.y, e.a!) : groundY(map, e.x, e.y);
+        const kind = e.p !== undefined ? PROJ_KINDS[e.p] : null;
+        if (kind === 'torpedo' && water) {
+          // Under the keel: a towering column of water.
+          this.fx.torpedoHit(e.x, e.y);
+          this.onSound('boom_l', e.x, e.y, 1.1, 1.6);
+          this.blastFlash(e.x, e.y, 1);
+        } else if (inAir && e.s < 0.3) {
+          // A SAM bursting near (or short of) its target.
+          this.fx.airburst(e.x, alt, e.y);
+          this.onSound('boom_s', e.x, e.y, 0.6, 0.35);
+        } else if (kind === 'shell' && e.s < 0.7) {
+          this.fx.shellHit(e.x, alt, e.y);
+          this.onSound('boom_s', e.x, e.y, 1, 0.5);
+        } else {
+          this.fx.explosion(e.x, alt, e.y, Math.min(1.5, Math.max(0.5, e.s)), water && alt < 0.1);
+          this.onSound(e.s > 0.8 ? 'boom_l' : 'boom_s', e.x, e.y, 1, Math.min(1.5, Math.max(0.5, e.s)));
+          if (kind === 'missile' || e.s > 1) this.blastFlash(e.x, e.y, 1);
+        }
         // Hits on land throw up dirt.
-        if (!water && !(e.a && e.a > 0.1)) this.fx.dirt(e.x, alt, e.y, e.s);
-        this.onSound(e.s > 0.8 ? 'boom_l' : 'boom_s', e.x, e.y);
+        if (!water && !inAir) this.fx.dirt(e.x, alt, e.y, e.s);
         if (e.s > 0.6) this.overlay?.shock(e.x, e.y, alt, 0.5 + e.s * 0.5, '#ffb070', 0.7);
         break;
       }
-      case 'splash':
-        this.fx.splash(e.x, e.y, 0.5);
-        this.onSound('splash', e.x, e.y, 0.6);
+      case 'splash': {
+        const sz = e.s ?? 0.35;
+        this.fx.splash(e.x, e.y, sz);
+        this.onSound('splash', e.x, e.y, sz > 0.5 ? 1 : 0.6);
         break;
+      }
       case 'chaff': {
         const ca = Math.max(groundY(map, e.x, e.y) + 0.05, e.a * VSCALE);
         this.fx.chaff(e.x, ca, e.y);
@@ -447,10 +522,25 @@ export class GameScene {
         const type = UNIT_TYPES[e.ty];
         const dom = UNITS[type].domain;
         const alt = this.units.get(e.id)?.m.root.position.y ?? 0;
-        const big = dom === 'sea' ? (type === 'lander' ? 0.6 : type === 'merchant' ? 1.2 : 2) : dom === 'land' ? 1.1 : 0.8;
+        const warship = dom === 'sea' && type !== 'lander' && type !== 'merchant';
+        const big = dom === 'sea' ? (type === 'lander' ? 0.6 : type === 'merchant' ? 1.2 : 2.2) : dom === 'land' ? 1.1 : 0.8;
         this.fx.explosion(e.x, alt, e.y, big, dom === 'sea' || dom === 'sub');
         this.overlay?.shock(e.x, e.y, alt, big * 0.9, e.o === w.me ? '#ff5d4f' : '#ffd84a', 1.2);
-        this.onSound(dom === 'air' ? 'boom_s' : 'boom_l', e.x, e.y, 1.2);
+        this.onSound(dom === 'air' ? 'boom_s' : 'boom_l', e.x, e.y, 1.2, dom === 'air' ? 0.6 : big);
+        if (warship || dom === 'sub') {
+          // Salvo's sinking blast: a wide ring and three more explosions over two seconds.
+          this.fx.ring(e.x, e.y, 150 * 0.014, 2.8, 0.4, 0xffd0a0);
+          this.fx.addShake(e.x, e.y, 2);
+          this.blastFlash(e.x, e.y, 1.6);
+          for (const dt of [0.7, 1.4, 2.1]) {
+            const ox = (Math.random() - 0.5) * 0.56;
+            const oy = (Math.random() - 0.5) * 0.56;
+            this.fx.later(dt, () => {
+              this.fx.explosion(e.x + ox, 0, e.y + oy, 1.1, true);
+              this.onSound('boom_l', e.x + ox, e.y + oy, 0.9, 1.1);
+            });
+          }
+        }
         if (this.units.has(e.id)) this.pendingKills.set(e.id, e);
         break;
       }
@@ -460,6 +550,7 @@ export class GameScene {
         break;
       }
       case 'lightning': {
+        this.r.flashColor.setRGB(1, 1, 1);
         this.flashLight.position.set(e.x, 3, e.y);
         this.flashLight.intensity = 45;
         this.weatherView.lightning(e.x, e.y);

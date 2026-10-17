@@ -119,9 +119,9 @@ export class Audio {
     return b;
   }
 
-  /** Distance attenuation and stereo pan relative to the camera. */
-  private spatial(x?: number, y?: number): { vol: number; pan: number } {
-    if (x === undefined || y === undefined) return { vol: 1, pan: 0 };
+  /** Distance attenuation, stereo pan and muffling (low-pass cutoff, Hz) relative to the camera. */
+  private spatial(x?: number, y?: number): { vol: number; pan: number; lp: number } {
+    if (x === undefined || y === undefined) return { vol: 1, pan: 0, lp: 20000 };
     const L = this.listener;
     const dx = x - L.x;
     const dy = y - L.y;
@@ -132,8 +132,14 @@ export class Audio {
     const s = Math.sin(L.yaw);
     const sx = dx * c + dy * s;
     const pan = Math.max(-0.9, Math.min(0.9, sx / hear));
-    return { vol, pan };
+    // Far blasts arrive muffled, as in Salvo (distance from the camera itself, not its aim point).
+    const d3 = Math.hypot(d, L.dist * 0.6);
+    const lp = Math.max(400, 18000 / (1 + d3 / 12));
+    return { vol, pan, lp };
   }
+
+  /** Low-pass for the sound being built (set by play() from the source's distance). */
+  private curLp = 20000;
 
   private out(vol: number, pan: number, reverb = 0.2, bus?: GainNode): GainNode {
     const ctx = this.ctx!;
@@ -141,7 +147,12 @@ export class Audio {
     g.gain.value = vol;
     const p = ctx.createStereoPanner();
     p.pan.value = pan;
-    g.connect(p).connect(bus ?? this.sfx);
+    if (this.curLp < 19000 && !bus) {
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = this.curLp;
+      g.connect(lp).connect(p).connect(this.sfx);
+    } else g.connect(p).connect(bus ?? this.sfx);
     if (reverb > 0) {
       const r = ctx.createGain();
       r.gain.value = reverb;
@@ -193,15 +204,57 @@ export class Audio {
     s.stop(t + a + dur + 0.05);
   }
 
-  play(name: Sfx, x?: number, y?: number, volume = 1) {
+  /**
+   * Salvo's explosion: a white-noise blast whose low-pass falls from 5 kHz to 90 Hz, a sub-bass
+   * thump, and debris crackling down for a second and a half. Bigger blasts last longer.
+   */
+  private explosion(t: number, size: number, v: number, pan: number) {
+    const ctx = this.ctx!;
+    const s = Math.max(0.3, Math.min(2.4, size));
+    const o = this.out(Math.min(1.4, 0.55 + 0.45 * s) * v, pan, 0.7);
+    t += 0.02;
+    const n = this.noiseSrc();
+    const f = ctx.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.setValueAtTime(5000, t);
+    f.frequency.exponentialRampToValueAtTime(90, t + 1.8 * s);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(1, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 2.4 * s);
+    n.connect(f).connect(g).connect(o);
+    n.start(t);
+    n.stop(t + 2.6 * s);
+    this.tone('sine', 90, 28, t, 1.0, 1.4, o, 0.003);
+    const c = this.noiseSrc();
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 2500;
+    const cg = ctx.createGain();
+    cg.gain.value = 0;
+    for (let i = 0; i < 14; i++) {
+      const tt = t + 0.15 + Math.random() * 1.3;
+      cg.gain.setValueAtTime(0.25 * Math.random(), tt);
+      cg.gain.setTargetAtTime(0, tt + 0.01, 0.02);
+    }
+    c.connect(hp).connect(cg).connect(o);
+    c.start(t);
+    c.stop(t + 1.8);
+  }
+
+  /** size: scale of a blast (boom_s / boom_l): 0.35 SAM burst ... 1.3 missile hit ... 2.2 ship lost; longer and deeper when bigger. */
+  play(name: Sfx, x?: number, y?: number, volume = 1, size = 1) {
     const ctx = this.ctx;
     if (!ctx || ctx.state !== 'running') return;
-    // Rate limit identical sounds.
+    // Rate limit identical sounds from the same place (2 km cells), so separate impacts all sound.
     const now = ctx.currentTime;
-    const minGap = name === 'ciws' ? 0.12 : name === 'gun' ? 0.05 : name === 'hover' ? 0.03 : 0.02;
-    if ((this.lastPlay.get(name) ?? -1) > now - minGap) return;
-    this.lastPlay.set(name, now);
-    const { vol, pan } = this.spatial(x, y);
+    const minGap = name === 'ciws' ? 0.09 : name === 'gun' ? 0.03 : name === 'hover' ? 0.03 : name === 'launch' ? 0.12 : name === 'splash' ? 0.04 : 0.05;
+    const key = x === undefined || y === undefined ? name : `${name}${Math.round(x / 2)},${Math.round(y / 2)}`;
+    if ((this.lastPlay.get(key) ?? -1) > now - minGap) return;
+    this.lastPlay.set(key, now);
+    if (this.lastPlay.size > 400) for (const [k, t0] of this.lastPlay) if (t0 < now - 2) this.lastPlay.delete(k);
+    const { vol, pan, lp } = this.spatial(x, y);
+    this.curLp = lp;
     const v = vol * volume;
     if (v < 0.01) return;
     const t = now + 0.005;
@@ -238,41 +291,46 @@ export class Audio {
         break;
       }
       case 'gun': {
-        const o = this.out(0.5 * v, pan, 0.3);
-        this.burst(t, 0.25, 0.9, 'lowpass', 1800, 200, o, 0.7);
-        this.tone('sine', 130, 45, t, 0.25, 0.9, o);
+        // Salvo's gun: a hard crack whose filter slams shut, over a short low punch.
+        const o = this.out(0.8 * v, pan, 0.5);
+        this.burst(t, 0.6, 1, 'lowpass', 1800, 120, o, 0.7, false, 0.002);
+        this.tone('sine', 110, 40, t, 0.3, 1, o, 0.002);
         break;
       }
       case 'bigGun': {
-        const o = this.out(0.9 * v, pan, 0.5);
-        this.burst(t, 0.9, 1, 'lowpass', 1200, 80, o, 0.7, true);
-        this.burst(t, 0.12, 0.6, 'highpass', 2000, 2000, o, 0.7);
-        this.tone('sine', 90, 28, t, 0.9, 1, o);
+        const o = this.out(1 * v, pan, 0.6);
+        this.burst(t, 1.1, 1, 'lowpass', 1500, 70, o, 0.7, false, 0.002);
+        this.burst(t, 0.9, 0.8, 'lowpass', 600, 50, o, 0.7, true);
+        this.tone('sine', 80, 26, t, 0.9, 1.2, o, 0.002);
         break;
       }
-      case 'launch': {
-        const o = this.out(0.55 * v, pan, 0.4);
+      case 'launch':
+      case 'sam': {
+        // Salvo's launch: a roaring motor that rises and then trails off, over raw rumble.
+        const sam = name === 'sam';
+        const o = this.out((sam ? 1.1 : 1.6) * v, pan, 0.6);
         const s = this.noiseSrc();
         const f = ctx.createBiquadFilter();
         f.type = 'bandpass';
-        f.Q.value = 1.4;
-        f.frequency.setValueAtTime(300, t);
-        f.frequency.exponentialRampToValueAtTime(2200, t + 0.5);
-        f.frequency.exponentialRampToValueAtTime(900, t + 2.2);
+        f.Q.value = 0.8;
+        f.frequency.setValueAtTime(sam ? 600 : 300, t);
+        f.frequency.exponentialRampToValueAtTime(sam ? 3000 : 1800, t + 0.6);
+        f.frequency.exponentialRampToValueAtTime(500, t + 3);
         const g = ctx.createGain();
+        const len = sam ? 2 : 3.5;
         g.gain.setValueAtTime(0.0001, t);
-        g.gain.exponentialRampToValueAtTime(1, t + 0.15);
-        g.gain.exponentialRampToValueAtTime(0.0001, t + 2.4);
+        g.gain.exponentialRampToValueAtTime(1.4, t + 0.08);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + len);
         s.connect(f).connect(g).connect(o);
         s.start(t);
-        s.stop(t + 2.5);
-        this.burst(t, 0.6, 0.8, 'lowpass', 400, 60, o, 0.7, true);
-        break;
-      }
-      case 'sam': {
-        const o = this.out(0.4 * v, pan, 0.3);
-        this.burst(t, 1.1, 1, 'bandpass', 1800, 3200, o, 1.6, false, 0.03);
-        this.burst(t, 0.3, 0.6, 'lowpass', 500, 80, o, 0.7, true);
+        s.stop(t + len + 0.1);
+        const rb = this.noiseSrc(true);
+        const rg = ctx.createGain();
+        rg.gain.setValueAtTime(sam ? 0.8 : 1.3, t);
+        rg.gain.exponentialRampToValueAtTime(0.0001, t + 1.5);
+        rb.connect(rg).connect(o);
+        rb.start(t);
+        rb.stop(t + 1.6);
         break;
       }
       case 'rifle': {
@@ -292,18 +350,30 @@ export class Audio {
         break;
       }
       case 'ciws': {
-        const o = this.out(0.3 * v, pan, 0.15);
-        const osc = ctx.createOscillator();
-        osc.type = 'sawtooth';
-        osc.frequency.value = 75;
+        // Salvo's CIWS "BRRRT": noise chopped by a 72 Hz square wave, so it sounds like single rounds.
+        const o = this.out(1.6 * v, pan, 0.2);
+        const s = this.noiseSrc();
         const f = ctx.createBiquadFilter();
-        f.type = 'lowpass';
-        f.frequency.value = 2400;
+        f.type = 'bandpass';
+        f.frequency.value = 1400;
+        f.Q.value = 0.5;
+        const vca = ctx.createGain();
+        vca.gain.value = 0;
+        const lfo = ctx.createOscillator();
+        lfo.type = 'square';
+        lfo.frequency.value = 72;
+        const depth = ctx.createGain();
+        depth.gain.value = 0.6;
+        lfo.connect(depth).connect(vca.gain);
         const g = ctx.createGain();
-        this.env(g.gain, t, 0.01, 0.8, 0.45);
-        osc.connect(f).connect(g).connect(o);
-        osc.start(t);
-        osc.stop(t + 0.5);
+        g.gain.setValueAtTime(1, t);
+        g.gain.setValueAtTime(1, t + 0.1);
+        g.gain.setTargetAtTime(0, t + 0.1, 0.03);
+        s.connect(f).connect(vca).connect(g).connect(o);
+        s.start(t);
+        lfo.start(t);
+        s.stop(t + 0.35);
+        lfo.stop(t + 0.35);
         break;
       }
       case 'torpedo': {
@@ -312,31 +382,21 @@ export class Audio {
         for (let i = 0; i < 5; i++) this.tone('sine', 300 + Math.random() * 300, 150, t + 0.2 + i * 0.07, 0.08, 0.3, o);
         break;
       }
-      case 'boom_s': {
-        const o = this.out(0.6 * v, pan, 0.4);
-        this.burst(t, 0.7, 1, 'lowpass', 2400, 120, o, 0.7, true);
-        this.tone('sine', 110, 35, t, 0.5, 0.9, o);
+      case 'boom_s':
+      case 'boom_l':
+        this.explosion(t, size, v, pan);
         break;
-      }
-      case 'boom_l': {
-        const o = this.out(1 * v, pan, 0.6);
-        this.burst(t, 2.2, 1, 'lowpass', 1600, 50, o, 0.6, true, 0.005);
-        this.burst(t, 0.2, 0.6, 'bandpass', 3000, 900, o, 0.8);
-        this.tone('sine', 85, 22, t, 1.6, 1, o);
-        break;
-      }
       case 'splash': {
-        const o = this.out(0.35 * v, pan, 0.3);
-        this.burst(t, 0.6, 0.8, 'highpass', 800, 3000, o, 0.5, false, 0.01);
-        this.burst(t, 0.3, 0.5, 'lowpass', 600, 100, o, 0.7, true);
+        // Salvo's splash: a wash of water noise around 900 Hz.
+        const o = this.out(1.4 * v, pan, 0.2);
+        this.burst(t, 0.9, 1, 'bandpass', 900, 700, o, 0.6, false, 0.03);
+        this.burst(t, 0.25, 0.4, 'lowpass', 500, 90, o, 0.7, true);
         break;
       }
-      case 'intercept': {
-        const o = this.out(0.45 * v, pan, 0.5);
-        this.burst(t, 0.35, 1, 'bandpass', 3000, 600, o, 0.9);
-        this.tone('sine', 2200, 900, t, 0.25, 0.4, o);
+      case 'intercept':
+        // A missile killed in the air is an explosion, not a zap.
+        this.explosion(t, 0.6, v, pan);
         break;
-      }
       case 'thunder': {
         const d = Math.hypot((x ?? 0) - this.listener.x, (y ?? 0) - this.listener.y);
         const delay = Math.min(4, d * 0.08);

@@ -119,8 +119,10 @@ export interface Snapshot {
 
 export type GameEvent =
   | { k: 'fire'; id: number; m: string; x: number; y: number; tx: number; ty: number; a?: number }
-  | { k: 'boom'; x: number; y: number; s: number; w: boolean; a?: number }
-  | { k: 'splash'; x: number; y: number }
+  /** p: kind of the round that hit (index in PROJ_KINDS), when it was a hit on a unit. */
+  | { k: 'boom'; x: number; y: number; s: number; w: boolean; a?: number; p?: number }
+  /** s: splash size (0.35 small round ... 0.8 heavy shell). */
+  | { k: 'splash'; x: number; y: number; s?: number }
   | { k: 'intercept'; x: number; y: number; a: number }
   | { k: 'kill'; id: number; ty: number; x: number; y: number; o: number; h: number }
   | { k: 'capture'; site: number; o: number; prev: number }

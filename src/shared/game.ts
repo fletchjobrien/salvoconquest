@@ -2614,11 +2614,11 @@ export class Game {
     chance *= 1 - 0.25 * w.storm;
     if (this.rng.next() < chance) {
       this.damage(t, dmg * mul, p.owner, p.kind, p.shooter);
-      this.emit({ k: 'boom', x: t.x, y: t.y, s: Math.min(1.5, (dmg * mul) / 30), w: false, a: t.alt }, t.x, t.y);
+      this.emit({ k: 'boom', x: t.x, y: t.y, s: Math.min(1.5, (dmg * mul) / 30), w: false, a: t.alt, p: PROJ_KINDS.indexOf(p.kind) }, t.x, t.y);
     } else {
       const [ox, oy] = this.rng.inDisc(0.25);
       if (cls === 'air') this.emit({ k: 'boom', x: t.x + ox, y: t.y + oy, s: 0.2, w: false, a: t.alt }, t.x, t.y);
-      else if (water) this.emit({ k: 'splash', x: t.x + ox, y: t.y + oy }, t.x, t.y);
+      else if (water) this.emit({ k: 'splash', x: t.x + ox, y: t.y + oy, s: dmg >= 20 ? 0.8 : 0.35 }, t.x, t.y);
       else this.emit({ k: 'boom', x: t.x + ox, y: t.y + oy, s: 0.3, w: false }, t.x, t.y);
     }
   }
