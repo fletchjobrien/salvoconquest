@@ -200,22 +200,43 @@ export class Match {
   edgeScroll = true;
   private mouseInside = false;
 
+  /** Distance (km) at which a fight counts as "ours": engagement ranges grow with the map. */
+  private get fightRange() {
+    return 11 * (this.world.map.size / 80);
+  }
+
+  /** Add to the music's "heat" (recent combat), capped. */
+  private warm(v: number) {
+    this.heat = Math.min(0.85, this.heat + v);
+  }
+
+  private nearMine(x: number, y: number, r: number): boolean {
+    const w = this.world;
+    for (const u of w.units.values()) if (u.owner === w.me && Math.abs(u.x - x) < r && Math.abs(u.y - y) < r && Math.hypot(u.x - x, u.y - y) < r) return true;
+    return false;
+  }
+
   /**
-   * How hot the fight is for us, 0..1: enemies close to our forces, missiles inbound, and
-   * recent hits, launches and losses (the "heat", which fades over about half a minute).
+   * How hot the fight is for us, 0..1: enemies within engagement range of our forces, missiles and
+   * torpedoes in flight (theirs and ours), and recent launches, hits, kills and losses (the "heat",
+   * which fades over about half a minute).
    */
   private musicIntensity(): number {
     const w = this.world;
-    this.heat *= Math.exp(-0.5 / 25);
-    const mine = [...w.units.values()].filter((u) => u.owner === w.me);
-    let near = 0;
-    const close = (x: number, y: number, r: number) => mine.some((u) => Math.abs(u.x - x) < r && Math.abs(u.y - y) < r && Math.hypot(u.x - x, u.y - y) < r);
-    for (const u of w.units.values()) if (w.teamOf(u.owner) !== w.myTeam && u.owner >= 0 && close(u.x, u.y, 14)) near++;
-    for (const c of w.contacts.values()) if (close(c.x, c.y, 18)) near += 0.5;
-    let inbound = 0;
-    for (const p of w.projs.values()) if (!p.mine && (p.kind === 'missile' || p.kind === 'torpedo')) inbound++;
     if (this.ended) return 0;
-    return Math.min(1, Math.min(0.45, near * 0.09) + Math.min(0.4, inbound * 0.15) + this.heat);
+    this.heat *= Math.exp(-0.5 / 25);
+    const R = this.fightRange;
+    let near = 0;
+    for (const u of w.units.values()) if (w.teamOf(u.owner) !== w.myTeam && u.owner >= 0 && u.type !== 'merchant' && u.type !== 'lander' && this.nearMine(u.x, u.y, R)) near++;
+    for (const c of w.contacts.values()) if (this.nearMine(c.x, c.y, R * 1.2)) near += 0.5;
+    let inbound = 0;
+    let outbound = 0;
+    for (const p of w.projs.values()) {
+      if (p.kind !== 'missile' && p.kind !== 'torpedo') continue;
+      if (p.mine) outbound++;
+      else inbound++;
+    }
+    return Math.min(1, Math.min(0.45, near * 0.08) + Math.min(0.45, inbound * 0.12 + outbound * 0.05) + this.heat);
   }
 
   private weatherAtCam(): number {
@@ -510,6 +531,11 @@ export class Match {
       }
       case 'kill': {
         const type = UNIT_TYPES[e.ty];
+        // Losses and kills near our forces heat the score up.
+        if (type !== 'lander') {
+          if (e.o === w.me) this.warm(0.25);
+          else if (w.teamOf(e.o) !== w.myTeam && this.nearMine(e.x, e.y, this.fightRange * 2)) this.warm(0.18);
+        }
         if (e.o === w.me) {
           if (type !== 'lander') {
             this.hud.log(unitName(fac, type, e.id), type === 'merchant' ? 'Merchant sunk!' : 'Unit lost.', 'bad');
@@ -553,7 +579,7 @@ export class Match {
         }
         break;
       case 'vampire': {
-        this.heat = Math.min(0.6, this.heat + 0.3);
+        this.warm(0.3);
         audio.play('vampire');
         const near = [...w.units.values()].find((u) => u.owner === w.me && UNITS[u.type].category === 'naval' && Math.hypot(u.x - e.x, u.y - e.y) < 30);
         if (near) void voices.say(fac, 'naval', 'vampire', unitName(fac, near.type, near.id), true);
@@ -620,7 +646,7 @@ export class Match {
         // Shake when something blows up close to the camera.
         const d = Math.hypot(e.x - this.rig.tx, e.y - this.rig.ty);
         if (d < this.rig.dist * 0.6 && e.s > 0.5) this.rig.shake = Math.max(this.rig.shake, Math.min(0.6, e.s * 0.4 * (1 - d / (this.rig.dist * 0.6))));
-        if (e.s > 0.3 && [...w.units.values()].some((u) => u.owner === w.me && Math.hypot(u.x - e.x, u.y - e.y) < 12)) this.heat = Math.min(0.6, this.heat + 0.06 * Math.min(2, e.s));
+        if (e.s > 0.3 && this.nearMine(e.x, e.y, this.fightRange * 1.5)) this.warm(0.06 * Math.min(2, e.s));
         // Under fire callout.
         if (w.clock - this.lastUnderFire > 20) {
           const hit = [...w.units.values()].find((u) => u.owner === w.me && Math.hypot(u.x - e.x, u.y - e.y) < 0.4);
@@ -646,6 +672,8 @@ export class Match {
         // Sonar ping when one of our subs launches.
         const m = MODULES[e.m];
         const u = w.units.get(e.id);
+        // Our own salvos count as fighting too.
+        if (u?.owner === w.me && m) this.warm(m.proj === 'missile' || m.proj === 'torpedo' ? 0.05 : 0.01);
         if (u?.owner === w.me && u.type === 'sub' && m?.proj === 'torpedo') audio.play('sonar');
         break;
       }
