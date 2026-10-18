@@ -114,7 +114,8 @@ export type Order =
   | { k: 'patrol'; x: number; y: number }
   | { k: 'rtb' }
   | { k: 'retreat'; x: number; y: number }
-  | { k: 'unload'; x: number; y: number; ids: number[] };
+  | { k: 'unload'; x: number; y: number; ids: number[] }
+  | { k: 'escort'; target: number };
 
 const OVERKILL_CHECK = new Set<string>(['missile', 'torpedo', 'bomb']);
 const GUIDED = new Set<string>(['missile', 'torpedo', 'sam']);
@@ -684,6 +685,19 @@ export class Game {
             u.mission = null;
           }
         break;
+      case 'escort': {
+        // Ships and aircraft guard a friendly ship or aircraft (any player on our team).
+        const t = this.units.get(Number(cmd.target));
+        if (!t || t.dead || t.team !== p.team || (UNITS[t.type].domain !== 'sea' && UNITS[t.type].domain !== 'sub' && UNITS[t.type].domain !== 'air')) return;
+        for (const u of own(cmd.ids)) {
+          const dom = UNITS[u.type].domain;
+          if (u.id === t.id || u.inside >= 0 || dom === 'land') continue;
+          const o: Order = { k: 'escort', target: t.id };
+          this.setOrder(u, o);
+          if (dom === 'air') u.mission = { ...o };
+        }
+        break;
+      }
       case 'launch': {
         // Every flight on this carrier's deck takes off for the point; one still rearming goes when ready.
         const ship = this.units.get(Number(cmd.ship));
@@ -1240,6 +1254,22 @@ export class Game {
     }
 
     switch (u.order.k) {
+      case 'escort': {
+        const t = this.units.get(u.order.target);
+        if (!t || t.dead || t.team !== u.team) {
+          u.order = { k: 'idle' };
+          u.path = null;
+          break;
+        }
+        // Keep station on the guarded unit, aiming a little ahead of it so we keep pace.
+        const [sx, sy] = this.escortSlot(u, t);
+        const lead = UNITS[t.type].domain === 'air' ? 0 : 5;
+        const gx = sx + Math.cos(t.heading) * t.speed * lead;
+        const gy = sy + Math.sin(t.heading) * t.speed * lead;
+        if (Math.hypot(gx - u.x, gy - u.y) > 0.25) this.navTo(u, gx, gy);
+        else u.path = null;
+        break;
+      }
       case 'board':
         this.thinkBoard(u);
         break;
@@ -1699,6 +1729,18 @@ export class Game {
     }
   }
 
+  /** An escort's station around the unit it guards: a ring of slots, beam first, then astern. */
+  private escortSlot(u: Unit, t: Unit): [number, number] {
+    const mates: number[] = [];
+    for (const e of this.units.values()) if (!e.dead && e.order.k === 'escort' && e.order.target === t.id && UNITS[e.type].domain !== 'air') mates.push(e.id);
+    mates.sort((a, b) => a - b);
+    const i = Math.max(0, mates.indexOf(u.id));
+    const SLOTS = [Math.PI / 2, -Math.PI / 2, Math.PI * 0.8, -Math.PI * 0.8, Math.PI, 0.35, -0.35, Math.PI * 0.6, -Math.PI * 0.6];
+    const a = t.heading + SLOTS[i % SLOTS.length];
+    const r = (UNITS[t.type].domain === 'air' ? 0.6 : 1.1 + UNITS[t.type].size * 2) * (1 + Math.floor(i / SLOTS.length) * 0.6);
+    return [t.x + Math.cos(a) * r, t.y + Math.sin(a) * r];
+  }
+
   /** Aircraft stowed on its carrier's deck (landed there). */
   aboard(u: Unit): boolean {
     return u.landed && !!u.base && 'unit' in u.base;
@@ -1916,6 +1958,27 @@ export class Game {
       }
       if (d > rng * 0.8) this.flyToward(u, k.x, k.y, dt);
       else this.orbit(u, k.x, k.y, Math.max(1.2, rng * 0.6), dt);
+      return;
+    }
+    if (o.k === 'escort') {
+      // Fly cover over the guarded unit: engage what comes near it, then come back.
+      const t = this.units.get(o.target);
+      if (!t || t.dead || t.team !== u.team) {
+        u.order = { k: 'patrol', x: u.x, y: u.y };
+        u.mission = { ...u.order };
+        return;
+      }
+      if (this.tickN % 5 === 0) {
+        const tgt = this.airPickTarget(u, t.x, t.y);
+        if (tgt) {
+          u.resume = o;
+          u.order = { k: 'attack', target: tgt };
+          return;
+        }
+      }
+      const d = Math.hypot(t.x - u.x, t.y - u.y);
+      if (d > 3.2) this.flyToward(u, t.x, t.y, dt);
+      else this.orbit(u, t.x, t.y, 2.2, dt);
       return;
     }
     if (o.k === 'patrol') {
@@ -3103,7 +3166,7 @@ export class Game {
         if (x.owner === pid) {
           const o = x.order;
           const oc = ORDER_CODES.indexOf(x.type === 'merchant' ? 'merchant' : x.type === 'lander' ? 'lander' : o.k);
-          const ox = 'x' in o ? r2(o.x) : o.k === 'attack' ? o.target : 0;
+          const ox = 'x' in o ? r2(o.x) : o.k === 'attack' || o.k === 'escort' ? o.target : 0;
           const oy = 'y' in o ? r2(o.y) : 0;
           d.push([
             x.id,

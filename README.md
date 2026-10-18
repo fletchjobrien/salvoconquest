@@ -14,7 +14,7 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
 | Input | Action |
 | --- | --- |
 | LMB / drag | Select / box select · double-click selects all of a type |
-| RMB | Move · attack (on enemy or radar contact) · board (troops on a ship) |
+| RMB | Move · attack (on enemy or radar contact) · board (troops on a ship) · escort (ships or aircraft on a friendly ship or aircraft: they follow it and fight off what comes near) |
 | Ctrl + RMB | Move without stopping to fight |
 | WASD / MMB drag / screen edge | Pan · Q/E rotate · wheel zoom |
 | U | Unload troops: a ring shows the landing range, click land inside it (every selected ship with troops lands there) |

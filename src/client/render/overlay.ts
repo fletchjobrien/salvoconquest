@@ -1234,12 +1234,12 @@ export class Overlay {
     } else if (code === 'move' || code === 'retreat' || code === 'patrol' || code === 'unload') {
       if (code === 'retreat') color = 'rgba(255,200,80,0.8)';
       if (code === 'unload') color = 'rgba(140,255,170,0.85)';
-    } else if (code === 'board') {
+    } else if (code === 'board' || code === 'escort') {
       const s = w.units.get(d[5]);
       if (!s) return;
       tx = s.x;
       ty = s.y;
-      color = 'rgba(140,255,170,0.85)';
+      color = code === 'escort' ? 'rgba(160,230,255,0.85)' : 'rgba(140,255,170,0.85)';
     } else return;
     const ty3 = groundY(w.map, tx, ty);
     if (!this.proj(v, tx, ty3, ty)) return;

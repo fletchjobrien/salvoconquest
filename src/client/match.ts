@@ -397,6 +397,7 @@ export class Match {
           }
         }
         if (t && t.owner === w.me && UNITS[t.type].hold > 0 || (t && t.owner === w.me && matchLoadoutOf(t.type).includes('troopbay'))) {
+          // (Troops board; ships and aircraft fall through to escort below.)
           const ground = ids.filter((id) => UNITS[w.units.get(id)!.type].domain === 'land');
           if (ground.length) {
             this.send({ c: 'board', ids: ground, ship: t!.id });
@@ -404,6 +405,20 @@ export class Match {
             audio.play('order');
             void voices.say(w.myFaction, 'ground', 'board', unitName(w.myFaction, 'infantry', ground[0]));
             const rest = ids.filter((id) => !ground.includes(id) && id !== t!.id);
+            if (rest.length) this.send({ c: 'move', ids: rest, x, y });
+            return;
+          }
+        }
+        // Ships and aircraft guard a friendly ship or aircraft: follow it and fight off what comes near.
+        if (t && w.teamOf(t.owner) === w.myTeam) {
+          const tdom = UNITS[t.type].domain;
+          const guards = ids.filter((id) => id !== t.id && UNITS[w.units.get(id)!.type].domain !== 'land');
+          if ((tdom === 'sea' || tdom === 'sub' || tdom === 'air') && t.type !== 'lander' && guards.length) {
+            this.send({ c: 'escort', ids: guards, target: t.id });
+            this.ping(t.x, t.y, 'move');
+            audio.play('order');
+            this.hud.log(unitName(w.myFaction, w.units.get(guards[0])!.type, guards[0]), `Escorting ${unitName(w.faction(t.owner), t.type, t.id)}${guards.length > 1 ? ` (${guards.length} units)` : ''}.`, 'good');
+            const rest = ids.filter((id) => !guards.includes(id) && id !== t.id);
             if (rest.length) this.send({ c: 'move', ids: rest, x, y });
             return;
           }

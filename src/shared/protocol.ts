@@ -26,7 +26,9 @@ export type Command =
   // Fire control: 0 hold fire, 1 weapons tight (2 missiles per target), 2 weapons free. Hotkey F:
   | { c: 'firemode'; ids: number[]; mode: number }
   // Carrier: launch every flight stowed aboard toward a point (fighters patrol, strike flights attack, AEW orbits). Hotkey L:
-  | { c: 'launch'; ship: number; x: number; y: number };
+  | { c: 'launch'; ship: number; x: number; y: number }
+  // Ships and aircraft follow and protect a friendly ship or aircraft (RMB on it):
+  | { c: 'escort'; ids: number[]; target: number };
 
 export interface LobbySlot {
   slot: number;
@@ -175,4 +177,4 @@ export const F_ABOARD = 16384; // aircraft stowed on a carrier: not drawn, launc
 export type CritPart = 'engine' | 'rudder' | 'radar' | 'weapon' | 'fire' | 'flood' | 'stun';
 
 // Order codes for DetailRow
-export const ORDER_CODES = ['idle', 'move', 'attack', 'board', 'patrol', 'rtb', 'retreat', 'unload', 'merchant', 'lander'] as const;
+export const ORDER_CODES = ['idle', 'move', 'attack', 'board', 'patrol', 'rtb', 'retreat', 'unload', 'merchant', 'lander', 'escort'] as const;

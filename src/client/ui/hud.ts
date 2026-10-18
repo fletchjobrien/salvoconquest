@@ -437,6 +437,7 @@ export class Hud {
       unload: 'UNLOADING TROOPS',
       merchant: 'HAULING CARGO',
       lander: 'FERRYING',
+      escort: 'ESCORTING',
     };
     const kills = d?.[15] ?? 0;
     let html = `<div class="sp-head"><img src="${symbolDataUrl('own', def.domain as SymDomain, glyphFor(u.type), 13)}"><div><div class="nm">${esc(unitName(fac, u.type, u.id))}</div><div class="ty">${def.names[fac]}</div></div><div class="kc${kills ? '' : ' z'}" title="Enemy units destroyed">${kills}<span>KILLS</span></div></div>`;
