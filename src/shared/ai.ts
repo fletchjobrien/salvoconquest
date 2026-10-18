@@ -434,9 +434,19 @@ export class Bot {
     const spare = this.spareTroops().filter((u) => u.type === 'infantry').length + p.queues.ground.filter((it) => it.type === 'infantry').length;
     // Two troops per free hull is a full load; more only waits at home.
     const free = this.freeTransports().reduce((a, u) => a + u.holdCap - u.cargo.length, 0);
-    const short = spare < Math.max(Math.min(2, lift), this.troopGoal);
+    // Only a real shortage may spend the money saved for warships; the landing force for the next
+    // operation fills up from what is left over (and not at all while the enemy fleet outweighs ours).
+    const pressed = this.underPressure();
+    // Troops on hand (garrisons, troops in holds and in the queue): one for most islands we hold plus
+    // a landing party is enough. More only sits at home while the money is needed for warships.
+    const team = p.team;
+    const held = new Set(g.sites.filter((s) => s.owner >= 0 && g.team(s.owner) === team).map((s) => s.island)).size;
+    const troops = count.get('infantry') ?? 0;
+    const cap = pressed ? Math.ceil(held / 2) + 1 : Math.ceil(held * 0.6) + 3;
+    const short = spare < Math.min(2, lift) && troops < cap;
+    const goal = pressed ? 0 : this.troopGoal;
     const want: Record<UnitType, number> = {
-      infantry: spare < Math.max(2, free, this.troopGoal) ? (count.get('infantry') ?? 0) + 1 : 0,
+      infantry: troops < cap && spare < Math.max(2, pressed ? 0 : Math.min(free, 4), goal) ? troops + 1 : 0,
       coastal: t > 150 ? (t > 600 ? 2 : 1) : 0,
       sam: t > 120 ? (t > 600 ? 2 : 1) : 0,
       destroyer: Math.min(10, (3 + t / 150) * rich),
@@ -467,6 +477,28 @@ export class Bot {
     want.fighter += Math.min(3, seen.strike);
     want.sub += Math.min(3, seen.battleship + seen.carrier);
     if (seen.destroyer >= 3 && t > 240) want.battleship = Math.max(want.battleship, 1);
+    // Under pressure (the enemy fleet we know of outweighs ours): stop saving for big hulls and
+    // extras; destroyers and coastal batteries (cheap, hard-hitting defenders) come first.
+    if (pressed) {
+      // Build the counter to what is beating us: battleships beat destroyers, submarines beat
+      // battleships and carriers, destroyers beat submarines. Batteries hold the coast meanwhile.
+      const mix = this.enemyFleetMix();
+      const n = (t: UnitType) => count.get(t) ?? 0;
+      // Never save for a big hull we cannot afford soon: hulls in the water now beat one later.
+      want.destroyer = Math.max(want.destroyer, n('destroyer') + 2);
+      const bbOk = p.cash >= unitCost('battleship', p.faction) * 0.8;
+      if (mix.destroyer >= mix.battleship + mix.carrier) {
+        want.battleship = bbOk ? Math.max(want.battleship, n('battleship') + 1) : n('battleship');
+        want.sub = Math.min(want.sub, Math.max(1, n('sub')));
+      } else {
+        want.sub = Math.max(want.sub, n('sub') + 1);
+        if (!bbOk) want.battleship = n('battleship');
+      }
+      want.carrier = Math.min(want.carrier, n('carrier'));
+      want.strike = Math.min(want.strike, 1);
+      want.recon = Math.min(want.recon, 1);
+      want.coastal = Math.max(want.coastal, Math.min(5, 2 + Math.floor(this.enemyFleetPower() / 12)));
+    }
     // Save up for the warship we want: cheaper ground and air units only spend what is left over,
     // except when we have nothing to land with at all.
     let reserve = 0;
@@ -481,11 +513,12 @@ export class Bot {
           best = type;
         }
       }
-      // Short of troops to land: that comes before batteries.
+      // Short of troops to land: that comes before batteries. Under pressure, batteries first.
       if (cat === 'ground' && short) best = 'infantry';
+      if (cat === 'ground' && pressed && (count.get('coastal') ?? 0) < want.coastal) best = 'coastal';
       if (!best) continue;
       const cost = unitCost(best, p.faction);
-      const urgent = best === 'infantry' && short;
+      const urgent = (best === 'infantry' && short) || (best === 'coastal' && pressed);
       if (p.cash - (urgent ? 0 : reserve) >= cost) {
         g.command(this.pid, { c: 'build', cat, type: best });
         count.set(best, (count.get(best) ?? 0) + 1);
@@ -564,6 +597,27 @@ export class Bot {
       out.push({ island, x, y, target: open.slice().sort((a, b) => (SITE_VALUE[b.type] ?? 1) - (SITE_VALUE[a.type] ?? 1))[0], value, dist, naval, ground, enemyHeld, centre, contested: enemyHeld || naval > 0 || ground > 0 });
     }
     return out;
+  }
+
+  /** Strength of the enemy fleet we know of (seen in the last 3 minutes). */
+  private enemyFleetPower(): number {
+    let p = 0;
+    for (const m of this.intel.values()) if (this.game.time - m.t <= 180 && (m.type === 'destroyer' || m.type === 'battleship' || m.type === 'carrier')) p += NAVAL_POWER[m.type] ?? 0;
+    return p;
+  }
+
+  /** Power of each enemy warship type we know of (seen in the last 3 minutes). */
+  private enemyFleetMix(): Record<'destroyer' | 'battleship' | 'carrier' | 'sub', number> {
+    const m = { destroyer: 0, battleship: 0, carrier: 0, sub: 0 };
+    for (const x of this.intel.values()) if (this.game.time - x.t <= 180 && x.type in m) m[x.type as keyof typeof m] += NAVAL_POWER[x.type] ?? 0;
+    return m;
+  }
+
+  /** The enemy fleet we know of outweighs ours. */
+  private underPressure(): boolean {
+    let ours = 0;
+    for (const u of this.mine()) if (u.type === 'destroyer' || u.type === 'battleship' || u.type === 'carrier') ours += this.shipPower(u);
+    return this.enemyFleetPower() > ours * 0.9 + 3;
   }
 
   /** Ships with a hold, not busy, healthy. */
@@ -871,16 +925,29 @@ export class Bot {
     const myTeam = g.players[this.pid].team;
     const surface = ships.filter((s) => s.type !== 'sub' && s.type !== 'carrier' && s.order.k !== 'attack');
     const power = surface.reduce((a, u) => a + this.shipPower(u), 0);
-    // Threatened island of ours that we can relieve?
+    // Threatened island of ours that we can relieve? If the threat is too strong, gather at our
+    // port nearest to it instead, under the batteries, and fight there.
     let rally: { x: number; y: number } | null = null;
     let worst = 0;
+    let outgunned: { x: number; y: number } | null = null;
+    let worstOut = 0;
     for (const s of g.sites) {
       if (s.owner < 0 || g.team(s.owner) !== myTeam) continue;
-      const th = this.navalThreat(s.x, s.y, 20);
-      if (th > worst && th * 1.1 <= power) {
-        worst = th;
-        rally = { x: s.x, y: s.y };
+      const th = this.navalThreat(s.x, s.y, 25, 90);
+      if (th <= 0) continue;
+      if (th * 1.1 <= power) {
+        if (th > worst) {
+          worst = th;
+          rally = { x: s.x, y: s.y };
+        }
+      } else if (th > worstOut) {
+        worstOut = th;
+        outgunned = { x: s.x, y: s.y };
       }
+    }
+    if (!rally && (outgunned || this.underPressure())) {
+      const near = outgunned ?? { x: hq.x, y: hq.y };
+      rally = this.nearestOwnPort(near.x, near.y) ?? { x: hq.x, y: hq.y };
     }
     if (!rally) {
       // Screen the next objective from our side, or join the operation's staging point.

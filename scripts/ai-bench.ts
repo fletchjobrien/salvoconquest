@@ -4,6 +4,7 @@
 //   npm run bench:ai                       self-play: current AI vs itself
 //   VS=HEAD~1 npm run bench:ai             head-to-head: current AI vs the AI at a git revision
 //   GAMES=16 MIN=20 CHECK=5 npm run bench:ai
+//   VS=rush npm run bench:ai              current AI vs an aggressive one-fleet rusher (human-like)
 //
 // Each pairing is played with the AIs swapping sides and factions, so map and faction luck cancel out.
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
@@ -13,6 +14,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Game } from '../src/shared/game';
 import { Bot } from '../src/shared/ai';
+import { makeRusher } from './rush-bot';
 import { THEMES, islandAt } from '../src/shared/map';
 import type { Faction } from '../src/shared/defs';
 
@@ -25,6 +27,8 @@ interface Job {
   minutes: number;
   check: number;
   baseline?: string;
+  /** The 'old' side is the rusher test opponent (VS=rush). */
+  rush?: boolean;
 }
 
 interface Snap {
@@ -62,7 +66,7 @@ async function play(job: Job): Promise<Result> {
     { name: 'B', faction: job.factions[1], team: 1, slot: 2, bot: true },
   ]);
   const Old = job.baseline ? ((await import(job.baseline)) as { Bot: typeof Bot }).Bot : Bot;
-  const bots = g.players.map((p) => (job.ais[p.id] === 'old' ? new Old(g, p.id) : new Bot(g, p.id)));
+  const bots = g.players.map((p) => (job.ais[p.id] === 'old' ? (job.rush ? makeRusher(g, p.id) : new Old(g, p.id)) : new Bot(g, p.id)));
   // Captures from the enemy: count sites whose owner flips from one player to the other.
   const fromEnemy = [0, 0];
   const owner = g.sites.map((s) => s.owner);
@@ -129,7 +133,7 @@ if (!isMainThread) {
   const CHECK = Number(process.env.CHECK ?? 5);
   const VS = process.env.VS;
   let baseline: string | undefined;
-  if (VS) {
+  if (VS && VS !== 'rush') {
     // Extract the AI at that revision and bundle it against the current game code.
     const dir = resolve('.wrangler/bench');
     mkdirSync(dir, { recursive: true });
@@ -153,6 +157,7 @@ if (!isMainThread) {
       minutes: MIN,
       check: CHECK,
       baseline,
+      rush: VS === 'rush',
     });
   }
   const t0 = Date.now();

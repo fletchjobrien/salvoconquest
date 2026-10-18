@@ -419,6 +419,7 @@ export const CRIT = {
 export const MAP_SIZE = 160; // km
 export const TICK = 0.1; // s
 export const HQ_INCOME = 3; // $/s
+export const MERCHANT_SUNK_WAIT = 45; // s before a site sends a new merchant after one is sunk
 export const MERCHANT_PAYOUT = 450;
 /** Deployment budget (prices are tripled, see COST_SCALE); what you don't spend carries into battle. */
 export const START_CASH = 6500;

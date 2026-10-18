@@ -8,6 +8,7 @@ import {
   FACTION_MOD,
   Faction,
   HQ_INCOME,
+  MERCHANT_SUNK_WAIT,
   Loadouts,
   MODULES,
   ModuleDef,
@@ -2825,6 +2826,9 @@ export class Game {
     t.hp = 0;
     const owner = this.players[t.owner];
     if (t.type !== 'merchant' && t.type !== 'lander') owner.losses++;
+    // A sunk merchant's site waits before it sends the next one, so a fleet parked on a lane does
+    // not sink a fresh merchant every few seconds.
+    if (t.type === 'merchant' && t.site !== undefined && this.sites[t.site]) this.sites[t.site].merchantCd = MERCHANT_SUNK_WAIT;
     if (by >= 0 && by !== t.owner && t.type !== 'lander') this.players[by].kills++;
     const killer = this.units.get(t.lastHitUnit);
     if (killer && killer.team !== t.team) killer.kills++;
