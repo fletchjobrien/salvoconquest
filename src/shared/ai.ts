@@ -72,6 +72,8 @@ export class Bot {
   /** Troops wanted in one place for the next operation. */
   private troopGoal = 0;
   private opOrderAt = 0;
+  /** Next time a strike package may be formed. */
+  private strikeAt = 0;
   /** Islands we were beaten back from, until when. */
   private avoid = new Map<number, number>();
   /** Ships ordered to break off: no new engagements until then. */
@@ -242,6 +244,57 @@ export class Bot {
     const ourPower = (x: number, y: number) => ships.reduce((a, u) => a + (u.type !== 'sub' && Math.hypot(u.x - x, u.y - y) < 20 ? power(u) : 0), 0);
     const theirPower = (x: number, y: number) =>
       navalFoes.reduce((a, { e, k }) => a + (e.type !== 'merchant' && e.type !== 'lander' && e.type !== 'sub' && Math.hypot(k.x - x, k.y - y) < 15 ? power(e) : 0), 0);
+    // Surface combatants near each other fight as one group: one target at a time, every ship on
+    // it, missiles weapons-free against defended ships so the salvo saturates their SAMs. A
+    // group that is clearly outgunned falls back on its port (batteries, SAM cover) together,
+    // instead of being picked off one ship at a time.
+    const surf = ships.filter((s) => s.type === 'destroyer' || s.type === 'battleship');
+    let gx = 0;
+    let gy = 0;
+    for (const s of surf) {
+      gx += s.x / (surf.length || 1);
+      gy += s.y / (surf.length || 1);
+    }
+    const group = new Set(surf.filter((s) => Math.hypot(s.x - gx, s.y - gy) < 25).map((s) => s.id));
+    let groupTarget: Unit | null = null;
+    const myTeam = g.players[this.pid].team;
+    const cover = (x: number, y: number) => {
+      let c = 0;
+      for (const u of mine) if (u.type === 'coastal' && Math.hypot(u.x - x, u.y - y) < 18) c += 4;
+      for (const st of g.sites) if (st.type === 'battery' && st.owner >= 0 && g.team(st.owner) === myTeam && Math.hypot(st.x - x, st.y - y) < 18) c += 5;
+      return c;
+    };
+    if (group.size >= 2) {
+      const ours = surf.filter((s) => group.has(s.id)).reduce((a, u) => a + power(u), 0) + cover(gx, gy);
+      const theirs = theirPower(gx, gy) + navalFoes.reduce((a, { e, k }) => a + (e.type !== 'merchant' && e.type !== 'lander' && e.type !== 'sub' && Math.hypot(k.x - gx, k.y - gy) >= 15 && Math.hypot(k.x - gx, k.y - gy) < 24 ? power(e) * 0.6 : 0), 0);
+      if (theirs > ours * 1.25 && theirs > 0) {
+        const hqs = this.home();
+        const port = this.nearestOwnPort(gx, gy) ?? (hqs ? { x: hqs.x, y: hqs.y } : null);
+        if (port) {
+          const ids = surf.filter((s) => group.has(s.id)).map((s) => s.id);
+          g.command(this.pid, { c: 'move', ids, x: port.x, y: port.y, mode: 'move' });
+          for (const id of ids) this.noEngage.set(id, g.time + 30);
+          this.stats.breakoffs++;
+          group.clear();
+        }
+      } else {
+        let bs = 0;
+        const hasDdg = surf.some((s) => group.has(s.id) && s.type === 'destroyer');
+        for (const { e, k } of navalFoes) {
+          const d = Math.hypot(k.x - gx, k.y - gy);
+          if (d > 30) continue;
+          let match = e.type === 'sub' ? (hasDdg ? 2.5 : 0) : e.type === 'merchant' ? 0.6 : e.type === 'lander' ? 0.8 : 1;
+          if (match <= 0) continue;
+          if (d > 14 && ourPower(k.x, k.y) + cover(k.x, k.y) < theirPower(k.x, k.y) * 0.9) continue;
+          if (e.type === 'battleship' || e.type === 'carrier') match *= 1.2;
+          const score = ((VALUE[e.type] ?? 1) * match * (1.6 - (e.hp / e.maxHp) * 0.6)) / (1 + d / 14);
+          if (score > bs) {
+            bs = score;
+            groupTarget = e;
+          }
+        }
+      }
+    }
     for (const s of ships) {
       const near = (types: UnitType[], r: number) => navalFoes.filter(({ e, k }) => types.includes(e.type) && Math.hypot(k.x - s.x, k.y - s.y) < r);
       if (s.type === 'battleship' || s.type === 'carrier') {
@@ -267,7 +320,13 @@ export class Bot {
         continue;
       }
       if (s.type === 'carrier') continue;
-      // Surface combatants: score every naval contact in reach.
+      if (groupTarget && group.has(s.id) && !(groupTarget.type === 'sub' && s.type !== 'destroyer')) {
+        attack(s, groupTarget);
+        const defended = groupTarget.type === 'destroyer' || groupTarget.type === 'battleship' || groupTarget.type === 'carrier';
+        s.fireMode = defended ? 2 : 1;
+        continue;
+      }
+      // Surface combatants on their own: score every naval contact in reach.
       let best: Unit | null = null;
       let bs = 0;
       for (const { e, k } of navalFoes) {
@@ -299,7 +358,28 @@ export class Bot {
     const samSites = known.filter(({ e }) => e.type === 'destroyer' || e.type === 'battleship' || e.type === 'carrier' || e.type === 'sam').map(({ k }) => ({ x: k.x, y: k.y }));
     for (const st of g.sites) if (st.type === 'battery' && st.owner >= 0 && g.team(st.owner) !== g.players[this.pid].team) samSites.push({ x: st.x, y: st.y });
     const samThreat = (x: number, y: number, r = 22) => samSites.filter((p) => Math.hypot(p.x - x, p.y - y) < r).length;
+    // Strike package: two or more strike flights hit one ship together (value against its air
+    // defence), with fighters escorting the lead flight.
+    const inPackage = new Set<number>();
+    const strikes = planes.filter((p) => p.type === 'strike' && p.order.k !== 'attack' && p.fuel > p.fuelMax * 0.6 && p.weapons.some((w) => w.max < 0 || w.ammo > 0));
+    if (strikes.length >= 2 && g.time > this.strikeAt) {
+      const t = known
+        .filter(({ e, k }) => UNITS[e.type].domain === 'sea' && e.type !== 'lander' && Math.hypot(k.x - anchor.x, k.y - anchor.y) < 70)
+        .map(({ e, k }) => ({ e, score: ((VALUE[e.type] ?? 1) * (1.6 - (e.hp / e.maxHp) * 0.6)) / (1 + samThreat(k.x, k.y, 16) * 0.7) / (1 + Math.hypot(k.x - anchor.x, k.y - anchor.y) / 40) }))
+        .sort((a, b) => b.score - a.score)[0];
+      if (t) {
+        this.strikeAt = g.time + 30;
+        for (const p of strikes) {
+          attack(p, t.e);
+          inPackage.add(p.id);
+        }
+        const fighters = planes.filter((p) => p.type === 'fighter' && p.order.k !== 'attack' && p.fuel > p.fuelMax * 0.5).slice(0, 2);
+        if (fighters.length) g.command(this.pid, { c: 'escort', ids: fighters.map((f) => f.id), target: strikes[0].id });
+        for (const f of fighters) inPackage.add(f.id);
+      }
+    }
     for (const pl of planes) {
+      if (inPackage.has(pl.id) || pl.order.k === 'escort') continue;
       if (pl.fuel < pl.fuelMax * 0.35) continue; // bingo logic brings it home
       if (pl.type === 'strike') {
         // Strike only what is lightly defended (the target's own SAMs count as one).
@@ -531,7 +611,7 @@ export class Bot {
       if (tr.state === 'sailing' && s.cargo.length === 0 && s.order.k !== 'unload') return false;
       return tr.state !== 'done';
     });
-    let plans = this.islandPlans().filter((p) => !p.contested && !this.transports.some((t) => t.island === p.island));
+    let plans = this.islandPlans().filter((p) => !p.contested && !this.transports.some((t) => t.island === p.island) && !((this.avoid.get(p.island) ?? 0) > g.time));
     const hq = this.home();
     // Troops grouped by the island they wait on. Home groups wait for a full load; an outpost
     // sends what it has.
@@ -786,7 +866,7 @@ export class Bot {
     const hq = this.home();
     if (!hq) return;
     const busy = this.busyShips();
-    const ships = this.mine().filter((u) => (u.type === 'destroyer' || u.type === 'battleship' || u.type === 'carrier' || u.type === 'sub') && !busy.has(u.id) && !u.retreating && u.inside < 0);
+    const ships = this.mine().filter((u) => (u.type === 'destroyer' || u.type === 'battleship' || u.type === 'carrier' || u.type === 'sub') && !busy.has(u.id) && !u.retreating && u.inside < 0 && !((this.noEngage.get(u.id) ?? 0) > g.time));
     if (!ships.length) return;
     const myTeam = g.players[this.pid].team;
     const surface = ships.filter((s) => s.type !== 'sub' && s.type !== 'carrier' && s.order.k !== 'attack');
