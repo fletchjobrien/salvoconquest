@@ -15,10 +15,6 @@ export interface Settings {
   edgeScroll: boolean;
   bots: number;
   teams: 'ffa' | '2v2';
-  /** Training mode: record skirmishes for the AI to learn from. */
-  train: boolean;
-  /** AI players follow the style learned from recorded games. */
-  mimic: boolean;
 }
 
 const KEY = 'salvo.settings.v1';
@@ -35,8 +31,6 @@ const DEFAULTS: Settings = {
   edgeScroll: true,
   bots: 1,
   teams: 'ffa',
-  train: false,
-  mimic: false,
 };
 
 export const settings: Settings = (() => {

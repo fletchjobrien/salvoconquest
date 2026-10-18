@@ -1,8 +1,6 @@
 // Connections: online (WebSocket to the room Durable Object) or local (simulation runs in this tab).
 import { Game } from '../shared/game';
 import { Bot } from '../shared/ai';
-import { Recorder, type StyleProfile } from '../shared/style';
-import { saveRecording } from './training';
 import type { ClientMsg, ServerMsg, StartInfo } from '../shared/protocol';
 import { TICK, Faction, Loadouts } from '../shared/defs';
 import type { Theme } from '../shared/map';
@@ -80,10 +78,6 @@ export interface SkirmishSettings {
   bots: { faction: Faction }[];
   teams: 'ffa' | '2v2';
   loadouts: Loadouts;
-  /** Training: record this game (our commands and state) for the AI to learn from. */
-  record?: boolean;
-  /** Training: style the AI players follow, from earlier recordings. */
-  style?: StyleProfile | null;
 }
 
 const BOT_NAMES = ['ADM. HALSEY', 'CDR. ZHENG', 'CAPT. NIMITZ', 'ADM. YI', 'CDR. RICKOVER'];
@@ -99,9 +93,6 @@ export class LocalConn implements Conn {
   private bots: Bot[];
   private timer: ReturnType<typeof setInterval> | null = null;
   private info: StartInfo;
-  private recorder: Recorder | null = null;
-  /** Called when a training recording has been saved, with the number of games now stored. */
-  onRecorded: (games: number) => void = () => {};
 
   constructor(s: SkirmishSettings) {
     const n = 1 + s.bots.length;
@@ -113,8 +104,7 @@ export class LocalConn implements Conn {
     ];
     const seed = (Math.random() * 2 ** 31) | 0;
     this.game = new Game(seed, s.theme, players);
-    this.bots = this.game.players.filter((p) => p.bot).map((p) => new Bot(this.game, p.id, s.style ?? null));
-    if (s.record) this.recorder = new Recorder(this.game, 0);
+    this.bots = this.game.players.filter((p) => p.bot).map((p) => new Bot(this.game, p.id));
     this.info = {
       seed,
       theme: s.theme,
@@ -139,13 +129,11 @@ export class LocalConn implements Conn {
         acc -= TICK;
         for (const b of this.bots) b.tick();
         g.step();
-        this.recorder?.tick();
         this.onMessage(g.snapshotFor(0, first));
         first = false;
         g.flushEvents();
         if (g.over) {
           const winners = g.players.filter((p) => p.team === g.winnerTeam).map((p) => p.id);
-          this.saveRecording(winners.includes(0) ? 'win' : 'loss');
           this.onMessage({ t: 'end', winner: g.winnerTeam, winners, stats: g.results() });
           this.close();
           return;
@@ -155,10 +143,7 @@ export class LocalConn implements Conn {
   }
 
   send(msg: ClientMsg) {
-    if (msg.t === 'cmd') {
-      this.recorder?.command(msg.cmd);
-      this.game.command(0, msg.cmd);
-    }
+    if (msg.t === 'cmd') this.game.command(0, msg.cmd);
   }
 
   /** Let the AI play for you (handy for demos and spectating). */
@@ -166,17 +151,7 @@ export class LocalConn implements Conn {
     if (!this.bots.some((b) => b.pid === 0)) this.bots.push(new Bot(this.game, 0));
   }
 
-  private saveRecording(result: 'win' | 'loss' | 'quit') {
-    const r = this.recorder;
-    this.recorder = null;
-    // Games abandoned in the first 4 minutes teach little.
-    if (!r || (result === 'quit' && this.game.time < 240)) return;
-    r.finish(result);
-    this.onRecorded(saveRecording(r.rec));
-  }
-
   close() {
-    this.saveRecording('quit');
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
   }

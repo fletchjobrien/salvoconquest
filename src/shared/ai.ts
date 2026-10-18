@@ -3,7 +3,6 @@ import { BUILDABLE, UNITS, UnitType, unitCost, counterOf } from './defs';
 import { canDeployAt, deployZone } from './game';
 import type { Contact, Game, Unit, SiteState } from './game';
 import { cellOf, islandAt } from './map';
-import { PHASES, type StyleProfile } from './style';
 
 /** How dangerous a unit is to a fleet (hp-weighted when it is ours). */
 const NAVAL_POWER: Partial<Record<UnitType, number>> = { battleship: 8, destroyer: 5, sub: 3, carrier: 3, coastal: 4, strike: 3 };
@@ -83,8 +82,6 @@ export class Bot {
   constructor(
     private game: Game,
     readonly pid: number,
-    /** A human's play style to follow (training mode); null plays the built-in style. */
-    private style: StyleProfile | null = null,
   ) {
     this.nextThink = 2 + pid * 0.37;
   }
@@ -141,13 +138,7 @@ export class Bot {
       { type: 'infantry', at: bk ?? hq },
       { type: 'coastal', at: hq },
     ];
-    // Training: open the way the human does.
-    if (this.style?.deploy.length) {
-      const at = (t: UnitType) => (UNITS[t].category === 'naval' ? nb?.dock ?? hq : UNITS[t].category === 'air' ? ab ?? hq : t === 'infantry' ? bk ?? hq : hq);
-      plan.length = 0;
-      for (const t of this.style.deploy) plan.push({ type: t, at: at(t) });
-    }
-    const reserve = this.style?.deploy.length ? 0 : p.cash * 0.2;
+    const reserve = p.cash * 0.2;
     for (const it of plan) {
       if (p.cash - unitCost(it.type, p.faction) < reserve) continue;
       // Spiral out from the anchor to the first legal spot.
@@ -396,24 +387,6 @@ export class Bot {
     want.fighter += Math.min(3, seen.strike);
     want.sub += Math.min(3, seen.battleship + seen.carrier);
     if (seen.destroyer >= 3 && t > 240) want.battleship = Math.max(want.battleship, 1);
-    // Training: keep the volume per category but split it the way the human spends money.
-    if (this.style) {
-      let ph = PHASES.findIndex(([a, b]) => t >= a && t < b);
-      while (ph > 0 && !Object.keys(this.style.mix[ph] ?? {}).length) ph--;
-      const mix = this.style.mix[ph] ?? {};
-      if (Object.keys(mix).length) {
-        for (const cat of ['naval', 'ground', 'air'] as const) {
-          const types = BUILDABLE[cat].filter((x) => x !== 'infantry');
-          const volume = types.reduce((a, x) => a + want[x], 0);
-          // Spend share to unit share: divide by price.
-          const w = types.map((x) => (mix[x] ?? 0) / unitCost(x, p.faction));
-          const sum = w.reduce((a, b) => a + b, 0);
-          types.forEach((x, i) => {
-            want[x] = sum > 0 ? Math.round((volume * w[i]) / sum + 0.3) : 0;
-          });
-        }
-      }
-    }
     // Save up for the warship we want: cheaper ground and air units only spend what is left over,
     // except when we have nothing to land with at all.
     let reserve = 0;
@@ -511,17 +484,6 @@ export class Bot {
       out.push({ island, x, y, target: open.slice().sort((a, b) => (SITE_VALUE[b.type] ?? 1) - (SITE_VALUE[a.type] ?? 1))[0], value, dist, naval, ground, enemyHeld, centre, contested: enemyHeld || naval > 0 || ground > 0 });
     }
     return out;
-  }
-
-  /** Earliest time for a planned attack: 5 min, or about when the human first takes an enemy island. */
-  private attackFrom(): number {
-    const c = this.style?.firstEnemyCapture ?? -1;
-    return c > 0 ? Math.max(120, Math.min(600, c - 120)) : 300;
-  }
-
-  /** Naval superiority needed before an attack: 1.4x, down to 1.0x for an aggressive human. */
-  private edge(): number {
-    return this.style ? 1.4 - 0.4 * this.style.aggression : 1.4;
   }
 
   /** Ships with a hold, not busy, healthy. */
@@ -652,8 +614,8 @@ export class Bot {
       // Only fights we expect to win: clear naval superiority at the target.
       const best = plans
         .filter((p) => p.contested && !(this.avoid.get(p.island)! > g.time))
-        .filter((p) => g.time > this.attackFrom() || p.centre || easy === 0)
-        .filter((p) => power >= p.naval * this.edge() + 4)
+        .filter((p) => g.time > 300 || p.centre || easy === 0)
+        .filter((p) => power >= p.naval * 1.4 + 4)
         .sort((a, b) => b.value / (1 + b.dist / 25) / (1 + b.naval / 10) - a.value / (1 + a.dist / 25) / (1 + a.naval / 10))[0];
       // Build up the landing force first; production reads this.
       this.troopGoal = best && fleet.length >= 2 ? needFor(best) : 0;
@@ -843,8 +805,7 @@ export class Bot {
     if (!rally) {
       // Screen the next objective from our side, or join the operation's staging point.
       const f = this.op ? { x: this.op.sx, y: this.op.sy } : this.frontPoint();
-      const fw = this.style && this.style.fleetFwd >= 0 ? Math.max(0.3, Math.min(0.9, 0.25 + this.style.fleetFwd)) : 0.5;
-      rally = { x: hq.x + (f.x - hq.x) * fw, y: hq.y + (f.y - hq.y) * fw };
+      rally = { x: hq.x + (f.x - hq.x) * 0.5, y: hq.y + (f.y - hq.y) * 0.5 };
     }
     if (surface.length) g.command(this.pid, { c: 'move', ids: surface.map((s) => s.id), x: rally.x, y: rally.y });
     const cvs = ships.filter((s) => s.type === 'carrier');

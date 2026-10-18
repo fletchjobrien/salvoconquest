@@ -6,7 +6,6 @@ import { World } from './state';
 import { Match } from './match';
 import { LocalConn, OnlineConn, Conn } from './net';
 import { titleScreen, skirmishScreen, LobbyScreen, settingsScreen, endScreen, pauseScreen } from './ui/menu';
-import { styleProfile } from './training';
 import { LoadoutEditor } from './ui/loadout';
 import { settings } from './settings';
 import { audio } from './audio/sfx';
@@ -60,9 +59,6 @@ function startMenuScene() {
   menuScene = { scene, rig, world };
 }
 
-/** Training games stored after the last match (0: none recorded). */
-let trained = 0;
-
 function showTitle() {
   clearUi();
   if (match) {
@@ -109,18 +105,7 @@ function showSkirmish() {
         const f = settings.teams === '2v2' && i === 1 ? settings.faction : i % 2 === 0 ? other : FACTIONS[Math.floor(Math.random() * 2)];
         bots.push({ faction: f });
       }
-      const lc = new LocalConn({
-        name: settings.name,
-        faction: settings.faction,
-        theme: settings.theme,
-        bots,
-        teams: settings.teams,
-        loadouts: getLoadouts(settings.faction),
-        record: settings.train,
-        style: settings.mimic ? styleProfile(settings.faction) : null,
-      });
-      trained = 0;
-      lc.onRecorded = (n) => (trained = n);
+      const lc = new LocalConn({ name: settings.name, faction: settings.faction, theme: settings.theme, bots, teams: settings.teams, loadouts: getLoadouts(settings.faction) });
       conn = lc;
       lc.onMessage = onServer;
       lc.start();
@@ -188,18 +173,12 @@ function onServer(m: ServerMsg) {
       if (m.t === 'end' && match) {
         const me = match.world.me;
         setTimeout(() => {
-          endScreen(
-            ui,
-            m,
-            me,
-            {
-              menu: () => {
-                history.replaceState(null, '', location.pathname);
-                showTitle();
-              },
+          endScreen(ui, m, me, {
+            menu: () => {
+              history.replaceState(null, '', location.pathname);
+              showTitle();
             },
-            trained,
-          );
+          });
         }, 1800);
       }
   }

@@ -251,19 +251,6 @@ input[type='range'] {
   height: 3px;
   margin: 8px 0 0;
 }
-.card.off {
-  opacity: 0.45;
-  cursor: default;
-}
-.train-note {
-  margin-top: 8px;
-  font-size: 10px;
-  color: var(--dim);
-  line-height: 1.6;
-}
-.train-note a {
-  color: var(--accent);
-}
 .panel {
   background: var(--panel);
   border: 1px solid var(--line);

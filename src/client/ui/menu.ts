@@ -4,7 +4,6 @@ import { THEMES, THEME_INFO, Theme } from '../../shared/map';
 import type { LobbyState, ServerMsg } from '../../shared/protocol';
 import { FACTION_STYLE, PALETTES, hex } from '../theme';
 import { settings, saveSettings } from '../settings';
-import { clearRecordings, downloadRecordings, loadRecordings } from '../training';
 import { audio } from '../audio/sfx';
 
 const h = (html: string): HTMLElement => {
@@ -108,7 +107,6 @@ export function skirmishScreen(ui: HTMLElement, a: { start(): void; back(): void
     <section><div class="label">Your side</div><div id="fac"></div></section>
     <section><div class="label">Theatre</div><div id="thm"></div></section>
     <section><div class="label">Opponents</div><div class="menu-row" id="opp"></div></section>
-    <section><div class="label">AI training</div><div class="menu-row" id="train"></div><div class="train-note" id="train-note"></div></section>
     <div class="foot"><button class="btn" data-a="back">Back</button><button class="btn primary" data-a="start">Deploy ▸</button></div>
   </div></div>`);
   el.querySelector('#fac')!.appendChild(
@@ -140,43 +138,6 @@ export function skirmishScreen(ui: HTMLElement, a: { start(): void; back(): void
       saveSettings();
     });
     opp.appendChild(c);
-  }
-  // Training: record this game, and/or let the AI play the way the recorded games were played.
-  const train = el.querySelector('#train')!;
-  const note = el.querySelector('#train-note')!;
-  const games = loadRecordings().length;
-  const toggles: ['train' | 'mimic', string, string][] = [
-    ['train', 'Record my game', 'Your orders, builds and positions are saved so the AI can learn your style.'],
-    ['mimic', 'AI copies my style', games ? `From ${games} recorded game${games > 1 ? 's' : ''}.` : 'Record a game first.'],
-  ];
-  for (const [key, label, hint] of toggles) {
-    const c = h(`<div class="card ${settings[key] && (key === 'train' || games) ? 'sel' : ''}" style="min-width:160px;flex:1"><div class="h">${label}</div><div class="d">${hint}</div></div>`);
-    if (key === 'mimic' && !games) c.classList.add('off');
-    c.addEventListener('click', () => {
-      if (key === 'mimic' && !games) return;
-      settings[key] = !settings[key];
-      c.classList.toggle('sel', settings[key]);
-      saveSettings();
-    });
-    train.appendChild(c);
-  }
-  if (games) {
-    note.innerHTML = `${games} game${games > 1 ? 's' : ''} recorded. <a href="#" data-a="dl">Download training file</a> (send it to improve the AI) · <a href="#" data-a="clr">Clear</a>`;
-    note.querySelector('[data-a="dl"]')!.addEventListener('click', (e) => {
-      e.preventDefault();
-      downloadRecordings();
-    });
-    note.querySelector('[data-a="clr"]')!.addEventListener('click', (e) => {
-      e.preventDefault();
-      if (!confirm('Delete all recorded training games?')) return;
-      clearRecordings();
-      settings.mimic = false;
-      saveSettings();
-      note.textContent = 'Recordings cleared.';
-      const m = train.querySelectorAll('.card')[1];
-      m?.classList.remove('sel');
-      m?.classList.add('off');
-    });
   }
   el.querySelector('[data-a="back"]')!.addEventListener('click', a.back);
   el.querySelector('[data-a="start"]')!.addEventListener('click', a.start);
@@ -301,21 +262,16 @@ export function settingsScreen(ui: HTMLElement, a: { back(): void; apply(): void
   return el;
 }
 
-export function endScreen(ui: HTMLElement, m: ServerMsg & { t: 'end' }, me: number, a: { menu(): void }, trained = 0) {
+export function endScreen(ui: HTMLElement, m: ServerMsg & { t: 'end' }, me: number, a: { menu(): void }) {
   const won = m.winners.includes(me);
   const rows = m.stats.map((s) => `<tr><td>${s.name}${s.id === me ? ' ◂' : ''}</td><td>${s.kills}</td><td>${s.losses}</td><td>$${s.earned.toLocaleString('en-US')}</td><td>${m.winners.includes(s.id) ? 'VICTORY' : 'DEFEAT'}</td></tr>`).join('');
   const el = h(`<div class="screen"><div class="dialog panel" style="width:min(620px,94vw)">
     <div class="title" style="font-size:40px;letter-spacing:.4em;color:${won ? 'var(--good)' : 'var(--hostile)'}">${won ? 'VICTORY' : 'DEFEAT'}</div>
     <div class="subtitle" style="margin-bottom:16px">${won ? 'The archipelago is yours' : 'Your fleet has been driven from the sea'}</div>
     <table class="endstats"><tr><th>COMMANDER</th><th>KILLS</th><th>LOSSES</th><th>EARNED</th><th>RESULT</th></tr>${rows}</table>
-    ${trained ? `<div class="train-note">Training game saved (${trained} recorded). <a href="#" data-a="dl">Download training file</a></div>` : ''}
     <div class="foot"><span></span><button class="btn primary" data-a="menu">Return to menu</button></div>
   </div></div>`);
   el.querySelector('[data-a="menu"]')!.addEventListener('click', a.menu);
-  el.querySelector('[data-a="dl"]')?.addEventListener('click', (e) => {
-    e.preventDefault();
-    downloadRecordings();
-  });
   sfxBind(el);
   ui.appendChild(el);
   audio.play(won ? 'capture' : 'lost');
