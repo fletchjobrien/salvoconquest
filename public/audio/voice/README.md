@@ -4,7 +4,7 @@ Drop audio files here and run `npm run build` (it regenerates `manifest.json`).
 Supported: `.mp3 .ogg .wav .m4a .webm`. Keep each line short (0.5–2 s) and record with a little energy.
 The game adds the radio band-pass, light distortion and squelch clicks, so record clean audio.
 
-Naming: `<category>/<event>_<n>.<ext>`. Add as many variants as you like (`_1`, `_2`, …); one is picked at random.
+Naming: `<category>/<event>_<n>.<ext>`. Add as many variants as you like (`_1`, `_2`, …); one is picked at random. The number picks the subtitle: `select_2` shows the second `select` line below.
 For a faction-specific voice, put the files under `coalition/` or `union/`, for example `union/naval/select_1.mp3`.
 
 ## naval/

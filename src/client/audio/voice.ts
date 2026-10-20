@@ -81,7 +81,9 @@ class VoiceBank {
     const lines = LINES[cat][ev];
     const files = this.files(faction, cat, ev);
     const idx = Math.floor(Math.random() * Math.max(files.length, lines?.length ?? 1));
-    const text = lines?.[idx % (lines?.length || 1)] ?? '';
+    // A recording's number names its line (select_2 is the second select line), so the subtitle matches.
+    const num = files.length ? Number(/_(\d+)\.\w+$/.exec(files[idx % files.length])?.[1]) : NaN;
+    const text = lines?.[num >= 1 && num <= lines.length ? num - 1 : idx % (lines?.length || 1)] ?? '';
     if (text) this.onSubtitle(cat, text, who);
     this.busyUntil = now + 1400;
     if (!ctx) return;
