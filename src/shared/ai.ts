@@ -12,6 +12,8 @@ const LINE = new Set<UnitType>(['frigate', 'destroyer', 'cruiser', 'battleship']
 const CAPITAL = new Set<UnitType>(['cruiser', 'battleship', 'carrier']);
 /** Enemy surface warships we count as fleet power. */
 const WARSHIP = new Set<UnitType>(['corvette', 'frigate', 'destroyer', 'cruiser', 'battleship', 'carrier']);
+/** A remembered sighting counts half after this many seconds: the ship has likely moved on. */
+const SIGHTING_HALF_LIFE = 60;
 /** What an island's buildings are worth to us. */
 const SITE_VALUE: Partial<Record<string, number>> = { resource: 3, hq: 8, dockyard: 2.5, navalbase: 2.5, airbase: 2, barracks: 2, battery: 2, radar: 1.5 };
 
@@ -45,6 +47,8 @@ interface Operation {
   since: number;
   startPower: number;
   need: number;
+  /** Strength the task force should have; new warships join only while it is below this. */
+  want: number;
 }
 
 interface Transport {
@@ -116,7 +120,7 @@ export class Bot {
     this.operation();
     this.grabs();
     this.fleet();
-    this.subRaids();
+    this.raidsAndRefits();
     this.air();
     this.groundIdle();
   }
@@ -218,6 +222,7 @@ export class Bot {
     const busy = new Set(this.transports.map((t) => t.ship));
     for (const [id, until] of this.noEngage) if (until > g.time) busy.add(id);
     if (this.op) for (const id of this.op.ships) busy.add(id);
+    for (const [id, r] of this.raids) if (r.home) busy.add(id);
     // Remember where merchants died: those lanes need air cover.
     const alive = new Set<number>();
     for (const u of mine) if (u.type === 'merchant') alive.add(u.id);
@@ -249,7 +254,9 @@ export class Bot {
     const navalFoes = known.filter(({ e }) => UNITS[e.type].domain === 'sea' || e.type === 'sub');
     // Local strength around a point: fight where we are at least about as strong, never piecemeal.
     const power = (u: Unit) => (VALUE[u.type] ?? 1) * (u.hp / u.maxHp);
-    const ourPower = (x: number, y: number) => ships.reduce((a, u) => a + (u.type !== 'sub' && Math.hypot(u.x - x, u.y - y) < 20 ? power(u) : 0), 0);
+    // Our own ships also count their offensive ammunition left (the enemy's we cannot know).
+    const ownPower = (u: Unit) => power(u) * (0.4 + 0.6 * this.offAmmo(u));
+    const ourPower = (x: number, y: number) => ships.reduce((a, u) => a + (u.type !== 'sub' && Math.hypot(u.x - x, u.y - y) < 20 ? ownPower(u) : 0), 0);
     const theirPower = (x: number, y: number) =>
       navalFoes.reduce((a, { e, k }) => a + (e.type !== 'merchant' && e.type !== 'lander' && e.type !== 'sub' && Math.hypot(k.x - x, k.y - y) < 15 ? power(e) : 0), 0);
     // Surface combatants near each other fight as one group: one target at a time, every ship on
@@ -277,7 +284,7 @@ export class Bot {
     const landing = (e: Unit, k: { x: number; y: number }) => (e.type === 'lander' || e.type === 'corvette') && ourSites.some((st) => Math.hypot(st.x - k.x, st.y - k.y) < 14);
     let groupFree = false;
     if (group.size >= 2) {
-      const ours = surf.filter((s) => group.has(s.id)).reduce((a, u) => a + power(u), 0) + cover(gx, gy);
+      const ours = surf.filter((s) => group.has(s.id)).reduce((a, u) => a + ownPower(u), 0) + cover(gx, gy);
       const theirs = theirPower(gx, gy) + navalFoes.reduce((a, { e, k }) => a + (e.type !== 'merchant' && e.type !== 'lander' && e.type !== 'sub' && Math.hypot(k.x - gx, k.y - gy) >= 15 && Math.hypot(k.x - gx, k.y - gy) < 24 ? power(e) * 0.6 : 0), 0);
       if (theirs > ours * 1.25 && theirs > 0) {
         const hqs = this.home();
@@ -543,7 +550,10 @@ export class Bot {
   private navalThreat(x: number, y: number, r: number, maxAge = 240): number {
     const g = this.game;
     let p = 0;
-    for (const m of this.intel.values()) if (g.time - m.t <= maxAge && Math.hypot(m.x - x, m.y - y) < r) p += NAVAL_POWER[m.type] ?? 0;
+    for (const m of this.intel.values()) {
+      const age = g.time - m.t;
+      if (age <= maxAge && Math.hypot(m.x - x, m.y - y) < r) p += (NAVAL_POWER[m.type] ?? 0) * 0.5 ** (age / SIGHTING_HALF_LIFE);
+    }
     const team = g.players[this.pid].team;
     for (const s of g.sites) if (s.type === 'battery' && s.owner >= 0 && g.team(s.owner) !== team && Math.hypot(s.x - x, s.y - y) < r) p += 5;
     return p;
@@ -556,8 +566,32 @@ export class Bot {
     return p;
   }
 
+  /** Our ship's fighting strength: hull left, and offensive ammunition left (guns keep some punch when the missiles are gone). */
   private shipPower(u: Unit): number {
-    return (NAVAL_POWER[u.type] ?? 0) * (u.hp / u.maxHp);
+    return (NAVAL_POWER[u.type] ?? 0) * (u.hp / u.maxHp) * (0.4 + 0.6 * this.offAmmo(u));
+  }
+
+  /** Share of offensive magazines left (anti-ship and land-attack missiles, torpedoes). Unlimited guns, SAMs and mines do not count; 1 when there are none. */
+  private offAmmo(u: Unit): number {
+    let have = 0;
+    let max = 0;
+    for (const w of u.weapons) {
+      if (w.max <= 0 || w.mod.ability || w.mod.proj === 'sam' || w.mod.proj === 'mine') continue;
+      have += Math.max(0, w.ammo);
+      max += w.max;
+    }
+    return max > 0 ? have / max : 1;
+  }
+
+  /** Badly hurt or nearly out of offensive ammunition: go to port. On the way home, stay until nearly whole and full again. */
+  private needsRefit(u: Unit, home: boolean): boolean {
+    if (home) return u.hp < u.maxHp * 0.9 || this.offAmmo(u) < 0.85;
+    return u.hp < u.maxHp * (u.type === 'sub' ? 0.45 : 0.5) || this.offAmmo(u) < 0.25;
+  }
+
+  /** Warship on its way to port, or in port, to repair and rearm. */
+  private refitting(id: number): boolean {
+    return this.raids.get(id)?.home === true;
   }
 
   /** Every island with buildings that is not fully ours, scored. */
@@ -595,7 +629,10 @@ export class Bot {
   /** Strength of the enemy fleet we know of (seen in the last 3 minutes). */
   private enemyFleetPower(): number {
     let p = 0;
-    for (const m of this.intel.values()) if (this.game.time - m.t <= 180 && WARSHIP.has(m.type)) p += NAVAL_POWER[m.type] ?? 0;
+    for (const m of this.intel.values()) {
+      const age = this.game.time - m.t;
+      if (age <= 180 && WARSHIP.has(m.type)) p += (NAVAL_POWER[m.type] ?? 0) * 0.5 ** (age / SIGHTING_HALF_LIFE);
+    }
     return p;
   }
 
@@ -616,6 +653,7 @@ export class Bot {
   private busyShips(): Set<number> {
     const s = new Set(this.transports.map((t) => t.ship));
     if (this.op) for (const id of [...this.op.ships, ...this.op.escorts]) s.add(id);
+    for (const [id, r] of this.raids) if (r.home) s.add(id);
     return s;
   }
 
@@ -720,7 +758,7 @@ export class Bot {
       // Open grabs come first, except the middle island, which is worth fighting for early.
       const easy = plans.filter((p) => !p.contested).length;
       // Warships escort; corvettes carry the troops.
-      const fleet = this.mine().filter((u) => (LINE.has(u.type) || u.holdCap > 0) && UNITS[u.type].category === 'naval' && u.inside < 0 && !u.retreating && !this.transports.some((t) => t.ship === u.id));
+      const fleet = this.mine().filter((u) => (LINE.has(u.type) || u.holdCap > 0) && UNITS[u.type].category === 'naval' && u.inside < 0 && !u.retreating && !this.refitting(u.id) && !this.transports.some((t) => t.ship === u.id));
       const power = fleet.reduce((a, u) => a + this.shipPower(u), 0);
       // Troops for the landing come from one island, so the transports make one pick-up.
       const groups = new Map<number, Unit[]>();
@@ -732,11 +770,14 @@ export class Bot {
       const troops = group.length;
       const lift = fleet.reduce((a, u) => a + u.holdCap - u.cargo.length, 0);
       const needFor = (p: IslandPlan) => Math.min(6, lift, Math.ceil(p.ground * 0.75) + 2);
-      // Only fights we expect to win: clear naval superiority at the target.
+      // Only fights we expect to win: naval superiority at the target, with a margin.
       const best = plans
         .filter((p) => p.contested && !(this.avoid.get(p.island)! > g.time))
         .filter((p) => g.time > 180 || p.centre || easy === 0)
-        .filter((p) => power >= p.naval * 1.4 + 4)
+        // What waits on the way counts too (batteries and ships between us and the target).
+        .map((p) => ({ ...p, naval: Math.max(p.naval, this.navalThreat((hq.x + p.x) / 2, (hq.y + p.y) / 2, 20)) }))
+        // Small landings where no naval defence is known; elsewhere a clear margin.
+        .filter((p) => power >= (p.naval < 1 ? 6 : p.naval * 1.4 + 4))
         .sort((a, b) => b.value / (1 + b.dist / 25) / (1 + b.naval / 10) - a.value / (1 + a.dist / 25) / (1 + a.naval / 10))[0];
       // Build up the landing force first; production reads this.
       this.troopGoal = best && fleet.length >= 2 ? needFor(best) : 0;
@@ -754,9 +795,18 @@ export class Bot {
         ships.push(s.id);
         cap += s.holdCap - s.cargo.length;
       }
-      const escorts = fleet.filter((u) => !ships.includes(u.id)).map((u) => u.id);
+      // A task force, not the whole navy: the ships nearest the target until it is clearly stronger
+      // than the defence there. The rest stay free to hunt, raid and defend.
+      const want = best.naval * 2 + 8;
+      let force = fleet.filter((u) => ships.includes(u.id)).reduce((a, u) => a + this.shipPower(u), 0);
+      const escorts: number[] = [];
+      for (const u of fleet.filter((u) => !ships.includes(u.id)).sort((a, b) => Math.hypot(a.x - best.x, a.y - best.y) - Math.hypot(b.x - best.x, b.y - best.y))) {
+        if (force >= want) break;
+        escorts.push(u.id);
+        force += this.shipPower(u);
+      }
       this.stats.ops++;
-      this.op = { island: best.island, x: best.x, y: best.y, tx: best.target.x, ty: best.target.y, sx, sy, ships, escorts, state: 'load', since: g.time, startPower: power, need };
+      this.op = { island: best.island, x: best.x, y: best.y, tx: best.target.x, ty: best.target.y, sx, sy, ships, escorts, state: 'load', since: g.time, startPower: force, need, want };
       // Board the group; the transports come to it.
       const gx = group.reduce((a, u) => a + u.x, 0) / group.length;
       const gy = group.reduce((a, u) => a + u.y, 0) / group.length;
@@ -777,12 +827,19 @@ export class Bot {
     }
     // Live members only.
     op.ships = op.ships.filter((id) => alive(id));
-    op.escorts = op.escorts.filter((id) => alive(id));
-    // Every healthy warship joins the assault once it is under way: one strong fleet, not two weak ones.
+    // Escorts that left to refit are no longer part of the force.
+    op.escorts = op.escorts.filter((id) => alive(id) && !this.refitting(id));
+    // Healthy free warships reinforce the assault while the task force is below the strength it needs.
     if (op.state !== 'load') {
+      let force = [...op.ships, ...op.escorts].reduce((a, id) => a + this.shipPower(alive(id)!), 0);
       const busy = this.busyShips();
-      for (const u of this.mine())
-        if (LINE.has(u.type) && !busy.has(u.id) && u.inside < 0 && !u.retreating && u.hp > u.maxHp * 0.6 && !((this.noEngage.get(u.id) ?? 0) > g.time)) op.escorts.push(u.id);
+      for (const u of this.mine()) {
+        if (force >= op.want) break;
+        if (LINE.has(u.type) && !busy.has(u.id) && u.inside < 0 && !u.retreating && u.hp > u.maxHp * 0.6 && !((this.noEngage.get(u.id) ?? 0) > g.time)) {
+          op.escorts.push(u.id);
+          force += this.shipPower(u);
+        }
+      }
     }
     const all = [...op.ships, ...op.escorts].map((id) => alive(id)!).filter((u) => !u.retreating);
     const power = all.reduce((a, u) => a + this.shipPower(u), 0);
@@ -793,8 +850,8 @@ export class Bot {
       if (success) this.stats.won++;
       else this.stats.aborted++;
       this.stats.why[why] = (this.stats.why[why] ?? 0) + 1;
-      this.opCooldown = g.time + (success ? 20 : 120);
-      if (!success) this.avoid.set(op.island, g.time + 240);
+      this.opCooldown = g.time + (success ? 10 : 60);
+      if (!success) this.avoid.set(op.island, g.time + 150);
     };
     // Back out when the fight turns against us; regroup at port and come back later.
     if (op.state !== 'load' && (power < op.startPower * 0.4 || this.navalThreat(cx, cy, 20, 30) > power * 1.15)) {
@@ -1171,22 +1228,34 @@ export class Bot {
     return out;
   }
 
-  private subRaids() {
+  /**
+   * Submarine raids, and the refit cycle of every warship: a boat or surface warship that is badly
+   * hurt or nearly out of offensive ammunition sails to the nearest port (subs through safe water),
+   * stays until repaired and rearmed (the port does the work while no one shoots at it), then goes
+   * back to duty. Surface warships only pass through here for refits.
+   */
+  private raidsAndRefits() {
     const g = this.game;
-    const subs = this.mine().filter((u) => u.type === 'sub' && u.inside < 0 && !u.retreating);
-    for (const id of this.raids.keys()) if (!subs.some((s) => s.id === id)) this.raids.delete(id);
-    if (!subs.length) return;
-    const threats = this.sonarThreats();
-    for (const sub of subs) {
-      // Busy with a target (tactics gave it an attack order), or rearming: leave it.
-      if (sub.order.k === 'attack' || sub.rearming) continue;
+    const boats = this.mine().filter((u) => (u.type === 'sub' || LINE.has(u.type)) && u.inside < 0 && !u.retreating);
+    for (const id of this.raids.keys()) if (!boats.some((s) => s.id === id)) this.raids.delete(id);
+    if (!boats.length) return;
+    let threats: { x: number; y: number; r: number }[] | null = null;
+    for (const sub of boats) {
+      const isSub = sub.type === 'sub';
       let r = this.raids.get(sub.id);
-      const lowAmmo = sub.weapons.length > 0 && sub.weapons.every((w) => (w.mod.ammo ?? -1) > 0 && w.ammo <= 0);
-      if (lowAmmo || sub.hp < sub.maxHp * 0.45) {
-        // Home through safe water to repair or reload.
+      // A refit that drags on (port under fire) ends after 5 minutes.
+      const refit = this.needsRefit(sub, !!r?.home && g.time - r.at < 300);
+      if (!isSub && !refit) {
+        if (r) this.raids.delete(sub.id);
+        continue;
+      }
+      // A sub busy with a target (tactics gave it an attack order), or rearming: leave it.
+      if (isSub && (sub.order.k === 'attack' || sub.rearming)) continue;
+      if (refit) {
+        // Home to repair or reload.
         const port = this.nearestOwnPort(sub.x, sub.y);
         if (port && (!r || r.home !== true)) {
-          const route = this.safeRoute(sub.x, sub.y, port.x, port.y, threats);
+          const route = isSub ? this.safeRoute(sub.x, sub.y, port.x, port.y, (threats ??= this.sonarThreats())) : null;
           r = { tx: port.x, ty: port.y, pts: route?.pts ?? [[port.x, port.y]], i: 0, at: g.time, home: true };
           this.raids.set(sub.id, r);
         }
@@ -1198,7 +1267,7 @@ export class Bot {
           if (taken.has(`${Math.round(c.x)},${Math.round(c.y)}`)) continue;
           // Arrived at a lane with nothing there: try another.
           if (r && Math.hypot(sub.x - c.x, sub.y - c.y) < 4 && !c.unit) continue;
-          const route = this.safeRoute(sub.x, sub.y, c.x, c.y, threats);
+          const route = this.safeRoute(sub.x, sub.y, c.x, c.y, (threats ??= this.sonarThreats()));
           if (!route) continue;
           const score = c.value / (1 + route.cost / 30);
           if (!best || score > best.score) best = { tx: c.x, ty: c.y, pts: route.pts, score };
