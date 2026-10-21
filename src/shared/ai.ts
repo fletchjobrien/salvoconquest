@@ -490,9 +490,9 @@ export class Bot {
       // The landing party for the next operation: cheap, and without it the fleet takes nothing.
       { type: 'infantry', want: troopWant },
       { type: 'frigate', want: Math.min(2, (seen.sub ?? 0) > 0 ? 1 + Math.floor((seen.sub ?? 0) / 2) : t > 420 ? 1 : 0), save: true },
-      { type: 'destroyer', want: 2, save: true },
       // A quiet boat on their merchant lanes pays for itself many times over.
       { type: 'sub', want: t > 240 ? 1 + (t > 720 ? 1 : 0) + Math.min(2, capitals) : 0, save: true },
+      { type: 'destroyer', want: 2, save: true },
       { type: 'strike', want: t > 150 ? 1 : 0 },
       { type: 'fighter', want: Math.min(3, Math.ceil((seen.strike ?? 0) / 2)) },
       { type: 'destroyer', want: 4, save: true },
@@ -778,6 +778,12 @@ export class Bot {
     // Live members only.
     op.ships = op.ships.filter((id) => alive(id));
     op.escorts = op.escorts.filter((id) => alive(id));
+    // Every healthy warship joins the assault once it is under way: one strong fleet, not two weak ones.
+    if (op.state !== 'load') {
+      const busy = this.busyShips();
+      for (const u of this.mine())
+        if (LINE.has(u.type) && !busy.has(u.id) && u.inside < 0 && !u.retreating && u.hp > u.maxHp * 0.6 && !((this.noEngage.get(u.id) ?? 0) > g.time)) op.escorts.push(u.id);
+    }
     const all = [...op.ships, ...op.escorts].map((id) => alive(id)!).filter((u) => !u.retreating);
     const power = all.reduce((a, u) => a + this.shipPower(u), 0);
     const cx = all.length ? all.reduce((a, u) => a + u.x, 0) / all.length : op.sx;

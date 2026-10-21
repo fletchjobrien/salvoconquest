@@ -77,7 +77,8 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
   pair). Units also hold fire when the target is already as good as dead. A unit on **weapons free** ignores
   the limit: it fires everything that bears, as fast as the launchers reload (up to four SAMs at a time at one
   target). **Hold fire** stops all shooting except self-defence against incoming missiles (SAMs and CIWS).
-  The computer opponent goes weapons free only against capital ships. The selection panel shows each unit's
+  The computer opponent goes weapons free against capital ships, and against any warship when its group clearly
+  outguns the enemy there. The selection panel shows each unit's
   **kills** (top right).
 - **Countermeasures (C):** every warship and air flight carries one load of **chaff**, every ground unit one load of
   **smoke**. Chaff throws a cloud of foil that pulls each enemy missile or SAM homing on the unit off course
@@ -240,15 +241,22 @@ not seen the defenders of an enemy island, it assumes that there is a garrison.
 
 1. **Money first.** Single transports take open islands near the waiting troops: resource islands first, then
    a stake in the middle island.
-2. **Navy first.** The AI saves for warships. It builds infantry only to fill the holds of its free transports,
-   or to gather the troops for the next landing. It does not fill its home island with idle troops.
+2. **Spend everything, navy first.** The AI walks one build list every 2 s and buys the first item it still
+   lacks: a transport and a landing party, a second transport, the troops for the next landing, a frigate (more
+   when it has seen submarines), a submarine for the merchant lanes, destroyers, a strike flight, fighters
+   against enemy strike flights, more destroyers, and a capital ship only after three destroyers. When the next
+   warship costs more than it has, it saves for it. It does not keep idle troops or spare batteries.
 3. **Planned landings.** The AI attacks an enemy-held or contested island only when its fleet is at least 1.4×
    the threat there. The troops board on one island while the escorts gather. The fleet sails ahead and the
    transports follow. The troops land when the transports are off the island and the sea there is clear. The
    escorts stay until the island is taken.
 4. **Back off and regroup.** If the force falls below 40% of its starting strength, or the enemy near it becomes
    stronger, the whole force goes back to port. It does not start new fights on the way. The AI does not attack
-   that island again for 4 minutes.
+   that island again for 4 minutes. While a landing is under way, every new healthy warship joins it.
+5. **Attack where stronger.** Warships that are not on a landing go after enemy squadrons that they outgun, or
+   wait on the enemy's merchant lanes off their resource islands. Strike flights with nothing to support hunt
+   merchants on lanes without enemy warships. Landing craft and transports near the AI's islands are the
+   first targets of its ships and aircraft.
 
 ### Theatres
 
@@ -284,10 +292,11 @@ npm run bench:ai   # many short headless AI games in parallel (no full playthrou
 minutes: islands, resource sites, middle-island sites, ships, idle troops, and planned landings started, won and
 called off. Settings: `GAMES` (default 8), `MIN` (game length, default 20), `CHECK` (minutes between rows,
 default 5). `VS=<git revision>` plays the current AI against the AI at that revision, with sides and factions
-swapped so that map and faction luck cancel out:
+swapped so that map and faction luck cancel out. It also prints the mean score margin with a 95% interval.
+Single games vary a lot: two identical AIs can split 11 to 21 in 32 games, so use 96 games to decide:
 
 ```bash
-VS=HEAD GAMES=16 MIN=25 npm run bench:ai   # did my change make the AI better?
+VS=HEAD GAMES=96 MIN=25 npm run bench:ai   # did my change make the AI better?
 ```
 
 ## Deploy to Cloudflare from GitHub
