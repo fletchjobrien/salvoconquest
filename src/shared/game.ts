@@ -8,6 +8,7 @@ import {
   FACTION_MOD,
   Faction,
   HQ_INCOME,
+  MERCHANT_PAY,
   AIR_DODGE,
   MERCHANT_SUNK_WAIT,
   Fleet,
@@ -1797,7 +1798,7 @@ export class Game {
       if ((m.mtimer ?? 0) <= 0) {
         m.mstate = 'back';
         // Payout scales with the trip length.
-        m.mtimer = s?.dock && m.port ? 60 + 12 * Math.hypot(s.dock.x - m.port.x, s.dock.y - m.port.y) : 100;
+        m.mtimer = s?.dock && m.port ? MERCHANT_PAY.base + MERCHANT_PAY.perKm * Math.hypot(s.dock.x - m.port.x, s.dock.y - m.port.y) : 50;
       }
     } else if (m.mstate === 'back') {
       const p = this.players[m.owner];

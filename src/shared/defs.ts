@@ -627,8 +627,24 @@ export const TORPEDO_VS: Partial<Record<UnitType, { dmg?: number; hit?: number }
   cruiser: { dmg: 1.6 },
   frigate: { hit: 0.5 },
 };
+/** A fixed random markup per unit type (4-9%, drawn once) on top of the point ratios. */
+export const PRICE_MARKUP: Partial<Record<UnitType, number>> = {
+  corvette: 1.062,
+  frigate: 1.042,
+  destroyer: 1.051,
+  sub: 1.081,
+  cruiser: 1.044,
+  carrier: 1.064,
+  battleship: 1.063,
+  infantry: 1.047,
+  coastal: 1.06,
+  sam: 1.082,
+  fighter: 1.08,
+  strike: 1.041,
+  recon: 1.042,
+};
 export function unitCost(type: UnitType, faction: Faction): number {
-  return Math.round((UNITS[type].cost * COST_SCALE * FACTION_MOD[faction].cost) / 5) * 5;
+  return Math.round((UNITS[type].cost * COST_SCALE * (PRICE_MARKUP[type] ?? 1) * FACTION_MOD[faction].cost) / 5) * 5;
 }
 export function unitBuildTime(type: UnitType, faction: Faction): number {
   return UNITS[type].buildTime * FACTION_MOD[faction].build;
@@ -680,9 +696,10 @@ export const CRIT = {
 
 export const MAP_SIZE = 160; // km
 export const TICK = 0.1; // s
-export const HQ_INCOME = 3; // $/s
+export const HQ_INCOME = 1.5; // $/s
 export const MERCHANT_SUNK_WAIT = 45; // s before a site sends a new merchant after one is sunk
-export const MERCHANT_PAYOUT = 450;
+/** Merchant cargo: a base sum plus so much per km of trip (longer trips pay more). */
+export const MERCHANT_PAY = { base: 30, perKm: 6 };
 /** Deployment budget: 16 points (see COST_SCALE); what you don't spend carries into battle. */
 export const START_CASH = 2400;
 /** Deployment phase: place your starting force, then launch (or wait for the timer). */

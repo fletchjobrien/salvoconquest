@@ -32,15 +32,19 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
   island, aircraft anywhere in the zone). Right-click moves placed units, troops can embark on ships, Del refunds.
   The budget is **16 points ($2,400)**. Money you don't spend carries into the battle. The battle starts when
   every player presses **Launch battle** (or the timer runs out).
-- **Prices** follow fixed ratios of one point = $150:
+- **Prices** follow fixed ratios of one point = $150, then each unit type has its own fixed markup of 4–9%
+  (`PRICE_MARKUP` in `src/shared/defs.ts`):
 
-  | Naval | Points | Air | Points | Ground | Points |
-  |---|---|---|---|---|---|
-  | Corvette | 2 ($300) | Fighter | 2 ($300) | Infantry | 1 ($150) |
-  | Frigate | 4 ($600) | Attack | 3 ($450) | Anti-ship battery | 2 ($300) |
-  | Submarine | 4 ($600) | AEW | 3 ($450) | SAM battery | 2 ($300) |
-  | Destroyer | 8 ($1,200) | | | | |
-  | Capital ship (cruiser, carrier or battleship) | 18 ($2,700) | | | | |
+  | Naval | Points | Price | Air | Points | Price | Ground | Points | Price |
+  |---|---|---|---|---|---|---|---|---|
+  | Corvette | 2 | $320 | Fighter | 2 | $325 | Infantry | 1 | $155 |
+  | Frigate | 4 | $625 | Attack | 3 | $470 | Anti-ship battery | 2 | $320 |
+  | Submarine | 4 | $650 | AEW | 3 | $470 | SAM battery | 2 | $325 |
+  | Destroyer | 8 | $1,260 | | | | | | |
+  | Cruiser / carrier / battleship | 18 | $2,820 / $2,875 / $2,870 | | | | | | |
+
+- **Income** is slow, so every merchant counts: the HQ earns $1.50/s, and a merchant earns $30 plus $6 per km
+  of its trip (about $210 for a 30 km run).
 
 - **Building:** pick a unit in the build bar, then click the map where it should go (Shift: place several). A ghost
   shows which building will make it (the nearest one that can reach the spot) and stays there until the unit is
@@ -92,7 +96,7 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
 - **Map:** 160 × 160 km. Every home gets the same mix of neutral islands (one quarter's layout is copied, rotated, to
   all four quarters, then each copy is nudged a few km and gets its own shape and size, so the map stays a little
   asymmetrical): one building island 18–24 km off each home, one dockyard per quarter. Islands keep their size, so there is far more open water between them; merchants
-  are paid more per trip (450) because the trips are longer.
+  are paid by trip length, so far islands pay more per trip.
 - **Automation:** ground units attack-move by default, idle troops engage enemies on their island, damaged units
   retreat to friendly buildings and come back when repaired, warships whose missiles, SAMs and torpedoes are all
   spent sail to the nearest naval base or dockyard, rearm and return to their task (both follow the auto-retreat
@@ -107,10 +111,10 @@ both factions, default variants): frigate beats submarine 29–1, submarine beat
 
 | Ship | Beats | Loses to | Why |
 |---|---|---|---|
-| Submarine ($600) | Capital ships | Frigate | Passive sonar hears ships at 1.3× its sonar range, so it finds them first and stays hidden. Heavy torpedoes explode under the keel: ×1.6 damage to battleships, cruisers and carriers. Destroyers and capital ships are deaf or nearly deaf to subs and have no anti-sub weapons. |
-| Frigate ($600) | Submarine | Destroyer | The only surface ship with sonar (17–20 km; the Sub Hunter's towed array nearly doubles it) and ASW rockets that reach 11–12 km, further than a sub's torpedoes. Towed torpedo decoys halve torpedo hits. |
-| Destroyer ($1,200) | Frigates, corvettes | Battleship, cruiser | The main fighter: the most firepower for the price. No sonar. |
-| Battleship ($2,700) | Destroyer | Submarine | Railguns, a thick armoured hull and its own air defence. |
+| Submarine ($650) | Capital ships | Frigate | Passive sonar hears ships at 1.3× its sonar range, so it finds them first and stays hidden. Heavy torpedoes explode under the keel: ×1.6 damage to battleships, cruisers and carriers. Destroyers and capital ships are deaf or nearly deaf to subs and have no anti-sub weapons. |
+| Frigate ($625) | Submarine | Destroyer | The only surface ship with sonar (17–20 km; the Sub Hunter's towed array nearly doubles it) and ASW rockets that reach 11–12 km, further than a sub's torpedoes. Towed torpedo decoys halve torpedo hits. |
+| Destroyer ($1,260) | Frigates, corvettes | Battleship, cruiser | The main fighter: the most firepower for the price. No sonar. |
+| Battleship ($2,870) | Destroyer | Submarine | Railguns, a thick armoured hull and its own air defence. |
 
 Escort capital ships with frigates. Hunt destroyers with battleships, cruisers and aircraft. Corvettes carry the
 troops: keep them behind the warships until the beach is clear.
