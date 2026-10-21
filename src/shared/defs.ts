@@ -702,6 +702,8 @@ export const MERCHANT_SUNK_WAIT = 45; // s before a site sends a new merchant af
 export const MERCHANT_PAY = { base: 30, perKm: 6 };
 /** Deployment budget: 32 points (see COST_SCALE); what you don't spend carries into battle. */
 export const START_CASH = 4800;
+/** Every unit moves this much faster than its listed speed (ships, subs, troops, aircraft; not weapons). */
+export const MOVE_SPEED = 1.2;
 /** Deployment phase: place your starting force, then launch (or wait for the timer). */
 export const SETUP_TIME = 120;
 /** The deployment zone reaches this far (km) beyond the home island's radius. */
@@ -768,7 +770,7 @@ export function deriveStats(type: UnitType, faction: Faction, loadout: string[],
   fuelMul *= v?.mul?.fuel ?? 1;
   return {
     hp: Math.round(def.hp * fac.hp * hpMul),
-    speed: def.speed * spdMul,
+    speed: def.speed * spdMul * MOVE_SPEED,
     turn: def.turn,
     signature: def.signature,
     visual: def.visual,

@@ -173,6 +173,8 @@ from, with a faint glint sweeping along it (like a radar-warning receiver), and 
 Both sides pay the same price and build time for each unit. There are no special abilities: the factions differ
 in **hull stats** and in **which weapons they can fit** (each side has its own missiles, SAMs, guns and torpedoes;
 utility kit such as CIWS, ECM, mines, sonar and armour is shared). See `HULLS` and `MODULES` in `src/shared/defs.ts`.
+Speeds in the table are listed speeds; every unit moves 20% faster than listed (`MOVE_SPEED` in `defs.ts`).
+Weapons (missiles, torpedoes, shells) keep their own speeds.
 
 | Unit | Atlantic Coalition (US pattern) | Pacific Union (PLAN / Russian pattern) |
 |---|---|---|

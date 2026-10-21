@@ -1949,7 +1949,7 @@ export class Game {
   private launch(u: Unit) {
     u.landed = false;
     u.alt = 0.9;
-    u.speed = UNITS[u.type].speed * 0.6;
+    u.speed = u.maxSpeed * 0.6;
   }
 
   private thinkAir(u: Unit, dt: number) {

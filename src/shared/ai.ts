@@ -723,7 +723,7 @@ export class Bot {
         plans = plans.filter((p) => p !== plan);
         const squad = troops.splice(0, Math.min(ship.holdCap - ship.cargo.length, plan.centre ? 3 : 2));
         // The loading clock starts when the ship can be there.
-        const trip = Math.hypot(ship.x - gx, ship.y - gy) / UNITS[ship.type].speed;
+        const trip = Math.hypot(ship.x - gx, ship.y - gy) / ship.maxSpeed;
         this.transports.push({ ship: ship.id, island: plan.island, tx: plan.target.x, ty: plan.target.y, state: 'loading', since: g.time + trip });
         g.command(this.pid, { c: 'board', ids: squad.map((u) => u.id), ship: ship.id });
         // Always re-order the ship: it may still carry an old fleet order away from the troops.
@@ -820,7 +820,7 @@ export class Bot {
         k += n;
         if (ids.length) g.command(this.pid, { c: 'board', ids, ship: id });
         g.command(this.pid, { c: 'move', ids: [id], x: gx, y: gy, mode: 'move' });
-        trip = Math.max(trip, Math.hypot(s.x - gx, s.y - gy) / UNITS[s.type].speed);
+        trip = Math.max(trip, Math.hypot(s.x - gx, s.y - gy) / s.maxSpeed);
       }
       this.op.since = g.time + trip;
       if (escorts.length) g.command(this.pid, { c: 'move', ids: escorts, x: sx, y: sy, mode: 'move' });

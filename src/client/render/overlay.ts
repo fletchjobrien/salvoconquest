@@ -1,5 +1,5 @@
 // Crisp 2D tactical overlay drawn over the pixelated world: symbols, contacts, rings, orders.
-import { BUILDINGS, MODULES, UNITS, UNIT_TYPES, UNLOAD_RANGE, UnitType, unitCost } from '../../shared/defs';
+import { BUILDINGS, MODULES, MOVE_SPEED, UNITS, UNIT_TYPES, UNLOAD_RANGE, UnitType, unitCost } from '../../shared/defs';
 import { canDeployAt, deployZone, rallySite } from '../../shared/game';
 import { cellOf } from '../../shared/map';
 import { sensorCoverage, coverageStale, unionOutline, COVER_COLORS, Coverage, Disc, Loop } from '../sensors';
@@ -1652,7 +1652,7 @@ export class Overlay {
       let r = Infinity;
       for (const a of w.details.get(id)?.[12] ?? []) {
         const t = w.units.get(a)?.type;
-        if (t && UNITS[t].fuel) r = Math.min(r, (UNITS[t].fuel! * UNITS[t].speed) / 2);
+        if (t && UNITS[t].fuel) r = Math.min(r, (UNITS[t].fuel! * UNITS[t].speed * MOVE_SPEED) / 2);
       }
       reach.push([c, Number.isFinite(r) ? r : 40]);
     }
