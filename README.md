@@ -30,8 +30,18 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
 - **Deployment phase** (like WARNO): the clock stands still for up to 2 minutes while you buy your opening
   force from the build bar and place it inside your deployment zone (ships on open water, troops on the home
   island, aircraft anywhere in the zone). Right-click moves placed units, troops can embark on ships, Del refunds.
-  Money you don't spend carries into the battle. The battle starts when every player presses **Launch battle**
-  (or the timer runs out).
+  The budget is **16 points ($2,400)**. Money you don't spend carries into the battle. The battle starts when
+  every player presses **Launch battle** (or the timer runs out).
+- **Prices** follow fixed ratios of one point = $150:
+
+  | Naval | Points | Air | Points | Ground | Points |
+  |---|---|---|---|---|---|
+  | Corvette | 2 ($300) | Fighter | 2 ($300) | Infantry | 1 ($150) |
+  | Frigate | 4 ($600) | Attack | 3 ($450) | Anti-ship battery | 2 ($300) |
+  | Submarine | 4 ($600) | AEW | 3 ($450) | SAM battery | 2 ($300) |
+  | Destroyer | 8 ($1,200) | | | | |
+  | Capital ship (cruiser, carrier or battleship) | 18 ($2,700) | | | | |
+
 - **Building:** pick a unit in the build bar, then click the map where it should go (Shift: place several). A ghost
   shows which building will make it (the nearest one that can reach the spot) and stays there until the unit is
   built; then the unit moves out to that spot. Ships can only go to water connected to one of your naval bases or
@@ -97,8 +107,8 @@ both factions, default variants): frigate beats submarine 29–1, submarine beat
 
 | Ship | Beats | Loses to | Why |
 |---|---|---|---|
-| Submarine ($1,140) | Capital ships | Frigate | Passive sonar hears ships at 1.3× its sonar range, so it finds them first and stays hidden. Heavy torpedoes explode under the keel: ×1.6 damage to battleships, cruisers and carriers. Destroyers and capital ships are deaf or nearly deaf to subs and have no anti-sub weapons. |
-| Frigate ($900) | Submarine | Destroyer | The only surface ship with sonar (17–20 km; the Sub Hunter's towed array nearly doubles it) and ASW rockets that reach 11–12 km, further than a sub's torpedoes. Towed torpedo decoys halve torpedo hits. |
+| Submarine ($600) | Capital ships | Frigate | Passive sonar hears ships at 1.3× its sonar range, so it finds them first and stays hidden. Heavy torpedoes explode under the keel: ×1.6 damage to battleships, cruisers and carriers. Destroyers and capital ships are deaf or nearly deaf to subs and have no anti-sub weapons. |
+| Frigate ($600) | Submarine | Destroyer | The only surface ship with sonar (17–20 km; the Sub Hunter's towed array nearly doubles it) and ASW rockets that reach 11–12 km, further than a sub's torpedoes. Towed torpedo decoys halve torpedo hits. |
 | Destroyer ($1,200) | Frigates, corvettes | Battleship, cruiser | The main fighter: the most firepower for the price. No sonar. |
 | Battleship ($2,700) | Destroyer | Submarine | Railguns, a thick armoured hull and its own air defence. |
 

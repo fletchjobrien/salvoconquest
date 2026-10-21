@@ -121,7 +121,7 @@ export class Bot {
     this.groundIdle();
   }
 
-  /** Deployment phase: buy a balanced opening force (keeping a reserve), place it, ready up. */
+  /** Deployment phase: buy a balanced opening force, place it, ready up. */
   private deploy() {
     const g = this.game;
     const p = g.players[this.pid];
@@ -147,7 +147,8 @@ export class Bot {
       { type: 'infantry', at: bk ?? hq },
       { type: 'coastal', at: hq },
     ];
-    const reserve = p.cash * 0.2;
+    // Spend the whole opening budget (16 points), like a player.
+    const reserve = 0;
     for (const it of plan) {
       if (p.cash - unitCost(it.type, p.faction) < reserve) continue;
       // Spiral out from the anchor to the first legal spot.
