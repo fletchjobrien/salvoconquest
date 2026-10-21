@@ -172,8 +172,13 @@ export class Minimap {
     }
   }
 
+  private drawnAt = -1;
+
   draw(_dt: number, r: Renderer, _rig: CameraRig) {
     const w = this.world;
+    // 15 redraws a second is plenty for a map this small.
+    if (w.clock - this.drawnAt < 1 / 15 && w.clock >= this.drawnAt) return;
+    this.drawnAt = w.clock;
     const ctx = this.ctx;
     const S = this.size;
     const k = S / w.map.size;

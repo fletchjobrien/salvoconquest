@@ -120,6 +120,9 @@ export class GameScene {
     const map = w.map;
     const scene = this.r.scene;
     setAirZoom(rig.dist);
+    // Effects are culled against this frame's view (and skipped when too small to see).
+    this.fx.view = { x: rig.tx, y: rig.ty, dist: rig.dist };
+    this.fx.setView(this.r.camera, this.r.height / this.r.pixelSize);
 
     // ---- units ----
     const seen = new Set<number>();

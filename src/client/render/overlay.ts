@@ -2,7 +2,7 @@
 import { BUILDINGS, MODULES, UNITS, UNIT_TYPES, UNLOAD_RANGE, UnitType, unitCost, unitDef } from '../../shared/defs';
 import { canDeployAt, deployZone, rallySite } from '../../shared/game';
 import { cellOf } from '../../shared/map';
-import { sensorCoverage, unionOutline, COVER_COLORS, Disc, Loop } from '../sensors';
+import { sensorCoverage, coverageStale, unionOutline, COVER_COLORS, Coverage, Disc, Loop } from '../sensors';
 import { ORDER_CODES, F_ABOARD, F_RETREAT, F_LANDED, F_FIRE, F_STOPPED, F_STUN, F_PAINTED, F_DARK, F_HOLD, F_FREE } from '../../shared/protocol';
 import type { Renderer, CameraRig } from './renderer';
 import type { World, UView } from '../state';
@@ -77,6 +77,8 @@ export class Overlay {
   /** Screen positions of everything clickable this frame. */
   items: ScreenItem[] = [];
   private dpr = 1;
+  /** Extra off-screen margin (px) counted as visible: the cached layers' margin while they are built. */
+  private pad = 0;
   private w = 1;
   private h = 1;
 
@@ -114,7 +116,8 @@ export class Overlay {
 
   private proj(v: OverlayView, x: number, alt: number, y: number) {
     v.r.project(x, alt, y, P);
-    return P.z < 1 && P.x > -200 && P.y > -200 && P.x < this.w + 200 && P.y < this.h + 200;
+    const m = Math.max(200, this.pad);
+    return P.z < 1 && P.x > -m && P.y > -m && P.x < this.w + m && P.y < this.h + m;
   }
 
   private circle(v: OverlayView, x: number, y: number, rad: number, alt = 0, seg = 56): boolean {
@@ -142,7 +145,7 @@ export class Overlay {
         if (lo === 0) continue;
         v.r.project(x + c * rad * lo, alt, y + s * rad * lo, P);
       }
-      if (P.x > -50 && P.y > -50 && P.x < this.w + 50 && P.y < this.h + 50) any = true;
+      if (P.x > -50 - this.pad && P.y > -50 - this.pad && P.x < this.w + 50 + this.pad && P.y < this.h + 50 + this.pad) any = true;
       if (!started) ctx.moveTo(P.x, P.y);
       else ctx.lineTo(P.x, P.y);
       started = true;
@@ -202,7 +205,7 @@ export class Overlay {
           open = false;
           continue;
         }
-        if (P.x > -50 && P.y > -50 && P.x < this.w + 50 && P.y < this.h + 50) any = true;
+        if (P.x > -50 - this.pad && P.y > -50 - this.pad && P.x < this.w + 50 + this.pad && P.y < this.h + 50 + this.pad) any = true;
         if (open) ctx.lineTo(P.x, P.y);
         else ctx.moveTo(P.x, P.y);
         open = true;
@@ -231,12 +234,10 @@ export class Overlay {
     ctx.font = `500 10px ${FONT}`;
     ctx.lineCap = 'round';
 
-    this.drawGrid(v, zoomedOut);
-    this.drawWeather(v, zoomedOut);
-    this.drawIslandLabels(v, dist);
-
-    // Fog of war on the map: a light veil always, the full sensor view with V.
-    this.drawSensors(v, v.showSensors);
+    // Map grid, weather, island names and the fog of war come from cached layers, rebuilt a few
+    // times a second; everything after this is drawn fresh every frame.
+    this.drawStatic(v, zoomedOut, dist);
+    if (v.showSensors) this.drawSensorLegend();
 
     // ---- range rings & orders for selection ----
     const selUnits: UView[] = [];
@@ -894,93 +895,214 @@ export class Overlay {
     return p ? `${p.name}` : 'UNCLAIMED';
   }
 
-  /**
-   * Sensor view (V): everything our sensors do not cover is darkened; where only air-search
-   * radar reaches (aircraft and missiles only) it is half dark. Coverage edges are drawn as one
-   * merged outline per sensor kind.
-   */
-  private drawSensors(v: OverlayView, full: boolean) {
+  // ---------------------------------------------------------------- cached map layers
+  //
+  // Three offscreen layers: "under" (grid, weather, island names), "fog" (the sensor veil, at half
+  // resolution) and "edge" (coverage outlines). They are drawn for the camera as it was when they
+  // were built, with a margin around the screen. Each frame they are laid onto the overlay through
+  // the 2D transform that takes three ground points from where they were to where they are now, so
+  // they follow panning, zoom and rotation between rebuilds. A rebuild comes when the camera has
+  // moved and 0.1 s has passed, when coverage or weather changed and 0.25 s has passed, or at once
+  // when the warp would show an edge of the layer or distort it too much.
+
+  private layers = { under: newLayer(), fog: newLayer(), edge: newLayer() };
+  private built = {
+    at: -1,
+    tx: 0,
+    ty: 0,
+    dist: 0,
+    yaw: 0,
+    w: 0,
+    h: 0,
+    full: false,
+    margin: 0,
+    cov: null as Coverage | null,
+    refs: [0, 0, 0, 0, 0, 0],
+    scr: [0, 0, 0, 0, 0, 0],
+  };
+
+  private drawStatic(v: OverlayView, zoomedOut: number, dist: number) {
     const w = v.world;
-    const real = this.ctx;
-    const cov = sensorCoverage(w);
-    const veil = this.layer();
-    const mask = this.layer2();
-    const disc = (g: CanvasRenderingContext2D, [x, y, r]: Disc) => {
-      this.ctx = g;
-      this.circle(v, x, y, r, 0, 72);
-      this.ctx = real;
-    };
-    // Coverage outlines already are the merged edge (weather bites included): fill even-odd, stroke as is.
-    const fillUnion = (loops: Loop[]) => {
-      mask.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-      mask.ctx.clearRect(0, 0, this.w, this.h);
-      mask.ctx.fillStyle = '#000';
-      mask.ctx.beginPath();
-      this.loops(v, loops, mask.ctx);
-      mask.ctx.fill('evenodd');
-    };
-    const strokeLoops = (loops: Loop[], col: string, width: number) => {
-      mask.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-      mask.ctx.clearRect(0, 0, this.w, this.h);
-      mask.ctx.strokeStyle = col;
-      mask.ctx.lineWidth = width;
-      mask.ctx.lineJoin = 'round';
-      mask.ctx.beginPath();
-      this.loops(v, loops, mask.ctx);
-      mask.ctx.stroke();
-    };
-    // 1. The veil: dark everywhere, half cleared under air radar, fully cleared under the surface picture.
-    const vg = veil.ctx;
-    vg.setTransform(1, 0, 0, 1, 0, 0);
-    vg.clearRect(0, 0, veil.canvas.width, veil.canvas.height);
-    vg.globalCompositeOperation = 'source-over';
-    vg.fillStyle = full ? 'rgba(2, 6, 10, 0.62)' : 'rgba(4, 10, 18, 0.32)';
-    vg.fillRect(0, 0, veil.canvas.width, veil.canvas.height);
-    if (!full) {
-      // Faint diagonal hatching marks the fog as "not seen" without hiding the map.
-      vg.fillStyle = this.hatch(vg);
-      vg.fillRect(0, 0, veil.canvas.width, veil.canvas.height);
-    }
-    vg.globalCompositeOperation = 'destination-out';
-    fillUnion(cov.air);
-    vg.globalAlpha = 0.5;
-    vg.drawImage(mask.canvas, 0, 0);
-    fillUnion(cov.surf);
-    vg.globalAlpha = 1;
-    vg.drawImage(mask.canvas, 0, 0);
-    vg.globalCompositeOperation = 'source-over';
-    real.setTransform(1, 0, 0, 1, 0, 0);
-    real.drawImage(veil.canvas, 0, 0);
-    if (!full) {
-      // A thin, faint edge where the surface picture ends.
-      if (cov.surf.length) {
-        strokeLoops(cov.surf, COVER_COLORS.surf, 0.75);
-        real.globalAlpha = 0.4;
-        real.drawImage(mask.canvas, 0, 0);
-        real.globalAlpha = 1;
+    const rig = v.rig;
+    const b = this.built;
+    const now = w.clock;
+    const full = v.showSensors;
+    let warp: number[] | null = null;
+    if (b.at >= 0 && b.w === this.w && b.h === this.h && b.full === full && now >= b.at) {
+      const dst: number[] = [];
+      for (let i = 0; i < 6; i += 2) {
+        if (!this.proj(v, b.refs[i], 0, b.refs[i + 1])) break;
+        dst.push(P.x, P.y);
       }
-      real.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-      return;
+      if (dst.length === 6) warp = affine(b.scr, dst);
     }
-    // 2. Merged outlines per sensor kind.
-    const kinds: [Loop[] | Disc[], string, number][] = [
-      [cov.air, COVER_COLORS.air, 0.45],
-      [cov.surf, COVER_COLORS.surf, 0.9],
-      [cov.sonar, COVER_COLORS.sonar, 0.9],
-    ];
-    for (const [shapes, col, alpha] of kinds) {
-      if (!shapes.length) continue;
-      if (shapes === cov.sonar) {
-        mask.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-        mask.ctx.clearRect(0, 0, this.w, this.h);
-        unionOutline(mask.ctx, cov.sonar, col, 1.25, (g, d) => disc(g, d));
-      } else strokeLoops(shapes as Loop[], col, 1.25);
-      real.globalAlpha = alpha;
-      real.drawImage(mask.canvas, 0, 0);
-      real.globalAlpha = 1;
+    let rebuild = !warp || !this.covers(warp, b.margin) || Math.abs(Math.log(rig.dist / b.dist)) > 0.12 || Math.abs(rig.yaw - b.yaw) > 0.06;
+    if (!rebuild) {
+      const moved = rig.tx !== b.tx || rig.ty !== b.ty || rig.dist !== b.dist || rig.yaw !== b.yaw;
+      const age = now - b.at;
+      if (coverageStale(w)) {
+        // Recompute coverage on this frame and rebuild the layers on the next one, so the two
+        // costs never land on the same frame.
+        sensorCoverage(w);
+      } else if ((moved && age >= 0.1) || (age >= 0.25 && (sensorCoverage(w) !== b.cov || w.weather.length > 0))) rebuild = true;
+    }
+    if (rebuild) {
+      this.buildLayers(v, zoomedOut, dist, full);
+      warp = [1, 0, 0, 1, 0, 0];
+    }
+    const real = this.ctx;
+    for (const L of [this.layers.under, this.layers.fog, this.layers.edge]) {
+      if (!L.used) continue;
+      real.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+      real.transform(warp![0], warp![1], warp![2], warp![3], warp![4], warp![5]);
+      real.translate(-b.margin, -b.margin);
+      real.scale(1 / L.sc, 1 / L.sc);
+      real.drawImage(L.canvas, 0, 0);
     }
     real.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    // 3. Legend.
+  }
+
+  /** Whether the warped layer (built with this margin) still covers the whole screen. */
+  private covers(m: number[], margin: number): boolean {
+    const det = m[0] * m[3] - m[1] * m[2];
+    if (Math.abs(det) < 1e-6) return false;
+    for (const [x, y] of [
+      [0, 0],
+      [this.w, 0],
+      [0, this.h],
+      [this.w, this.h],
+    ]) {
+      // Inverse of the affine map: screen now -> screen when built.
+      const dx = x - m[4];
+      const dy = y - m[5];
+      const ox = (m[3] * dx - m[2] * dy) / det;
+      const oy = (-m[1] * dx + m[0] * dy) / det;
+      if (ox < -margin + 2 || oy < -margin + 2 || ox > this.w + margin - 2 || oy > this.h + margin - 2) return false;
+    }
+    return true;
+  }
+
+  private buildLayers(v: OverlayView, zoomedOut: number, dist: number, full: boolean) {
+    const w = v.world;
+    const rig = v.rig;
+    const b = this.built;
+    const margin = Math.round(Math.max(this.w, this.h) * 0.15);
+    const cov = sensorCoverage(w);
+    // Reference points on the ground around the view centre, for the warp.
+    const k = Math.max(0.5, rig.dist * 0.2);
+    const refs = [rig.tx, rig.ty, rig.tx + k, rig.ty, rig.tx, rig.ty + k];
+    const scr: number[] = [];
+    for (let i = 0; i < 6; i += 2) {
+      this.proj(v, refs[i], 0, refs[i + 1]);
+      scr.push(P.x, P.y);
+    }
+    Object.assign(b, { at: w.clock, tx: rig.tx, ty: rig.ty, dist: rig.dist, yaw: rig.yaw, w: this.w, h: this.h, full, margin, cov, refs, scr });
+    const real = this.ctx;
+    const begin = (L: Layer, sc: number) => {
+      const cw = Math.ceil((this.w + margin * 2) * sc);
+      const ch = Math.ceil((this.h + margin * 2) * sc);
+      if (L.canvas.width !== cw || L.canvas.height !== ch) {
+        L.canvas.width = cw;
+        L.canvas.height = ch;
+      }
+      L.sc = sc;
+      L.used = true;
+      const g = L.ctx;
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      g.globalAlpha = 1;
+      g.globalCompositeOperation = 'source-over';
+      g.clearRect(0, 0, cw, ch);
+      // Draw in screen pixels (CSS), offset by the margin.
+      g.setTransform(sc, 0, 0, sc, margin * sc, margin * sc);
+      return g;
+    };
+    this.pad = margin;
+    try {
+      // 1. Under the fog: grid, weather outlines, island names (sharp, full resolution).
+      this.ctx = begin(this.layers.under, this.dpr);
+      this.ctx.lineCap = 'round';
+      this.drawGrid(v, zoomedOut);
+      this.drawWeather(v, zoomedOut);
+      this.drawIslandLabels(v, dist);
+
+      // 2. The veil (half resolution: it is soft anyway): dark everywhere, half cleared under air
+      // radar, fully cleared under the surface picture.
+      const F = this.layers.fog;
+      const vg = begin(F, 0.5);
+      vg.setTransform(1, 0, 0, 1, 0, 0);
+      vg.fillStyle = full ? 'rgba(2, 6, 10, 0.62)' : 'rgba(4, 10, 18, 0.32)';
+      vg.fillRect(0, 0, F.canvas.width, F.canvas.height);
+      if (!full) {
+        // Faint diagonal hatching marks the fog as "not seen" without hiding the map.
+        vg.fillStyle = this.hatch(vg);
+        vg.fillRect(0, 0, F.canvas.width, F.canvas.height);
+      }
+      vg.setTransform(F.sc, 0, 0, F.sc, margin * F.sc, margin * F.sc);
+      // Coverage outlines already are the merged edge (weather bites included): one even-odd fill each.
+      vg.globalCompositeOperation = 'destination-out';
+      vg.fillStyle = '#000';
+      for (const [loops, a] of [
+        [cov.air, 0.5],
+        [cov.surf, 1],
+      ] as [Loop[], number][]) {
+        if (!loops.length) continue;
+        vg.globalAlpha = a;
+        vg.beginPath();
+        this.loops(v, loops, vg);
+        vg.fill('evenodd');
+      }
+      vg.globalAlpha = 1;
+      vg.globalCompositeOperation = 'source-over';
+
+      // 3. Coverage edges: a thin faint line where the surface picture ends, or with V the merged
+      // outline of each sensor kind.
+      const eg = begin(this.layers.edge, this.dpr);
+      eg.lineJoin = 'round';
+      const stroke = (loops: Loop[], col: string, width: number, alpha: number) => {
+        if (!loops.length) return;
+        eg.strokeStyle = col;
+        eg.lineWidth = width;
+        eg.globalAlpha = alpha;
+        eg.beginPath();
+        this.loops(v, loops, eg);
+        eg.stroke();
+        eg.globalAlpha = 1;
+      };
+      if (!full) stroke(cov.surf, COVER_COLORS.surf, 0.75, 0.4);
+      else {
+        stroke(cov.air, COVER_COLORS.air, 1.25, 0.45);
+        stroke(cov.surf, COVER_COLORS.surf, 1.25, 0.9);
+        if (cov.sonar.length) {
+          // Sonar discs: their union outline needs a scratch canvas of its own.
+          const E = this.layers.edge;
+          const sc = this.layer2();
+          if (sc.canvas.width !== E.canvas.width || sc.canvas.height !== E.canvas.height) {
+            sc.canvas.width = E.canvas.width;
+            sc.canvas.height = E.canvas.height;
+          }
+          sc.ctx.setTransform(1, 0, 0, 1, 0, 0);
+          sc.ctx.clearRect(0, 0, sc.canvas.width, sc.canvas.height);
+          sc.ctx.setTransform(E.sc, 0, 0, E.sc, margin * E.sc, margin * E.sc);
+          unionOutline(sc.ctx, cov.sonar, COVER_COLORS.sonar, 1.25, (g, d: Disc) => {
+            this.ctx = g;
+            this.circle(v, d[0], d[1], d[2], 0, 72);
+            this.ctx = eg;
+          });
+          eg.setTransform(1, 0, 0, 1, 0, 0);
+          eg.globalAlpha = 0.9;
+          eg.drawImage(sc.canvas, 0, 0);
+          eg.globalAlpha = 1;
+        }
+      }
+    } finally {
+      this.ctx = real;
+      this.pad = 0;
+    }
+  }
+
+  /** Legend for the full sensor view (V). */
+  private drawSensorLegend() {
+    const real = this.ctx;
     real.font = `600 9px ${FONT}`;
     real.textAlign = 'left';
     const items: [string, string][] = [
@@ -1006,13 +1128,14 @@ export class Overlay {
   private hatch(g: CanvasRenderingContext2D): CanvasPattern {
     if (!this.hatchPat) {
       const c = document.createElement('canvas');
-      c.width = c.height = 8;
+      // Drawn into the half-resolution fog layer: 4 px here is 8 px on screen.
+      c.width = c.height = 4;
       const h = c.getContext('2d')!;
-      h.strokeStyle = 'rgba(150, 190, 220, 0.1)';
-      h.lineWidth = 1;
+      h.strokeStyle = 'rgba(150, 190, 220, 0.09)';
+      h.lineWidth = 0.75;
       h.beginPath();
-      h.moveTo(0, 8);
-      h.lineTo(8, 0);
+      h.moveTo(-1, 5);
+      h.lineTo(5, -1);
       h.stroke();
       this.hatchPat = g.createPattern(c, 'repeat')!;
     }
@@ -1026,20 +1149,6 @@ export class Overlay {
       this.scratch2 = { canvas, ctx: canvas.getContext('2d')! };
     }
     const sc = this.scratch2;
-    if (sc.canvas.width !== this.canvas.width || sc.canvas.height !== this.canvas.height) {
-      sc.canvas.width = this.canvas.width;
-      sc.canvas.height = this.canvas.height;
-    }
-    return sc;
-  }
-
-  private scratch: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } | null = null;
-  private layer() {
-    if (!this.scratch) {
-      const canvas = document.createElement('canvas');
-      this.scratch = { canvas, ctx: canvas.getContext('2d')! };
-    }
-    const sc = this.scratch;
     if (sc.canvas.width !== this.canvas.width || sc.canvas.height !== this.canvas.height) {
       sc.canvas.width = this.canvas.width;
       sc.canvas.height = this.canvas.height;
@@ -1508,4 +1617,35 @@ export function weaponModsFor(w: World, u: UView) {
 
 export function unitLabel(w: World, u: { id: number; type: UnitType; owner: number }): string {
   return unitName(w.faction(u.owner), u.type, u.id);
+}
+
+interface Layer {
+  canvas: HTMLCanvasElement;
+  ctx: CanvasRenderingContext2D;
+  /** Canvas pixels per screen (CSS) pixel. */
+  sc: number;
+  used: boolean;
+}
+
+function newLayer(): Layer {
+  const canvas = document.createElement('canvas');
+  return { canvas, ctx: canvas.getContext('2d')!, sc: 1, used: false };
+}
+
+/**
+ * The 2D affine transform [a, b, c, d, e, f] (canvas order) that takes three points (x, y pairs in
+ * `src`) to three others (`dst`): u = a x + c y + e, v = b x + d y + f.
+ */
+function affine(src: number[], dst: number[]): number[] | null {
+  const [x1, y1, x2, y2, x3, y3] = src;
+  const det = x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2);
+  if (Math.abs(det) < 1e-6) return null;
+  const solve = (u1: number, u2: number, u3: number) => [
+    (u1 * (y2 - y3) + u2 * (y3 - y1) + u3 * (y1 - y2)) / det,
+    (u1 * (x3 - x2) + u2 * (x1 - x3) + u3 * (x2 - x1)) / det,
+    (u1 * (x2 * y3 - x3 * y2) + u2 * (x3 * y1 - x1 * y3) + u3 * (x1 * y2 - x2 * y1)) / det,
+  ];
+  const [a, c, e] = solve(dst[0], dst[2], dst[4]);
+  const [b, d, f] = solve(dst[1], dst[3], dst[5]);
+  return [a, b, c, d, e, f];
 }

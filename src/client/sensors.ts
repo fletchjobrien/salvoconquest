@@ -71,6 +71,11 @@ let buf: { n: number; rad: Float32Array; vis: Float32Array; storm: Float32Array;
  * bite out of the covered area wherever it sits far enough from the sensor. The coverage is sampled
  * on a grid with the same rule and traced into outlines (marching squares). Refreshed every 0.4 s.
  */
+/** Whether the next sensorCoverage() call will recompute (callers can keep it off a busy frame). */
+export function coverageStale(w: World): boolean {
+  return !(cache && w.clock >= cache.at && w.clock - cache.at < 0.4);
+}
+
 export function sensorCoverage(w: World): Coverage {
   if (cache && w.clock >= cache.at && w.clock - cache.at < 0.4) return cache.cov;
   const { src, sonar } = sources(w);

@@ -105,8 +105,16 @@ class Pool {
     this.points.frustumCulled = false;
   }
 
+  /** Pixels per km of particle size at 1 km from the camera, and the camera distance (set every frame). */
+  pxScale = 300;
+  /** 0: never skip (rain is placed around the camera on purpose). */
+  camDist = 0;
+  /** Next slot to overwrite once the pool is full (oldest first, roughly). */
+  private victim = 0;
+
   add(p: Partial<P> & { x: number; y: number; z: number }) {
-    if (this.ps.length >= this.max) this.ps.shift();
+    // Too small to show from here (it would only fade in as a sub-pixel sprite): skip it.
+    if (Math.max(p.s0 ?? 0.1, p.s1 ?? 0.2) * this.pxScale < this.camDist * 0.35) return;
     const q: P = {
       vx: 0,
       vy: 0,
@@ -130,7 +138,12 @@ class Pool {
       cl: 0.5,
       ...p,
     };
-    this.ps.push(q);
+    if (this.ps.length < this.max) this.ps.push(q);
+    else {
+      // Full: overwrite in turn instead of shifting thousands of entries.
+      this.ps[this.victim] = q;
+      this.victim = (this.victim + 1) % this.max;
+    }
   }
 
   update(dt: number) {
@@ -287,6 +300,7 @@ export class Fx {
 
   /** One tracer streak this frame, from (x1..) back toward (x0..). */
   streak(x0: number, a0: number, y0: number, x1: number, a1: number, y1: number, r: number, g: number, b: number) {
+    if (!this.seen2(x0, a0, y0, x1, a1, y1)) return;
     if (this.streakN >= 800) return;
     const i = this.streakN++;
     this.streakPos.set([x1, a1, y1, x0, a0, y0], i * 6);
@@ -296,6 +310,39 @@ export class Fx {
   setScale(viewportHeight: number, fovDeg: number) {
     const s = viewportHeight / (2 * Math.tan((fovDeg * Math.PI) / 360));
     for (const p of [this.smoke, this.foam, this.glow, this.rain]) p.mat.uniforms.scale.value = s;
+  }
+
+  private vp = new THREE.Matrix4();
+  private camPos = new THREE.Vector3();
+
+  /**
+   * Set the view for this frame's culling. Effects that start off screen (with a margin) are not
+   * made at all: nobody sees them, and they would only fill the pools.
+   */
+  setView(camera: THREE.PerspectiveCamera, viewportHeight: number) {
+    const pxScale = viewportHeight / (2 * Math.tan((camera.fov * Math.PI) / 360));
+    camera.updateMatrixWorld();
+    this.vp.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    this.camPos.setFromMatrixPosition(camera.matrixWorld);
+    for (const p of [this.smoke, this.foam, this.glow]) {
+      p.pxScale = pxScale;
+      p.camDist = Math.hypot(this.camPos.x - this.view.x, this.camPos.y, this.camPos.z - this.view.y);
+    }
+  }
+
+  /** Whether a point (map x, height, map y) is on screen or within `pad` (in half-screens) of it. */
+  seen(x: number, alt: number, y: number, pad = 0.35): boolean {
+    const e = this.vp.elements;
+    const w = e[3] * x + e[7] * alt + e[11] * y + e[15];
+    if (w <= 0.01) return false;
+    const cx = (e[0] * x + e[4] * alt + e[8] * y + e[12]) / w;
+    const cy = (e[1] * x + e[5] * alt + e[9] * y + e[13]) / w;
+    return cx > -1 - pad && cx < 1 + pad && cy > -1 - pad && cy < 1 + pad;
+  }
+
+  /** Either end of a line (a burst of fire, a trail segment) is on screen. */
+  private seen2(x0: number, a0: number, y0: number, x1: number, a1: number, y1: number): boolean {
+    return this.seen(x0, a0, y0) || this.seen(x1, a1, y1);
   }
 
   private clock = 0;
@@ -347,6 +394,7 @@ export class Fx {
   // ---- emitters ----
 
   wake(x: number, y: number, heading: number, speed: number, width: number) {
+    if (!this.seen(x, 0, y)) return;
     // Two foam lines from the stern spreading outward, plus a bow wave.
     const c = Math.cos(heading);
     const s = Math.sin(heading);
@@ -372,12 +420,14 @@ export class Fx {
   }
 
   bowSpray(x: number, y: number, heading: number, len: number) {
+    if (!this.seen(x, 0, y)) return;
     const c = Math.cos(heading);
     const s = Math.sin(heading);
     this.foam.add({ x: x + c * len * 0.46, y: 0.01, z: y + s * len * 0.46, vx: rnd(-0.02, 0.02), vz: rnd(-0.02, 0.02), max: 0.8, s0: len * 0.04, s1: len * 0.1, a0: 0.55 });
   }
 
   subWake(x: number, y: number) {
+    if (!this.seen(x, 0, y)) return;
     this.foam.add({ x: x + rnd(-0.03, 0.03), y: 0.008, z: y + rnd(-0.03, 0.03), max: 2.5, s0: 0.05, s1: 0.15, a0: 0.25 });
   }
 
@@ -386,6 +436,7 @@ export class Fx {
    * unbroken trails at any frame rate), plus the motor flame at the head. Returns leftover distance.
    */
   missileTrail(x0: number, a0: number, y0: number, x1: number, a1: number, y1: number, carry: number, sam: boolean, hostile: boolean): number {
+    if (!this.seen2(x0, a0, y0, x1, a1, y1)) return 0;
     const d = Math.hypot(x1 - x0, a1 - a0, y1 - y0);
     const step = (sam ? 3.5 : 4) * U;
     let acc = carry + d;
@@ -422,6 +473,7 @@ export class Fx {
   }
 
   torpedoTrail(x: number, y: number) {
+    if (!this.seen(x, 0, y)) return;
     this.foam.add({ x, y: 0.006, z: y, max: 3, s0: 0.02, s1: 0.07, a0: 0.45 });
   }
 
@@ -430,6 +482,7 @@ export class Fx {
    * brief light. (dx, dy) points at the target.
    */
   muzzle(x: number, alt: number, y: number, big: number, dx = 0, dy = 0) {
+    if (!this.seen(x, alt, y)) return;
     const l = Math.hypot(dx, dy) || 1;
     const fx = dx / l;
     const fy = dy / l;
@@ -444,6 +497,7 @@ export class Fx {
 
   /** Missile launch: a hot flash and a big billowing cloud of white smoke (smaller for SAMs). */
   launch(x: number, alt: number, y: number, sam = false) {
+    if (!this.seen(x, alt, y)) return;
     this.glow.add({ x, y: alt + 0.05, z: y, max: 0.25, s0: (sam ? 16 : 26) * U, s1: (sam ? 24 : 40) * U, r: 1, g: 0.92, b: 0.7, a0: 1, r2: 1, g2: 0.3, b2: 0.04, cl: 1, sq: true });
     for (let i = 0; i < (sam ? 10 : 20); i++) {
       const a = Math.random() * Math.PI * 2;
@@ -461,6 +515,7 @@ export class Fx {
    * on the water, a water column and foam ring, a light and camera shake.
    */
   explosion(x: number, alt: number, y: number, scale: number, onWater: boolean) {
+    if (!this.seen(x, alt, y, 0.6)) return;
     const s = Math.max(0.3, scale);
     const y0 = alt + 0.02;
     this.glow.add({ x, y: y0, z: y, max: 0.18, s0: 45 * s * U, s1: 80 * s * U, r: 1, g: 0.85, b: 0.6, a0: 0.85, r2: 1, g2: 0.45, b2: 0.1, cl: 1, sq: true });
@@ -500,6 +555,7 @@ export class Fx {
 
   /** A shell striking a hull: a hard flash, a spray of sparks and a few puffs of smoke. */
   shellHit(x: number, alt: number, y: number) {
+    if (!this.seen(x, alt, y)) return;
     const y0 = alt + 0.03;
     this.glow.add({ x, y: y0, z: y, max: 0.15, s0: 18 * U, s1: 26 * U, r: 1, g: 0.92, b: 0.75, a0: 1, r2: 1, g2: 0.4, b2: 0.05, cl: 1, sq: true });
     for (let i = 0; i < 12; i++) {
@@ -517,6 +573,7 @@ export class Fx {
 
   /** A column of white water thrown up and falling back, with a low skirt of spray. */
   waterColumn(x: number, y: number, scale: number) {
+    if (!this.seen(x, 0, y)) return;
     for (let i = 0; i < 40 * scale; i++) {
       const a = Math.random() * Math.PI * 2;
       const r = rnd(0, 4) * scale * U;
@@ -532,6 +589,7 @@ export class Fx {
 
   /** A round landing in the sea: a water column and a foam ring (scale 0.35 small gun ... 0.8 heavy). */
   splash(x: number, y: number, scale = 0.35) {
+    if (!this.seen(x, 0, y)) return;
     this.waterColumn(x, y, scale);
     this.ring(x, y, 34 * scale * U, 1.1, 0.3);
 
@@ -539,6 +597,7 @@ export class Fx {
 
   /** A torpedo hit: a towering column of water, a wide ring, a flash and a smoke pall. */
   torpedoHit(x: number, y: number) {
+    if (!this.seen(x, 0, y, 0.6)) return;
     this.waterColumn(x, y, 2.2);
     this.ring(x, y, 110 * U, 2.2, 0.35);
     this.glow.add({ x, y: 0.05, z: y, max: 0.25, s0: 40 * U, s1: 60 * U, r: 1, g: 0.9, b: 0.7, a0: 1, r2: 1, g2: 0.4, b2: 0.05, cl: 1, sq: true });
@@ -555,6 +614,7 @@ export class Fx {
    * ship fire). Called many times a second while something burns.
    */
   fire(x: number, alt: number, y: number, size: number) {
+    if (!this.seen(x, alt, y, 0.5)) return;
     if (Math.random() < 0.7) {
       this.glow.add({ x: x + rnd(-1.5, 1.5) * size * U, y: alt + 0.02, z: y + rnd(-1.5, 1.5) * size * U, vy: rnd(6, 14) * U, max: rnd(0.4, 0.8), s0: rnd(4, 7) * size * U, s1: rnd(2, 4) * size * U, r: 1, g: 0.6, b: 0.2, a0: 0.95, r2: 0.6, g2: 0.15, b2: 0.02, cl: 1, grav: -4 * U });
     }
@@ -566,6 +626,7 @@ export class Fx {
 
   /** Chaff: a launcher thump, then a glittering cloud of foil that spreads, drifts and slowly falls. */
   chaff(x: number, alt: number, y: number) {
+    if (!this.seen(x, alt, y)) return;
     this.glow.add({ x, y: alt, z: y, max: 0.25, s0: 0.2, s1: 0.05, r: 1, g: 0.9, b: 0.6, a0: 1 });
     for (let i = 0; i < 70; i++) {
       const a = Math.random() * Math.PI * 2;
@@ -580,6 +641,7 @@ export class Fx {
 
   /** Smoke grenades bursting around a ground unit. */
   smokeBurst(x: number, alt: number, y: number) {
+    if (!this.seen(x, alt, y, 0.6)) return;
     for (let i = 0; i < 24; i++) {
       const a = Math.random() * Math.PI * 2;
       const v = rnd(0.1, 0.35);
@@ -589,11 +651,13 @@ export class Fx {
 
   /** One puff of a standing smoke screen (white-grey, slowly rising and spreading). */
   smokePuff(x: number, alt: number, y: number, size: number, a0: number) {
+    if (!this.seen(x, alt, y, 0.5)) return;
     this.smoke.add({ x, y: alt + 0.02, z: y, vx: rnd(-0.02, 0.02) + 0.01, vy: rnd(0.01, 0.04), vz: rnd(-0.02, 0.02), max: rnd(3.5, 5.5), s0: size * 0.4, s1: size, r: 0.84, g: 0.85, b: 0.83, a0, drag: 0.5 });
   }
 
   /** A missile killed in the air: a real explosion with black smoke, not a spark. */
   intercept(x: number, alt: number, y: number) {
+    if (!this.seen(x, alt, y)) return;
     this.glow.add({ x, y: alt, z: y, max: 0.2, s0: 34 * U, s1: 50 * U, r: 1, g: 0.95, b: 0.8, a0: 1, r2: 1, g2: 0.4, b2: 0.05, cl: 1, sq: true });
     for (let i = 0; i < 18; i++) {
       const a = Math.random() * Math.PI * 2;
@@ -617,6 +681,7 @@ export class Fx {
 
   /** A SAM that missed and self-destructed: a small black puff in the sky. */
   airburst(x: number, alt: number, y: number) {
+    if (!this.seen(x, alt, y)) return;
     this.glow.add({ x, y: alt, z: y, max: 0.15, s0: 20 * U, s1: 30 * U, r: 1, g: 0.9, b: 0.7, a0: 1, r2: 1, g2: 0.4, b2: 0.05, cl: 1, sq: true });
     for (let i = 0; i < 8; i++) {
       const g = rnd(0.1, 0.18);
@@ -654,6 +719,7 @@ export class Fx {
    * dust kicked up around the target.
    */
   smallArms(x0: number, a0: number, y0: number, x1: number, a1: number, y1: number, water: boolean) {
+    if (!this.seen2(x0, a0, y0, x1, a1, y1)) return;
     const n = 4 + Math.floor(Math.random() * 3);
     for (let i = 0; i < n; i++) {
       this.at(i * 0.11 + Math.random() * 0.04, () => {
@@ -671,6 +737,7 @@ export class Fx {
 
   /** Autocannons and AA guns: fast chains of orange tracers, big flashes, flak puffs at aircraft. */
   autocannon(x0: number, a0: number, y0: number, x1: number, a1: number, y1: number, water: boolean, air: boolean) {
+    if (!this.seen2(x0, a0, y0, x1, a1, y1)) return;
     const n = 6 + Math.floor(Math.random() * 4);
     for (let i = 0; i < n; i++) {
       this.at(i * 0.07, () => {
@@ -691,6 +758,7 @@ export class Fx {
 
   /** A shell landing on land: a fountain of dirt and stones, then a dust cloud. */
   dirt(x: number, alt: number, y: number, size: number) {
+    if (!this.seen(x, alt, y)) return;
     const s = Math.max(0.4, size);
     for (let i = 0; i < 10 * s; i++) {
       const a = Math.random() * Math.PI * 2;
@@ -701,6 +769,7 @@ export class Fx {
   }
 
   tracer(x0: number, a0: number, y0: number, x1: number, a1: number, y1: number) {
+    if (!this.seen2(x0, a0, y0, x1, a1, y1)) return;
     const n = 4;
     for (let i = 0; i < n; i++) {
       const t = Math.random();
@@ -709,10 +778,12 @@ export class Fx {
   }
 
   contrail(x: number, alt: number, y: number) {
+    if (!this.seen(x, alt, y)) return;
     this.smoke.add({ x, y: alt, z: y, max: rnd(2.5, 3.5), s0: 0.015, s1: 0.07, r: 0.95, g: 0.96, b: 0.98, a0: 0.3, drag: 0 });
   }
 
   dust(x: number, alt: number, y: number) {
+    if (!this.seen(x, alt, y)) return;
     this.smoke.add({ x: x + rnd(-0.08, 0.08), y: alt + 0.01, z: y + rnd(-0.08, 0.08), vy: 0.02, max: 1.6, s0: 0.05, s1: 0.18, r: 0.65, g: 0.6, b: 0.5, a0: 0.25 });
   }
 

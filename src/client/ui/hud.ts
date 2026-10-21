@@ -228,13 +228,14 @@ export class Hud {
   /** Called every frame; heavy DOM work is throttled. */
   update(selected: UView[], clock: number) {
     const w = this.world;
+    // The DOM changes at most 10 times a second, not every frame: layout and style work is costly.
+    if (clock - this.lastHud < 0.1 && clock >= this.lastHud) return;
+    this.lastHud = clock;
     const cashHtml = `${fmtMoney(w.displayCash)}<small>+${w.income.toFixed(1)}/s</small>`;
     if (cashHtml !== this.lastCash) {
       this.cashEl.innerHTML = cashHtml;
       this.lastCash = cashHtml;
     }
-    if (clock - this.lastHud < 0.12) return;
-    this.lastHud = clock;
     const t = Math.floor(w.serverTime);
     this.clockEl.textContent = `T+${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
     this.updateWeatherLabel();
