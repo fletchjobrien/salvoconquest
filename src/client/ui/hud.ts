@@ -286,6 +286,9 @@ export class Hud {
     if (fogs) parts.push(`${fogs} FOG BANK${fogs > 1 ? 'S' : ''}`);
     this.wxEl.textContent = parts.length ? parts.join(' · ') : 'CLEAR · VIS GOOD';
     this.wxEl.className = 'wx' + (storms ? ' storm' : '');
+    this.wxEl.title = storms
+      ? 'Inside a storm (at full strength): radar -45%, eyesight -70%; ships 40% slower and turn 40% slower; aircraft 25% slower and burn fuel twice as fast; troops 50% slower; guns and bombs 35% less accurate from a storm, missiles 10%; anything in a storm 25% harder to hit. Subs and sonar do not feel it.'
+      : '';
   }
 
   private updatePlayers() {

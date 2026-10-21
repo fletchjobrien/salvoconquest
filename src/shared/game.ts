@@ -1893,7 +1893,8 @@ export class Game {
       }
       return;
     }
-    u.fuel -= dt;
+    // Fighting a storm burns fuel up to twice as fast.
+    u.fuel -= dt * (1 + this.weatherAt(u.x, u.y).storm);
     // Bingo fuel: turn back while the nearest base is still in reach.
     let bingo = false;
     if (u.order.k !== 'rtb' && this.tickN % 5 === u.id % 5) {
@@ -2030,8 +2031,10 @@ export class Game {
 
   private flyToward(u: Unit, x: number, y: number, dt: number) {
     const want = Math.atan2(y - u.y, x - u.x);
-    u.heading = turnToward(u.heading, want, u.turnRate * dt);
-    u.speed += (u.maxSpeed - u.speed) * Math.min(1, dt * 0.8);
+    // Inside a storm: up to a quarter slower and less agile (headwinds and turbulence).
+    const storm = this.weatherAt(u.x, u.y).storm;
+    u.heading = turnToward(u.heading, want, u.turnRate * (1 - 0.3 * storm) * dt);
+    u.speed += (u.maxSpeed * (1 - 0.25 * storm) - u.speed) * Math.min(1, dt * 0.8);
   }
 
   private orbit(u: Unit, x: number, y: number, r: number, dt: number) {
@@ -2115,10 +2118,12 @@ export class Game {
       const diff = Math.abs(angDiff(u.heading, want));
       if (dom === 'land') {
         u.heading = turnToward(u.heading, want, u.turnRate * dt);
-        u.speed = u.maxSpeed;
+        // Troops slog through a storm at up to half speed.
+        u.speed = u.maxSpeed * (1 - 0.5 * w.storm);
       } else {
         // Jammed steering turns at a quarter rate; engine and flooding damage cut speed.
-        u.heading = turnToward(u.heading, want, u.turnRate * (u.sys.rudder > 0 ? 0.25 : 1) * dt);
+        // Heavy seas: ships answer the helm slowly (subs run deep and do not feel it).
+        u.heading = turnToward(u.heading, want, u.turnRate * (u.sys.rudder > 0 ? 0.25 : 1) * (dom === 'sub' ? 1 : 1 - 0.4 * w.storm) * dt);
         const dEnd = Math.hypot(target.x - u.x, target.y - u.y) + (path!.length > 1 ? 5 : 0);
         let vmax = u.maxSpeed * this.speedFactor(u) * wMul * (diff > 1 ? 0.45 : 1);
         vmax = Math.min(vmax, Math.max(0.05, dEnd * 0.35));
@@ -2455,7 +2460,7 @@ export class Game {
       t: 0,
       life: kind === 'shell' || kind === 'bomb' ? d / speed : ((w.mod.range ?? 10) * (kind === 'sam' ? 1.25 : 1.6)) / speed + (kind === 'sam' ? 2 : 4),
       dmgMul: 1,
-      hitChance: w.mod.accuracy ?? 0.7,
+      hitChance: (w.mod.accuracy ?? 0.7) * (1 - this.weatherAt(sh.x, sh.y).storm * (kind === 'shell' || kind === 'bullet' || kind === 'bomb' ? 0.35 : kind === 'torpedo' || kind === 'mine' ? 0 : 0.1)),
       sx: sh.x,
       sy: sh.y,
       dead: false,

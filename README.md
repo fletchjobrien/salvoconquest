@@ -105,7 +105,7 @@ track. **Unidentified contacts cannot be targeted**: they mark a position only (
 once a contact is classified you can attack it. Ground contacts use a square marker, surface contacts a quatrefoil.
 The minimap outlines your sensor coverage (surface radar and eyes, air radar, sonar). On the main map, water and land
 outside your surface picture are always shaded with a light, hatched veil, with a thin line where coverage ends. Press
-**V** (or the SENSORS button above the minimap) for the full sensor view: everything your sensors cannot see goes dark. At most two weather systems are on the map at once. Storms cut radar range and eyesight; fog banks cut eyesight. The coverage lines and the veil show this: where a storm or fog bank sits in your coverage, the covered area has a bite taken out of it. Sonar is not affected. Submarines are
+**V** (or the SENSORS button above the minimap) for the full sensor view: everything your sensors cannot see goes dark. At most two weather systems are on the map at once. Storms cut radar range and eyesight; fog banks cut eyesight. Inside a storm (at full strength) ships move and turn 40% slower, aircraft fly 25% slower and burn fuel twice as fast, troops move at half speed, guns and bombs fired from the storm are 35% less accurate (missiles 10%), and anything in it is 25% harder to hit. Submarines do not feel it. The coverage lines and the veil show this: where a storm or fog bank sits in your coverage, the covered area has a bite taken out of it. Sonar is not affected. Submarines are
 invisible until a sonar hears them, and they reveal themselves briefly when they fire.
 
 **What the coverage lines mean** (minimap and the V view): **blue** is your surface picture (surface radar
