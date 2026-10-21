@@ -208,7 +208,7 @@ capital class is a choice of ship: you build cruisers, carriers **or** battleshi
 | **Infantry** | **Heavy Landing Craft**: armoured landing craft with 3× the hull · **Heavy APCs**: autocannon and mortars against troops · **Sappers**: dig in (−30% damage while holding) and lay one minefield [M] |
 | **Anti-ship battery** | **Short Range**: 14 km, 8 missiles · **Long Range**: 27 km, 2 missiles (both need outside radar) · **Radar Independent**: brings its own radar truck |
 | **SAM battery** | **Missile Defence**: 10 km, 12 rounds, better interceptor · **Anti-Air**: 25% more reach, 5 rounds · **AA Guns**: never run out, 3.5 km, inaccurate |
-| **Fighter** | **Anti-Missile**: 9 km missiles, 4 of them, that also shoot down anti-ship missiles · **Anti-Air**: longer reach, more accurate, 1 round · **Long Endurance**: drop tanks (+60% time on station), no dogfight missiles |
+| **Fighter** | **Anti-Missile**: 9 km missiles, 4 of them, that also shoot down anti-ship missiles · **Anti-Air**: longer reach, more accurate, 1 round · **SAM Screen**: counter-SAM missiles (10 km, 6 rounds) that shoot down enemy SAMs and air-to-air missiles chasing your missiles or aircraft; escort a strike flight with it, or fly it over a missile barrage |
 | **Attack aircraft** | **Anti-Ship**: heavy anti-ship missiles · **Anti-Ground**: stand-off missiles and guided bombs · **Anti-Sub**: two loads of ASW torpedoes |
 | **AEW** | **Long Endurance**: drop tanks · **Long Range**: 46 km air / 38 km surface radar · **Sonobuoys**: drops listening buoys [M] |
 

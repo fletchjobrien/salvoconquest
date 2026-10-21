@@ -83,6 +83,8 @@ export interface ModuleDef {
   ability?: 'mines' | 'buoys';
   /** Land mines (sappers): laid on land, hit ground units. */
   land?: boolean;
+  /** Counter-SAM: intercepts enemy SAMs and air-to-air missiles in flight, not anti-ship missiles. */
+  antiSam?: boolean;
   /** Drops a sonobuoy by itself every few km the ship sails (sub-hunter frigate). */
   autobuoy?: boolean;
   // Utility modifiers.
@@ -204,6 +206,7 @@ for (const [b, f] of [['aam_long', 'AMRAAM'], ['pl15', 'PL-15']] as const) {
   const m = MODULES[b];
   derive(b, b + '_m', `${f} (interceptor)`, 'Medium-range missiles that also shoot down anti-ship missiles: 9 km, 4 rounds.', { range: 9, ammo: 4, dmg: { air: 36, missile: 1 }, intercept: 0.35 });
   derive(b, b + '_l', `${f} (long range)`, 'Fewer, longer-reaching, more accurate missiles.', { range: (m.range ?? 16) * 1.25, ammo: 1, accuracy: (m.accuracy ?? 0.7) + 0.1 });
+  derive(b, b + '_x', `${f} (counter-SAM)`, 'Shoots down enemy SAMs and air-to-air missiles in flight: 10 km, 6 rounds. Still fights aircraft.', { range: 10, ammo: 6, cooldown: 1, speed: 2.8, dmg: { air: 30 }, intercept: 0.7, antiSam: true });
 }
 
 export interface UnitDef {
@@ -431,7 +434,7 @@ export const CLASSES: Record<ClassId, ClassDef> = {
     variants: [
       { name: 'Anti-Missile', desc: 'Shorter-range missiles (9 km), twice as many; they also shoot down anti-ship missiles.', type: 'fighter', lo: ['@aam_m', 'aam_short', 'gunpod'] },
       { name: 'Anti-Air', desc: 'Long-range missiles that reach 25% further and hit more often, but fewer of them.', type: 'fighter', lo: ['@aam_l', 'aam_short', 'gunpod'] },
-      { name: 'Long Endurance', desc: 'Drop tanks: 60% more time on station, no dogfight missiles.', type: 'fighter', lo: ['@aam', 'droptank', 'gunpod'] },
+      { name: 'SAM Screen', desc: 'Counter-SAM missiles that shoot down enemy SAMs and air-to-air missiles in flight. Fly it with (or escort) your strike flights, or over a missile barrage, to get them through.', type: 'fighter', lo: ['@aam_x', 'aam_short', 'gunpod'] },
     ],
   },
   strike: {

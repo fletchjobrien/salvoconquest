@@ -7,7 +7,7 @@
 //              strike cruiser, a fictional railgun battleship, ski-jump carrier, ZBD-05
 //              amphibious IFV, YJ-12 coastal TEL, HQ-9, J-20, J-15, KJ-600.
 // Every model has three versions, one per fleet-comp variant (vi 0..2): the same hull with the
-// variant's kit visible on deck (extra launchers, a second gun, mine rails, drop tanks...).
+// variant's kit visible on deck (extra launchers, a second gun, mine rails, drop tanks, missiles...).
 // Axes: +x is the bow or nose, +y up; +z is starboard (the carrier island side is -z, as before).
 import * as THREE from 'three';
 import type { Faction } from '../../shared/defs';
@@ -742,8 +742,8 @@ function aew(P: Part[], f: Faction, vi = 0) {
 }
 
 /** Stores under one jet's wings (nose +x, centred at ox, oz): missiles, tanks, bombs or torpedoes. */
-function stores(P: Part[], ox: number, oz: number, kind: 'aam' | 'aam_big' | 'tank' | 'asm' | 'bomb' | 'torp') {
-  const spec = { aam: [0.004, 0.16, 0xd8d8d0, 2], aam_big: [0.006, 0.24, 0xd8d8d0, 1], tank: [0.014, 0.22, 0x6f7880, 1], asm: [0.009, 0.28, 0x8a8f86, 1], bomb: [0.01, 0.14, 0x55604e, 1], torp: [0.009, 0.22, 0xc9a24a, 1] } as const;
+function stores(P: Part[], ox: number, oz: number, kind: 'aam' | 'aam_big' | 'aam_x' | 'tank' | 'asm' | 'bomb' | 'torp') {
+  const spec = { aam: [0.004, 0.16, 0xd8d8d0, 2], aam_big: [0.006, 0.24, 0xd8d8d0, 1], aam_x: [0.0045, 0.15, 0xe2c76a, 3], tank: [0.014, 0.22, 0x6f7880, 1], asm: [0.009, 0.28, 0x8a8f86, 1], bomb: [0.01, 0.14, 0x55604e, 1], torp: [0.009, 0.22, 0xc9a24a, 1] } as const;
   const [r, len, col, n] = spec[kind];
   for (const s of [-1, 1]) for (let i = 0; i < n; i++) P.push(tube(r, len, ox - 0.1, -0.035, oz + s * (0.16 + i * 0.07), col, 0, 0, 5));
 }
@@ -754,7 +754,7 @@ export function airParts(P: Part[], type: 'fighter' | 'strike' | 'recon', f: Fac
     return;
   }
   const spec = type === 'fighter' ? (f === 'coalition' ? F22 : J20) : f === 'coalition' ? F35 : J15;
-  const kit = type === 'fighter' ? (['aam', 'aam_big', 'tank'] as const)[vi] : (['asm', 'bomb', 'torp'] as const)[vi];
+  const kit = type === 'fighter' ? (['aam', 'aam_big', 'aam_x'] as const)[vi] : (['asm', 'bomb', 'torp'] as const)[vi];
   for (const [ox, oz] of [[0.2, 0], [-0.45, 0.75]] as const) {
     jet(P, ox, oz, spec);
     stores(P, ox, oz, kit ?? 'aam');

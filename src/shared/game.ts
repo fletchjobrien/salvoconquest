@@ -2427,18 +2427,20 @@ export class Game {
     let best: Projectile | null = null;
     let bd = 1e9;
     for (const p of this.projs) {
-      if (p.dead || p.kind !== 'missile' || p.team === sh.team) continue;
+      if (p.dead || p.team === sh.team || p.kind !== (w.mod.antiSam ? 'sam' : 'missile')) continue;
       const d = Math.hypot(p.x - sh.x, p.y - sh.y);
       if (d > range) continue;
-      // Only engage missiles heading for something of ours.
+      // Only engage missiles heading for something of ours (counter-SAM: SAMs chasing our
+      // missiles or our aircraft).
       const tgt = this.units.get(p.target);
-      const threat = tgt ? tgt.team === sh.team : Math.hypot(p.tx - sh.x, p.ty - sh.y) < 12;
+      const ourMissile = p.target <= -2 && this.projs.some((q) => !q.dead && q.id === -2 - p.target && q.team === sh.team);
+      const threat = tgt ? tgt.team === sh.team : ourMissile || (!w.mod.antiSam && Math.hypot(p.tx - sh.x, p.ty - sh.y) < 12);
       if (!threat) continue;
       // Never more than two SAMs in flight at one missile; if both miss, fire again.
       if (w.mod.proj === 'sam' && this.samsAt(-2 - p.id) >= 2) continue;
       // Most urgent first: the missile closest to hitting its target (not merely closest to
       // this launcher, which may be passing by on its way to another ship).
-      const urgency = tgt ? Math.hypot(tgt.x - p.x, tgt.y - p.y) : Math.hypot(p.tx - p.x, p.ty - p.y);
+      const urgency = tgt ? Math.hypot(tgt.x - p.x, tgt.y - p.y) : d;
       if (urgency < bd) {
         bd = urgency;
         best = p;
