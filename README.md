@@ -40,7 +40,8 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
   (destroyer: 4 anti-ship missiles; 5 SM-6 or 6 HQ-9B SAMs per launcher) and rearm at a naval base or dockyard (ground units at any friendly building), but only after a lull: no hit
   for 30 s, no shots fired for 20 s, and nothing homing on them. Field medics and launcher reloads wait too. Missile batteries (buildings and trucks) fire at half their old rate.
 - Ground units capture buildings by standing next to them. Captured **resource sites** spawn merchant
-  ships that sail cargo home and turn it into cash. Enemy subs love merchants. When a merchant is sunk,
+  ships that sail cargo home and turn it into cash. They unload only at a naval base (your own or a captured one)
+  or a port on your home island, never at a forward dockyard. Enemy subs love merchants. When a merchant is sunk,
   its site waits 45 s before it sends the next one.
 - Other buildings give bonuses: radar stations (24 km air / 18 km surface radar), airbases, barracks and dockyards (forward production, repair, rearm),
   missile batteries (fire for whoever owns them).

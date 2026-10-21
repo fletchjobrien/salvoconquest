@@ -1217,12 +1217,16 @@ export class Game {
     }
   }
 
+  /**
+   * Where merchants unload: the nearest naval base we hold, or a port on our home island. Forward
+   * dockyards do not count: cargo has to come home.
+   */
   private homePort(p: Player, nearX: number, nearY: number): { x: number; y: number } | null {
     let best: { x: number; y: number } | null = null;
     let bd = 1e9;
     for (const s of this.sites) {
-      if (s.owner !== p.id || !s.dock || (s.type !== 'navalbase' && s.type !== 'dockyard')) continue;
-      const d = Math.hypot(s.dock.x - nearX, s.dock.y - nearY) + (s.type === 'navalbase' ? 0 : 6);
+      if (s.owner !== p.id || !s.dock || (s.type !== 'navalbase' && !(s.type === 'dockyard' && s.home === p.slot))) continue;
+      const d = Math.hypot(s.dock.x - nearX, s.dock.y - nearY);
       if (d < bd) {
         bd = d;
         best = s.dock;
