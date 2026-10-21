@@ -10,6 +10,8 @@ interface Slot extends LobbySlot {
   ws: WebSocket | null;
   fleet: Fleet | undefined;
   pid: number; // player index once started
+  /** The browser tab's reconnect token (empty for bots). */
+  token: string;
   needFull: boolean;
   /** Token bucket for commands and chat. */
   tokens: number;
@@ -63,11 +65,16 @@ export class GameRoom extends DurableObject {
       }
       if (msg.t === 'ping') return this.send(ws, { t: 'pong', n: msg.n });
       if (msg.t === 'hello') {
-        slot = this.join(ws, msg.name, msg.faction, msg.fleet);
+        slot = this.join(ws, msg.name, msg.faction, msg.fleet, msg.token);
         return;
       }
-      if (!slot) return;
-      this.handle(slot, msg);
+      if (!slot || slot.ws !== ws) return;
+      // One bad message must never take the room (and every player's connection) down.
+      try {
+        this.handle(slot, msg);
+      } catch (e) {
+        console.error('room: message failed', msg.t, e);
+      }
     });
     const drop = () => {
       if (slot && slot.ws === ws) {
@@ -80,27 +87,38 @@ export class GameRoom extends DurableObject {
       }
       if (!this.slots.some((s) => s.ws)) this.idleSince = Date.now();
     };
-    ws.addEventListener('close', drop);
+    ws.addEventListener('close', () => {
+      // Answer the client's close frame: without it the browser waits about a minute before it
+      // reports the socket closed (and only then reconnects).
+      try {
+        ws.close(1000, 'bye');
+      } catch {
+        /* already closed */
+      }
+      drop();
+    });
     ws.addEventListener('error', drop);
   }
 
-  private join(ws: WebSocket, rawName: unknown, rawFaction: unknown, rawFleet: unknown): Slot | null {
+  private join(ws: WebSocket, rawName: unknown, rawFaction: unknown, rawFleet: unknown, rawToken: unknown): Slot | null {
     const name = String(rawName ?? 'PLAYER').replace(/[^\w .\-]/g, '').slice(0, 16).toUpperCase() || 'PLAYER';
     const faction: Faction = FACTIONS.includes(rawFaction as Faction) ? (rawFaction as Faction) : 'coalition';
     const fleet = sanitizeFleet(rawFleet);
+    const token = typeof rawToken === 'string' ? rawToken.slice(0, 64) : '';
+    // The same browser tab coming back (a refresh, a dropped connection): it takes back its seat, even
+    // if the server has not noticed yet that the old connection is gone.
+    const mine = token ? this.slots.find((s) => !s.bot && s.token === token) : undefined;
+    if (mine) return this.resume(mine, ws);
     if (this.game) {
-      // Rejoin a running game by name.
+      // A seat left empty in a running game can be taken back by name (another tab or device).
       const s = this.slots.find((s) => !s.bot && !s.ws && s.name === name);
       if (!s) {
         this.send(ws, { t: 'error', msg: 'Game already in progress.' });
         ws.close(1000, 'in progress');
         return null;
       }
-      s.ws = ws;
-      s.needFull = true;
-      this.send(ws, { t: 'welcome', slot: s.slot, code: this.code });
-      this.send(ws, { t: 'start', info: this.startInfo(s) });
-      return s;
+      if (token) s.token = token;
+      return this.resume(s, ws);
     }
     if (this.slots.length >= MAX_SLOTS) {
       // Replace a bot if there is one.
@@ -118,11 +136,29 @@ export class GameRoom extends DurableObject {
     let uniqueName = name;
     let k = 2;
     while (this.slots.some((s) => s.name === uniqueName)) uniqueName = `${name}${k++}`;
-    const s: Slot = { slot: slotNo, name: uniqueName, faction, team: slotNo, bot: false, ready: false, ws, fleet, pid: -1, needFull: true, tokens: BUCKET, refill: Date.now() };
+    const s: Slot = { slot: slotNo, name: uniqueName, faction, team: slotNo, bot: false, ready: false, ws, fleet, pid: -1, token, needFull: true, tokens: BUCKET, refill: Date.now() };
     this.slots.push(s);
     this.ensureHost();
     this.send(ws, { t: 'welcome', slot: slotNo, code: this.code });
     this.broadcastLobby();
+    return s;
+  }
+
+  /** Put a returning player back in their seat on a new connection; the old one, if still open, is closed. */
+  private resume(s: Slot, ws: WebSocket): Slot {
+    const old = s.ws;
+    s.ws = ws;
+    s.needFull = true;
+    if (old && old !== ws) {
+      try {
+        old.close(1000, 'replaced');
+      } catch {
+        /* already closed */
+      }
+    }
+    this.send(ws, { t: 'welcome', slot: s.slot, code: this.code });
+    if (this.game) this.send(ws, { t: 'start', info: this.startInfo(s) });
+    else this.broadcastLobby();
     return s;
   }
 
@@ -142,6 +178,8 @@ export class GameRoom extends DurableObject {
   }
 
   private handle(slot: Slot, msg: ClientMsg) {
+    if (!msg || typeof msg !== 'object') return;
+    if (msg.t === 'cmd' && (!msg.cmd || typeof msg.cmd !== 'object')) return;
     if ((msg.t === 'cmd' || msg.t === 'chat' || msg.t === 'lobby') && !this.allow(slot, msg.t === 'chat' ? 8 : 1)) return;
     if (msg.t === 'cmd') {
       if (this.game && slot.pid >= 0) this.game.command(slot.pid, msg.cmd);
@@ -163,7 +201,7 @@ export class GameRoom extends DurableObject {
           const used = new Set(this.slots.map((s) => s.slot));
           const slotNo = [0, 2, 1, 3].find((n) => !used.has(n))!;
           const bf: Faction = slot.faction === 'coalition' ? 'union' : 'coalition';
-          this.slots.push({ slot: slotNo, name: BOT_NAMES[slotNo % BOT_NAMES.length], faction: bf, team: slotNo, bot: true, ready: true, ws: null, fleet: undefined, pid: -1, needFull: false, tokens: 0, refill: 0 });
+          this.slots.push({ slot: slotNo, name: BOT_NAMES[slotNo % BOT_NAMES.length], faction: bf, team: slotNo, bot: true, ready: true, ws: null, fleet: undefined, pid: -1, token: '', needFull: false, tokens: 0, refill: 0 });
         }
         if (typeof msg.removeSlot === 'number') this.slots = this.slots.filter((s) => !(s.bot && s.slot === msg.removeSlot));
         if (msg.botFaction) {
@@ -245,27 +283,37 @@ export class GameRoom extends DurableObject {
         if (Date.now() - this.idleSince > 5 * 60_000) this.stopGame();
         return; // pause while nobody is connected
       }
-      while (acc >= TICK) {
-        acc -= TICK;
-        for (const b of this.bots) b.tick();
-        g.step();
-        // Snapshots go out at 5 Hz; events accumulate between them so none are lost.
-        if (g.tickN % SNAP_EVERY !== 0 && !g.over) continue;
-        for (const s of this.slots) {
-          if (!s.ws || s.pid < 0) continue;
-          const snap = g.snapshotFor(s.pid, s.needFull);
-          s.needFull = false;
-          this.send(s.ws, snap);
+      try {
+        while (acc >= TICK && this.game === g) {
+          acc -= TICK;
+          this.step(g);
         }
-        g.flushEvents();
-        if (g.over) {
-          const winners = g.players.filter((p) => p.team === g.winnerTeam).map((p) => p.id);
-          for (const s of this.slots) this.send(s.ws, { t: 'end', winner: g.winnerTeam, winners, stats: g.results() });
-          this.stopGame();
-          return;
-        }
+      } catch (e) {
+        // Keep the room alive: log it, drop the backlog and carry on with the next tick.
+        console.error('room: tick failed', e);
+        acc = 0;
       }
     }, TICK * 1000);
+  }
+
+  /** One simulation tick; snapshots go out every SNAP_EVERY ticks (5 Hz). */
+  private step(g: Game) {
+    for (const b of this.bots) b.tick();
+    g.step();
+    // Events accumulate between snapshots so none are lost.
+    if (g.tickN % SNAP_EVERY !== 0 && !g.over) return;
+    for (const s of this.slots) {
+      if (!s.ws || s.pid < 0) continue;
+      const snap = g.snapshotFor(s.pid, s.needFull);
+      s.needFull = false;
+      this.send(s.ws, snap);
+    }
+    g.flushEvents();
+    if (g.over) {
+      const winners = g.players.filter((p) => p.team === g.winnerTeam).map((p) => p.id);
+      for (const s of this.slots) this.send(s.ws, { t: 'end', winner: g.winnerTeam, winners, stats: g.results() });
+      this.stopGame();
+    }
   }
 
   private stopGame() {

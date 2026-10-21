@@ -16,24 +16,76 @@ export interface Conn {
   speed?: number;
 }
 
+/** This browser tab's identity for the server. It survives a page reload (sessionStorage), so a refresh gets its seat back. */
+export function tabToken(): string {
+  const make = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`);
+  try {
+    let t = sessionStorage.getItem('salvo.token');
+    if (!t) {
+      t = make();
+      sessionStorage.setItem('salvo.token', t);
+    }
+    return t;
+  } catch {
+    return make();
+  }
+}
+
+/** Server close reasons after which trying again cannot help. */
+const FINAL = new Set(['in progress', 'full', 'replaced']);
+/** Give up reconnecting after this long (ms). */
+const RETRY_FOR = 120_000;
+/** An open connection that has said nothing for this long (ms) is dead (sleep, network change). */
+const SILENT = 12_000;
+
 export class OnlineConn implements Conn {
   readonly local = false;
   onMessage: (m: ServerMsg) => void = () => {};
   onClose: (reason: string) => void = () => {};
+  /** 'lost': the connection dropped and we are trying again (attempt n); 'back': reconnected. */
+  onReconnect: (state: 'lost' | 'back', attempt: number) => void = () => {};
   latency = 0;
-  private ws: WebSocket;
+  private ws!: WebSocket;
   private pingTimer: ReturnType<typeof setInterval>;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private queue: string[] = [];
   private closed = false;
+  private opened = false;
+  /** The hello message, sent again on every reconnect so the server gives us our seat back. */
+  private hello: string | null = null;
+  private lastMsg = performance.now();
+  private attempt = 0;
+  private lostAt = 0;
 
-  constructor(code: string) {
+  constructor(private code: string) {
+    this.connect();
+    // Pings measure latency and keep the room's Durable Object busy with fresh requests.
+    this.pingTimer = setInterval(() => {
+      this.send({ t: 'ping', n: performance.now() });
+      this.watchdog();
+    }, 2000);
+    document.addEventListener('visibilitychange', this.onVisible);
+  }
+
+  private connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    this.ws = new WebSocket(`${proto}//${location.host}/ws/${encodeURIComponent(code)}`);
-    this.ws.onopen = () => {
-      for (const q of this.queue) this.ws.send(q);
+    const ws = new WebSocket(`${proto}//${location.host}/ws/${encodeURIComponent(this.code)}`);
+    this.ws = ws;
+    ws.onopen = () => {
+      if (this.ws !== ws) return;
+      this.lastMsg = performance.now();
+      if (this.opened && this.hello) ws.send(this.hello);
+      for (const q of this.queue) ws.send(q);
       this.queue = [];
+      this.opened = true;
+      if (this.attempt > 0) {
+        this.attempt = 0;
+        this.onReconnect('back', 0);
+      }
     };
-    this.ws.onmessage = (ev) => {
+    ws.onmessage = (ev) => {
+      if (this.ws !== ws) return;
+      this.lastMsg = performance.now();
       let m: ServerMsg;
       try {
         m = JSON.parse(ev.data);
@@ -46,27 +98,80 @@ export class OnlineConn implements Conn {
       }
       this.onMessage(m);
     };
-    this.ws.onclose = () => {
-      if (!this.closed) this.onClose('Connection lost');
-      this.closed = true;
-      clearInterval(this.pingTimer);
+    ws.onclose = (ev) => {
+      if (this.ws !== ws || this.closed) return;
+      if (FINAL.has(ev.reason)) return this.finish(ev.reason === 'replaced' ? 'Opened in another tab' : 'Connection lost');
+      this.retry();
     };
-    this.ws.onerror = () => {
+    ws.onerror = () => {
       /* onclose follows */
     };
-    // Pings keep the Durable Object's CPU budget fresh and measure latency.
-    this.pingTimer = setInterval(() => this.send({ t: 'ping', n: performance.now() }), 2000);
+  }
+
+  /** Try again with growing pauses (0.5, 1, 2, 4, 8, 8 ... s) for up to two minutes. */
+  private retry() {
+    if (this.closed || this.retryTimer) return;
+    const now = performance.now();
+    if (this.attempt === 0) this.lostAt = now;
+    if (now - this.lostAt > RETRY_FOR) return this.finish('Connection lost');
+    this.attempt++;
+    this.onReconnect('lost', this.attempt);
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
+      if (!this.closed) this.connect();
+    }, Math.min(8000, 250 * 2 ** this.attempt));
+  }
+
+  /**
+   * Drop a connection that went silent, or one stuck closing (no close reply), and start again.
+   * Only judged while the tab is visible: a hidden tab pings rarely.
+   */
+  private watchdog() {
+    const st = this.ws.readyState;
+    if (this.closed || document.hidden || (st !== WebSocket.OPEN && st !== WebSocket.CLOSING)) return;
+    if (performance.now() - this.lastMsg < (st === WebSocket.CLOSING ? 3000 : SILENT)) return;
+    const ws = this.ws;
+    ws.onclose = null;
+    ws.close();
+    this.retry();
+  }
+
+  /** Back in the tab: check the line at once, and do not wait out a long retry pause. */
+  private onVisible = () => {
+    if (document.hidden || this.closed) return;
+    this.lastMsg = Math.max(this.lastMsg, performance.now() - SILENT + 4000);
+    this.send({ t: 'ping', n: performance.now() });
+    if (this.retryTimer) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+      this.connect();
+    }
+  };
+
+  private finish(reason: string) {
+    if (this.closed) return;
+    this.cleanup();
+    this.onClose(reason);
+  }
+
+  private cleanup() {
+    this.closed = true;
+    clearInterval(this.pingTimer);
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.retryTimer = null;
+    document.removeEventListener('visibilitychange', this.onVisible);
   }
 
   send(msg: ClientMsg) {
     const s = JSON.stringify(msg);
+    if (msg.t === 'hello') this.hello = s;
     if (this.ws.readyState === WebSocket.OPEN) this.ws.send(s);
-    else if (this.ws.readyState === WebSocket.CONNECTING) this.queue.push(s);
+    // Only the first connection queues; orders given while reconnecting are stale and dropped.
+    else if (this.ws.readyState === WebSocket.CONNECTING && !this.opened) this.queue.push(s);
   }
 
   close() {
-    this.closed = true;
-    clearInterval(this.pingTimer);
+    this.cleanup();
     this.ws.close();
   }
 }

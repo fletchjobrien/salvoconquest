@@ -8,6 +8,9 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
 
 - **Runs on one Cloudflare Worker.** Static client from Workers Static Assets, one Durable Object per room runs the authoritative simulation.
 - **Play offline vs AI** in the browser (the same simulation runs locally), or **create a room** and send the link to friends.
+- **Reconnects by itself.** A refresh, a dropped or silent connection, or a tab that comes back from the background
+  puts you back in your seat in the running game (each browser tab has its own reconnect token). The client retries
+  for up to 2 minutes. A redeploy of the Worker restarts every room, and a game in progress is lost.
 
 ## How to play
 
@@ -43,8 +46,8 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
   | Destroyer | 8 | $1,260 | | | | | | |
   | Cruiser / carrier / battleship | 18 | $2,820 / $2,875 / $2,870 | | | | | | |
 
-- **Income** is slow, so every merchant counts: the HQ earns $1.50/s, and a merchant earns $30 plus $6 per km
-  of its trip (about $210 for a 30 km run).
+- **Income** is slow, so every merchant counts: the HQ earns $2.25/s, and a merchant earns $45 plus $9 per km
+  of its trip (about $315 for a 30 km run).
 
 - **Building:** pick a unit in the build bar, then click the map where it should go (Shift: place several). A ghost
   shows which building will make it (the nearest one that can reach the spot) and stays there until the unit is

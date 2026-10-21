@@ -4,7 +4,7 @@ import { Renderer, CameraRig } from './render/renderer';
 import { GameScene } from './render/scene';
 import { World } from './state';
 import { Match } from './match';
-import { LocalConn, OnlineConn, Conn } from './net';
+import { LocalConn, OnlineConn, Conn, tabToken } from './net';
 import { titleScreen, skirmishScreen, LobbyScreen, settingsScreen, endScreen, pauseScreen } from './ui/menu';
 import { FleetBuilder } from './ui/loadout';
 import { settings } from './settings';
@@ -132,6 +132,11 @@ function joinRoom(code: string) {
   conn = oc;
   history.replaceState(null, '', `?room=${code}`);
   oc.onMessage = onServer;
+  // A dropped connection retries by itself; the server gives this tab its seat back.
+  oc.onReconnect = (state, attempt) => {
+    if (match && !match.isEnded) match.hud.banner(state === 'lost' ? 'RECONNECTING' : 'RECONNECTED', state === 'lost' ? `Connection lost · attempt ${attempt}` : 'Back in the battle');
+    else if (lobby && state === 'lost') lobby.error(`Connection lost · reconnecting (attempt ${attempt})`);
+  };
   oc.onClose = (reason) => {
     if (match && !match.isEnded) {
       match.hud.banner('CONNECTION LOST', reason);
@@ -142,7 +147,7 @@ function joinRoom(code: string) {
       if (err) err.textContent = reason;
     }
   };
-  oc.send({ t: 'hello', name: settings.name, faction: settings.faction, fleet: getFleet(settings.faction) });
+  oc.send({ t: 'hello', name: settings.name, faction: settings.faction, fleet: getFleet(settings.faction), token: tabToken() });
   clearUi();
   lobby = new LobbyScreen(ui, {
     send: (m) => oc.send(m),
@@ -166,6 +171,9 @@ function onServer(m: ServerMsg) {
       }
       break;
     case 'start':
+      // After a reconnect the server sends the same game again: keep the running match, the next
+      // (full) snapshot brings it up to date.
+      if (match && !match.isEnded && match.world.info.seed === m.info.seed && match.world.info.you === m.info.you) break;
       startMatch(m.info);
       break;
     default:

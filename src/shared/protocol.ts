@@ -53,7 +53,8 @@ export interface LobbyState {
 }
 
 export type ClientMsg =
-  | { t: 'hello'; name: string; faction: Faction; fleet: Fleet }
+  /** token: random per browser tab, kept across reloads, so a refresh or a dropped connection takes back the same seat. */
+  | { t: 'hello'; name: string; faction: Faction; fleet: Fleet; token?: string }
   | { t: 'lobby'; theme?: Theme; addBot?: boolean; removeSlot?: number; teams?: 'ffa' | '2v2'; faction?: Faction; ready?: boolean; botFaction?: { slot: number; faction: Faction } }
   | { t: 'start' }
   | { t: 'cmd'; cmd: Command }

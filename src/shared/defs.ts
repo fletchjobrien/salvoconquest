@@ -696,10 +696,10 @@ export const CRIT = {
 
 export const MAP_SIZE = 160; // km
 export const TICK = 0.1; // s
-export const HQ_INCOME = 1.5; // $/s
+export const HQ_INCOME = 2.25; // $/s
 export const MERCHANT_SUNK_WAIT = 45; // s before a site sends a new merchant after one is sunk
 /** Merchant cargo: a base sum plus so much per km of trip (longer trips pay more). */
-export const MERCHANT_PAY = { base: 30, perKm: 6 };
+export const MERCHANT_PAY = { base: 45, perKm: 9 };
 /** Deployment budget: 32 points (see COST_SCALE); what you don't spend carries into battle. */
 export const START_CASH = 4800;
 /** Every unit moves this much faster than its listed speed (ships, subs, troops, aircraft; not weapons). */
