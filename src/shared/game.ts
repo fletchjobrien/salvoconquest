@@ -336,7 +336,6 @@ export interface Player {
   earned: number;
   income: number;
   queues: Record<Cat, { type: UnitType; t: number; total: number; rally?: { x: number; y: number }; site?: number }[]>;
-  factory: Record<Cat, { site: number } | { unit: number } | null>;
   loadouts: Record<string, string[]>;
   defeated: boolean;
   kills: number;
@@ -422,7 +421,6 @@ export class Game {
         earned: 0,
         income: 0,
         queues: { naval: [], ground: [], air: [] },
-        factory: { naval: null, ground: null, air: null },
         loadouts,
         defeated: false,
         kills: 0,
@@ -435,12 +433,7 @@ export class Game {
     // Home islands.
     for (const p of this.players) {
       for (const s of this.sites) {
-        if (s.home === p.slot) {
-          s.owner = p.id;
-          if (s.type === 'navalbase') p.factory.naval = { site: s.id };
-          if (s.type === 'airbase') p.factory.air = { site: s.id };
-          if (s.type === 'barracks') p.factory.ground = { site: s.id };
-        }
+        if (s.home === p.slot) s.owner = p.id;
       }
       // No free starting forces: everyone buys and places theirs in the deployment phase.
     }
@@ -464,13 +457,8 @@ export class Game {
     this.events.push({ e, x, y, team });
   }
 
+  /** Where a build with no placement (the AI's) comes from: an owned production site, home first. */
   factorySite(p: Player, cat: Cat): SiteState | null {
-    const f = p.factory[cat];
-    if (f && 'site' in f) {
-      const s = this.sites[f.site];
-      if (s && s.owner === p.id) return s;
-    }
-    // Fallback: any owned production site of this category, home first.
     let best: SiteState | null = null;
     for (const s of this.sites) {
       if (s.owner !== p.id || BUILDINGS[s.type].produces !== cat) continue;
@@ -748,14 +736,6 @@ export class Game {
         if (!(i >= 0 && i < q.length)) return;
         const [it] = q.splice(i, 1);
         p.cash += unitCost(it.type, p.faction);
-        break;
-      }
-      case 'factory': {
-        if (!CATS.includes(cmd.cat)) return;
-        if (typeof cmd.site === 'number') {
-          const s = this.sites[cmd.site];
-          if (s && s.owner === pid && BUILDINGS[s.type].produces === cmd.cat) p.factory[cmd.cat] = { site: s.id };
-        }
         break;
       }
     }
@@ -3277,11 +3257,6 @@ export class Game {
       ground: p.queues.ground.map(qrow),
       air: p.queues.air.map(qrow),
     };
-    const fac = (cat: Cat) => {
-      const s = this.factorySite(p, cat);
-      return s ? s.id : -1;
-    };
-    snap.f = { naval: fac('naval'), ground: fac('ground'), air: fac('air') };
     return snap;
   }
 

@@ -14,7 +14,6 @@ export type Command =
   | { c: 'autoretreat'; ids: number[]; on: boolean }
   | { c: 'build'; cat: 'naval' | 'ground' | 'air'; type: UnitType; x?: number; y?: number }
   | { c: 'cancel'; cat: 'naval' | 'ground' | 'air'; index: number }
-  | { c: 'factory'; cat: 'naval' | 'ground' | 'air'; site?: number; unit?: number }
   // Deployment phase only:
   | { c: 'deploy'; type: UnitType; x: number; y: number }
   | { c: 'undeploy'; ids: number[] }
@@ -109,7 +108,6 @@ export interface Snapshot {
   s?: SiteRow[];
   w?: WeatherWire[];
   q?: Record<'naval' | 'ground' | 'air', QueueItem[]>;
-  f?: Record<'naval' | 'ground' | 'air', number>; // factory site (>=0) or carrier unit (encoded -1-id)
   pl?: { id: number; res: number; units: number; defeated: boolean; dom: number }[];
   /** Present while the deployment phase runs: seconds left and the players who are ready. */
   ph?: { left: number; ready: number[] };

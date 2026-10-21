@@ -15,7 +15,7 @@ export interface HudActions {
   selectOnly(ids: number[]): void;
   unloadMode(ship: number, ids: number[]): void;
   toggleCargo(id: number): void;
-  ability(name: 'mines' | 'rtb' | 'retreat' | 'stop' | 'siteFactory' | 'refund' | 'counter' | 'radar' | 'firemode' | 'launch'): void;
+  ability(name: 'mines' | 'rtb' | 'retreat' | 'stop' | 'refund' | 'counter' | 'radar' | 'firemode' | 'launch'): void;
   ready(on: boolean): void;
 }
 
@@ -308,23 +308,15 @@ export class Hud {
     const w = this.world;
     const fac = w.myFaction;
     for (const cat of ['naval', 'ground', 'air'] as Cat[]) {
-      const f = w.factories[cat];
-      let label = '— NONE —';
-      if (f <= -1 && f !== -1) {
-        const u = w.units.get(-1 - f);
-        label = u ? unitName(fac, u.type, u.id) : 'CARRIER';
-      } else if (f >= 0) {
-        const s = w.map.sites[f];
-        const isl = w.map.islands[s.island];
-        label = isl.home >= 0 ? (w.players.some((p) => p.slot === isl.home) ? 'HOME' : 'UNCLAIMED') : isl.name;
-      }
-      this.factoryLabels.get(cat)!.textContent = w.setup ? 'DEPLOY' : '@ ' + label;
+      this.factoryLabels.get(cat)!.textContent = w.setup ? 'DEPLOY' : '';
+      // Units are built at the nearest of our sites that produce them: none held, none built.
+      const canBuild = w.map.sites.some((s) => BUILDINGS[s.type].produces === cat && w.sites[s.id].owner === w.me);
       const q = w.queues[cat];
       for (const type of BUILDABLE[cat]) {
         const b = this.buttons.get(type)!;
         const n = q.filter((i) => i.type === type).length;
         const cost = unitCost(type, fac);
-        b.classList.toggle('poor', w.cash < cost || (f === -1 && !w.setup));
+        b.classList.toggle('poor', w.cash < cost || (!canBuild && !w.setup));
         let qe = b.querySelector('.q') as HTMLElement | null;
         if (n) {
           if (!qe) {
@@ -355,10 +347,6 @@ export class Hud {
         this.selKey = key;
         el.classList.remove('empty');
         el.innerHTML = this.siteHtml(this.siteSel);
-        el.querySelector('[data-act="siteFactory"]')?.addEventListener('mousedown', (e) => {
-          e.stopPropagation();
-          this.act.ability('siteFactory');
-        });
       }
       return;
     }
@@ -414,12 +402,9 @@ export class Hud {
     const affil = sv.owner === -2 ? 'unknown' : sv.owner < 0 ? 'neutral' : sv.owner === w.me ? 'own' : w.teamOf(sv.owner) === w.myTeam ? 'ally' : 'hostile';
     const owner = sv.owner === -2 ? 'UNKNOWN · NOT SCOUTED' : sv.owner < 0 ? 'NEUTRAL' : w.players[sv.owner].name;
     const isl = w.map.islands[s.island];
-    const canProduce = sv.owner === w.me && b.produces;
-    const isFactory = canProduce && w.factories[b.produces!] === id;
     return `<div class="sp-head"><img src="${symbolDataUrl(affil, 'site', SITE_GLYPH[s.type], 13)}"><div><div class="nm">${b.name.toUpperCase()}</div><div class="ty">${esc(isl.home >= 0 ? (w.players.some((p) => p.slot === isl.home) ? 'HOME ISLAND' : 'UNCLAIMED ISLAND') : isl.name)} · ${esc(owner)}</div></div></div>
       <div class="tt-r" style="color:var(--dim);font-size:10px;line-height:1.5">${b.desc}</div>
-      ${sv.cap > 0 ? `<div class="status">CAPTURE ${Math.round(sv.cap * 100)}%</div><div class="bar"><i style="width:${sv.cap * 100}%;background:var(--warn)"></i></div>` : ''}
-      ${canProduce ? `<div class="acts"><button class="btn small ${isFactory ? 'on' : ''}" data-act="siteFactory">${isFactory ? '✓ PRODUCING HERE' : 'PRODUCE ' + b.produces!.toUpperCase() + ' HERE'}</button></div>` : ''}`;
+      ${sv.cap > 0 ? `<div class="status">CAPTURE ${Math.round(sv.cap * 100)}%</div><div class="bar"><i style="width:${sv.cap * 100}%;background:var(--warn)"></i></div>` : ''}`;
   }
 
   private unitHtml(u: UView): string {

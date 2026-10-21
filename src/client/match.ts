@@ -481,7 +481,7 @@ export class Match {
     this.hud.log('AIR OPS', 'Pick the area to launch to. The dashed ring is the strike radius.', 'good');
   }
 
-  private ability(a: 'mines' | 'rtb' | 'retreat' | 'stop' | 'siteFactory' | 'refund' | 'counter' | 'radar' | 'firemode' | 'launch') {
+  private ability(a: 'mines' | 'rtb' | 'retreat' | 'stop' | 'refund' | 'counter' | 'radar' | 'firemode' | 'launch') {
     const ids = this.ownSelectedIds();
     const w = this.world;
     switch (a) {
@@ -547,14 +547,6 @@ export class Match {
       case 'stop':
         this.send({ c: 'stop', ids });
         break;
-      case 'siteFactory': {
-        const s = this.hud.siteSel;
-        if (s === null) break;
-        const site = w.map.sites[s];
-        const cat = site.type === 'navalbase' || site.type === 'dockyard' ? 'naval' : site.type === 'airbase' ? 'air' : 'ground';
-        this.send({ c: 'factory', cat: cat as Cat, site: s });
-        break;
-      }
     }
     this.hud.invalidate();
   }

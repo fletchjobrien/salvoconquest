@@ -123,7 +123,6 @@ export class World {
   displayCash = 0;
   income = 0;
   queues: Record<'naval' | 'ground' | 'air', QueueItem[]> = { naval: [], ground: [], air: [] };
-  factories: Record<'naval' | 'ground' | 'air', number> = { naval: -1, ground: -1, air: -1 };
   players: { id: number; name: string; faction: Faction; team: number; slot: number; bot: boolean; res: number; units: number; defeated: boolean; dom: number }[];
   serverTime = 0;
   /** Server time being drawn: behind the newest snapshot by `delay`. */
@@ -188,7 +187,6 @@ export class World {
     this.smokes = s.sm ?? [];
     this.buoys = s.bu ?? [];
     if (s.q) this.queues = s.q;
-    if (s.f) this.factories = s.f;
     if (s.s) for (const [id, owner, cap, capBy] of s.s) this.sites[id] = { id, owner, cap: cap / 100, capBy };
     if (s.w) {
       // Server sends cells once a second; keep them gliding in between.
