@@ -554,7 +554,7 @@ export class Hud {
       const modes = new Set(sel.map((u) => fireModeOf(u.flags)));
       const m = modes.size === 1 ? [...modes][0] : -1;
       const label = m === 0 ? 'HOLD FIRE' : m === 2 ? 'WEAPONS FREE' : m === 1 ? 'WEAPONS TIGHT' : 'FIRE: MIXED';
-      b.push(`<button class="btn small ${m === 0 ? '' : m === 2 ? 'on' : ''}" data-act="firemode" title="Hold fire: only self-defence against missiles · Weapons tight: at most 2 guided rounds in flight per target · Weapons free: fire everything that bears">${label}<span class="kbd">F</span></button>`);
+      b.push(`<button class="btn small ${m === 0 ? '' : m === 2 ? 'on' : ''}" data-act="firemode" title="Hold fire: only self-defence against missiles · Weapons tight: your whole side keeps at most 2 guided rounds in flight per target (2 SAMs at a time, 4 in all, per incoming missile) · Weapons free: this unit fires everything that bears">${label}<span class="kbd">F</span></button>`);
     }
     // Radar on/off (only units that have a radar of their own).
     const radars = sel.filter((u) => this.hasRadar(u));

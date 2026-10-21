@@ -57,10 +57,13 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
   first, then attack aircraft, carriers and coastal batteries, merchants last); distance and damage only break
   ties. Torpedoes listen for a target all the way (not only at their aim point), lead a moving ship, and turn
   tightly enough to finish an attack run.
-- **Fire control (F):** each unit is on **weapons tight** by default: at most two of its own guided rounds
-  (missiles, torpedoes, SAMs) in flight at one target, and it holds fire when the target is already as good as
-  dead. **Weapons free** fires everything that bears, as fast as the launchers reload. **Hold fire** stops all
-  shooting except self-defence against incoming missiles (SAMs and CIWS). The selection panel shows each unit's
+- **Fire control (F):** each unit is on **weapons tight** by default. The limit counts your whole side (ships,
+  batteries and aircraft together): at most two guided rounds (missiles, torpedoes, SAMs) in flight at one
+  target, and at one incoming missile two SAMs at a time and four in all (if the first pair misses, one more
+  pair). Units also hold fire when the target is already as good as dead. A unit on **weapons free** ignores
+  the limit: it fires everything that bears, as fast as the launchers reload (up to four SAMs at a time at one
+  target). **Hold fire** stops all shooting except self-defence against incoming missiles (SAMs and CIWS).
+  The computer opponent goes weapons free only against capital ships. The selection panel shows each unit's
   **kills** (top right).
 - **Countermeasures (C):** every warship and air flight carries one load of **chaff**, every ground unit one load of
   **smoke**. Chaff throws a cloud of foil that pulls each enemy missile or SAM homing on the unit off course

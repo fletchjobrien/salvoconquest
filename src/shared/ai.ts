@@ -329,8 +329,8 @@ export class Bot {
       if (s.type === 'carrier') continue;
       if (groupTarget && group.has(s.id) && !(groupTarget.type === 'sub' && s.type !== 'frigate')) {
         attack(s, groupTarget);
-        const defended = LINE.has(groupTarget.type) || groupTarget.type === 'carrier';
-        s.fireMode = defended ? 2 : 1;
+        // Weapons free only on capital ships; otherwise two rounds at a time, like the player's fleet.
+        s.fireMode = CAPITAL.has(groupTarget.type) ? 2 : 1;
         // A cruiser empties its magazines into a defended capital target.
         if (s.type === 'cruiser' && CAPITAL.has(groupTarget.type) && !g.salvoOn(s)) g.command(this.pid, { c: 'salvo', ids: [s.id] });
         continue;

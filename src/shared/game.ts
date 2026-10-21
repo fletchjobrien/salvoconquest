@@ -128,6 +128,13 @@ export type Order =
   | { k: 'escort'; target: number }
   | { k: 'bombard'; x: number; y: number; until: number };
 
+/**
+ * Fire control. Weapons tight: at most this many guided rounds of one team in flight at one target
+ * (ships, batteries and aircraft counted together), and at one incoming missile two SAMs at a time,
+ * four in all. Weapons free: no limit on rounds at ships, up to freeSams SAMs at one target at a time.
+ */
+const FIRE_CTRL = { tight: 2, freeSams: 4 };
+
 /** Missile cruiser salvo: how long it lasts (s) and how fast launchers cycle meanwhile (share of the reload). */
 const SALVO_TIME = 30;
 const SALVO_CD = 0.15;
@@ -322,6 +329,8 @@ export interface Projectile {
   decoy?: { alt: number };
   /** Already rolled against a chaff cloud. */
   chaffed?: boolean;
+  /** SAMs each team has launched at this missile (fire control caps it). */
+  engaged?: Record<number, number>;
   /** Bombardment shell: blast radius (km), hurts every enemy ship or ground unit inside. */
   aoe?: number;
 }
@@ -2412,21 +2421,22 @@ export class Game {
     p.dmgMul = sh.dmgMul;
   }
 
-  /** Guided rounds one unit has in flight at one target. */
-  private inFlightFrom(shooter: number, target: number): number {
+  /** Guided rounds a whole team (ships, batteries, aircraft together) has in flight at one target. */
+  private guidedAt(team: number, target: number): number {
     let n = 0;
-    for (const q of this.projs) if (!q.dead && q.shooter === shooter && q.target === target) n++;
+    for (const q of this.projs) if (!q.dead && q.team === team && q.target === target && GUIDED.has(q.kind)) n++;
     return n;
   }
 
-  /** Live SAMs homing on a target (unit id, or -2-projId for a missile). */
-  private samsAt(target: number): number {
+  /** Live SAMs of one team homing on a target (unit id, or -2-projId for a missile). */
+  private samsAt(target: number, team: number): number {
     let n = 0;
-    for (const q of this.projs) if (!q.dead && q.kind === 'sam' && q.target === target) n++;
+    for (const q of this.projs) if (!q.dead && q.kind === 'sam' && q.target === target && q.team === team) n++;
     return n;
   }
 
-  private pickMissileTarget(sh: { x: number; y: number; team: number }, w: Weapon): Projectile | null {
+  private pickMissileTarget(sh: { x: number; y: number; team: number; unit?: Unit | null }, w: Weapon): Projectile | null {
+    const free = !!sh.unit && (sh.unit.fireMode === 2 || this.salvoOn(sh.unit));
     const range = w.mod.range ?? 0;
     let best: Projectile | null = null;
     let bd = 1e9;
@@ -2440,8 +2450,13 @@ export class Game {
       const ourMissile = p.target <= -2 && this.projs.some((q) => !q.dead && q.id === -2 - p.target && q.team === sh.team);
       const threat = tgt ? tgt.team === sh.team : ourMissile || (!w.mod.antiSam && Math.hypot(p.tx - sh.x, p.ty - sh.y) < 12);
       if (!threat) continue;
-      // Never more than two SAMs in flight at one missile; if both miss, fire again.
-      if (w.mod.proj === 'sam' && this.samsAt(-2 - p.id) >= 2) continue;
+      // Fire control, counted over the whole team: weapons tight puts at most two SAMs in flight at
+      // one missile, and if both miss one more pair (shoot, look, shoot); weapons free up to four at
+      // a time. Guns (CIWS) are never held back.
+      if (w.mod.proj === 'sam') {
+        if (this.samsAt(-2 - p.id, sh.team) >= (free ? FIRE_CTRL.freeSams : FIRE_CTRL.tight)) continue;
+        if (!free && (p.engaged?.[sh.team] ?? 0) >= FIRE_CTRL.tight * 2) continue;
+      }
       // Most urgent first: the missile closest to hitting its target (not merely closest to
       // this launcher, which may be passing by on its way to another ship).
       const urgency = tgt ? Math.hypot(tgt.x - p.x, tgt.y - p.y) : d;
@@ -2466,6 +2481,7 @@ export class Game {
       return;
     }
     this.launchProj(sh, w, -2 - m.id, m.x, m.y);
+    if (w.mod.proj === 'sam') (m.engaged ??= {})[sh.team] = (m.engaged[sh.team] ?? 0) + 1;
   }
 
   private rangeOf(_u: Unit | null, w: Weapon): number {
@@ -2498,15 +2514,17 @@ export class Game {
       if (d > range) continue;
       // Torpedoes need open water all the way.
       if (w.mod.proj === 'torpedo' && !lineClear(this.map, sh.x, sh.y, tx, ty, (c) => this.map.nav[c] !== 1)) continue;
-      // Never more than two SAMs (or air-to-air missiles) in flight at one aircraft.
-      if (w.mod.proj === 'sam' && this.samsAt(id) >= 2) continue;
+      const free = sh.unit?.fireMode === 2 || (!!sh.unit && this.salvoOn(sh.unit));
+      // Never more than two SAMs (or air-to-air missiles) of our team in flight at one aircraft
+      // (four when weapons free).
+      if (w.mod.proj === 'sam' && this.samsAt(id, sh.team) >= (free ? FIRE_CTRL.freeSams : FIRE_CTRL.tight)) continue;
       // Don't waste limited, slow munitions on a target that is already as good as dead.
       // Guns are not held back: their rounds are free and arrive in seconds.
       // Fire control. Weapons free: everything that bears, no holding back. Weapons tight (default):
       // at most two of our own guided rounds in flight at one target, and no overkill.
-      const free = sh.unit?.fireMode === 2 || (!!sh.unit && this.salvoOn(sh.unit));
       if (!free && OVERKILL_CHECK.has(w.mod.proj!) && t.pendingDmg >= t.hp * 1.2) continue;
-      if (sh.unit && !free && sh.unit.fireMode === 1 && GUIDED.has(w.mod.proj!) && this.inFlightFrom(sh.unit.id, id) >= 2) continue;
+      // Weapons tight: at most two guided rounds in flight at one target from the whole team.
+      if (!free && GUIDED.has(w.mod.proj!) && this.guidedAt(sh.team, id) >= FIRE_CTRL.tight) continue;
       // Ground small arms only fight on the same island.
       if (sh.unit && UNITS[sh.unit.type].domain === 'land' && cls === 'land' && islandAt(this.map, t.x, t.y) !== islandAt(this.map, sh.x, sh.y)) continue;
       // Biggest threat first: warships and attack aircraft before support craft; distance and

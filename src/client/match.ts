@@ -539,7 +539,7 @@ export class Match {
         const mode = modes.size === 1 ? ([...modes][0] + 1) % 3 : 1;
         this.send({ c: 'firemode', ids: us.map((u) => u!.id), mode });
         audio.play('order');
-        this.hud.log('FIRE CONTROL', mode === 0 ? 'Hold fire. Self-defence only.' : mode === 1 ? 'Weapons tight: two rounds per target.' : 'Weapons free: fire everything that bears.', mode === 2 ? 'warn' : 'good');
+        this.hud.log('FIRE CONTROL', mode === 0 ? 'Hold fire. Self-defence only.' : mode === 1 ? 'Weapons tight: two rounds in flight per target, counted over the whole fleet.' : 'Weapons free: fire everything that bears.', mode === 2 ? 'warn' : 'good');
         break;
       }
       case 'radar': {
