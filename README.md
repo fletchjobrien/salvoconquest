@@ -30,7 +30,7 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
 - **Deployment phase** (like WARNO): the clock stands still for up to 2 minutes while you buy your opening
   force from the build bar and place it inside your deployment zone (ships on open water, troops on the home
   island, aircraft anywhere in the zone). Right-click moves placed units, troops can embark on ships, Del refunds.
-  The budget is **16 points ($2,400)**. Money you don't spend carries into the battle. The battle starts when
+  The budget is **32 points ($4,800)**. Money you don't spend carries into the battle. The battle starts when
   every player presses **Launch battle** (or the timer runs out).
 - **Prices** follow fixed ratios of one point = $150, then each unit type has its own fixed markup of 4–9%
   (`PRICE_MARKUP` in `src/shared/defs.ts`):
@@ -107,13 +107,13 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
 ### Ship counters
 
 The navy works as a rock-paper-scissors triangle. Each counter wins its 1-vs-1 duel clearly (30 duels per pair,
-both factions, default variants): frigate beats submarine 29–1, submarine beats battleship 30–0 and cruiser
+both factions, default variants): frigate beats submarine 55–5 (60 duels, after the sonar cut), submarine beats battleship 30–0 and cruiser
 30–0, battleship beats destroyer 23–5 (2 draws), destroyer beats frigate 30–0.
 
 | Ship | Beats | Loses to | Why |
 |---|---|---|---|
 | Submarine ($650) | Capital ships | Frigate | Passive sonar hears ships at 1.3× its sonar range, so it finds them first and stays hidden. Heavy torpedoes explode under the keel: ×1.6 damage to battleships, cruisers and carriers. Destroyers and capital ships are deaf or nearly deaf to subs and have no anti-sub weapons. |
-| Frigate ($625) | Submarine | Destroyer | The only surface ship with sonar (17–20 km; the Sub Hunter's towed array nearly doubles it) and ASW rockets that reach 11–12 km, further than a sub's torpedoes. Towed torpedo decoys halve torpedo hits. |
+| Frigate ($625) | Submarine | Destroyer | The only surface ship with sonar (12–13 km; the Sub Hunter's towed array adds 40%, to about 17–18 km) and ASW rockets that reach 11–12 km, further than a sub's torpedoes. Towed torpedo decoys halve torpedo hits. |
 | Destroyer ($1,260) | Frigates, corvettes | Battleship, cruiser | The main fighter: the most firepower for the price. No sonar. |
 | Battleship ($2,870) | Destroyer | Submarine | Railguns, a thick armoured hull and its own air defence. |
 
@@ -177,7 +177,7 @@ utility kit such as CIWS, ECM, mines, sonar and armour is shared). See `HULLS` a
 | Unit | Atlantic Coalition (US pattern) | Pacific Union (PLAN / Russian pattern) |
 |---|---|---|
 | Corvette | Freedom LCS: hull 58, fastest (0.42), stealthier (0.6). Swarm: NSM quad packs (16 km) | Type 056: hull 66, slower. Swarm: YJ-83 quad packs (16 km, harder to intercept) |
-| Frigate | Constellation: hull 78, sonar 20 km, ESSM (14 km), VL-ASROC (12 km) | Type 054B: hull 86, sonar 17 km, HQ-16 (15 km), CY-5 ASW (11 km) |
+| Frigate | Constellation: hull 78, sonar 13 km, ESSM (14 km), VL-ASROC (12 km) | Type 054B: hull 86, sonar 12 km, HQ-16 (15 km), CY-5 ASW (11 km) |
 | Destroyer | Hull 100, air radar 24 km, radar signature 1.0. Mk 45 5-inch (10 km), **NSM** (21 km, stealthy: 30% harder to intercept), **SM-6** (24 km, best interceptor, 5 rounds) | Hull 102, air radar 22 km, signature 1.15. 130mm gun (12 km), **YJ-18** (22 km, supersonic sprint: 25% harder to intercept), **HQ-9B** (20 km, 6 rounds) |
 | Missile cruiser | Ticonderoga-II: hull 205, radar 30 km, 3× NSM, 3× SM-6, Tomahawk | Type 60 (Kirov-type): hull 225, heavy anti-ship missiles (25 km), 2× YJ-18, 3× HQ-9B, CJ-10 |
 | Submarine | Hull 70, quieter hull (noise 80%), sonar 12 km. Mk 48 ADCAP (10 km, wide seeker), Sub Harpoon (17 km) | Hull 75, faster (0.28), sonar 10 km. Yu-6 (9.5 km, bigger warhead), sub-launched YJ-18 (18 km, supersonic) |

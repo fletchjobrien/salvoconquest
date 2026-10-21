@@ -137,7 +137,7 @@ export const MODULES: Record<string, ModuleDef> = {
   mines3: M({ id: 'mines3', name: 'Mine Deck', short: 'MINE', desc: 'Three loads of hidden mines dropped behind the ship [M].', proj: 'mine', range: 0, dmg: { sea: 50, sub: 40 }, cooldown: 4, ammo: 3, ability: 'mines' }),
   sub_mines: M({ id: 'sub_mines', name: 'Tube-Laid Mines', short: 'MINE', desc: 'Two loads of mines laid from the torpedo tubes [M], quietly, deep in enemy waters.', proj: 'mine', range: 0, dmg: { sea: 50, sub: 40 }, cooldown: 6, ammo: 2, ability: 'mines' }),
   ecm: M({ id: 'ecm', name: 'Decoys + ECM', short: 'ECM', desc: 'Incoming missiles miss more often.', mods: { ecm: 0.35 } }),
-  towed: M({ id: 'towed', name: 'Towed Sonar', short: 'SONAR', desc: 'Hear submarines much further away.', mods: { sonarMul: 1.8 } }),
+  towed: M({ id: 'towed', name: 'Towed Sonar', short: 'SONAR', desc: 'Hear submarines much further away.', mods: { sonarMul: 1.4 } }),
   radar_ext: M({ id: 'radar_ext', name: 'Long Range Radar', short: 'RADAR', desc: 'Better radar range and accuracy.', mods: { radar: 1.25 } }),
   armor: M({ id: 'armor', name: 'Armour Belt', short: 'ARMR', desc: '+35% hull points, -10% speed.', mods: { hp: 1.35, speed: 0.9 } }),
   anechoic: M({ id: 'anechoic', name: 'Anechoic Tiles', short: 'QUIET', desc: 'Harder to hear on enemy sonar.', mods: { quiet: 0.6 } }),
@@ -254,7 +254,7 @@ export const UNITS: Record<UnitType, UnitDef> = {
   fighter: U({ type: 'fighter', category: 'air', domain: 'air', names: { coalition: 'F-22 Fighter Flight', union: 'J-20 Fighter Flight' }, short: 'FTR', cost: 100, buildTime: 14, hp: 30, speed: 1.15, turn: 1.8, radarAir: 18, radarSurf: 6, sonar: 0, visual: 6, signature: 0.4, hold: 0, fuel: 120, role: 'Owns the sky. Patrols and intercepts aircraft.', size: 0.02 }),
   recon: U({ type: 'recon', category: 'air', domain: 'air', names: { coalition: 'E-2 Hawkeye AEW', union: 'KJ-600 AEW' }, short: 'AEW', cost: 150, buildTime: 15, hp: 25, speed: 0.7, turn: 1.0, radarAir: 8, radarSurf: 8, sonar: 0, visual: 6, signature: 1, hold: 0, fuel: 180, role: 'Flying radar. Sharpens every contact around it.', size: 0.025 }),
   corvette: U({ type: 'corvette', category: 'naval', domain: 'sea', names: { coalition: 'Freedom-class Corvette', union: 'Type-056 Corvette' }, short: 'FS', cost: 100, buildTime: 14, hp: 60, speed: 0.4, turn: 0.5, radarAir: 14, radarSurf: 12, sonar: 0, visual: 5, signature: 0.7, hold: 2, role: 'Small, fast and cheap. The only ships that carry troops. Good in swarms.', size: 0.09 }),
-  frigate: U({ type: 'frigate', category: 'naval', domain: 'sea', names: { coalition: 'Constellation-class Frigate', union: 'Type-054B Frigate' }, short: 'FF', cost: 200, buildTime: 18, hp: 80, speed: 0.34, turn: 0.4, radarAir: 18, radarSurf: 14, sonar: 18, visual: 6, signature: 0.85, hold: 0, role: 'Sub hunter: the only surface ship with hull sonar. Lays mines. Beats subs.', size: 0.13 }),
+  frigate: U({ type: 'frigate', category: 'naval', domain: 'sea', names: { coalition: 'Constellation-class Frigate', union: 'Type-054B Frigate' }, short: 'FF', cost: 200, buildTime: 18, hp: 80, speed: 0.34, turn: 0.4, radarAir: 18, radarSurf: 14, sonar: 12, visual: 6, signature: 0.85, hold: 0, role: 'Sub hunter: the only surface ship with hull sonar. Lays mines. Beats subs.', size: 0.13 }),
   cruiser: U({ type: 'cruiser', category: 'naval', domain: 'sea', names: { coalition: 'Ticonderoga-II Missile Cruiser', union: 'Type-60 Strike Cruiser' }, short: 'CG', cost: 900, buildTime: 44, hp: 210, speed: 0.27, turn: 0.24, radarAir: 26, radarSurf: 18, sonar: 2, visual: 6, signature: 1.5, hold: 0, role: 'Super destroyer: huge magazines for long fights. SALVO [B] empties its missiles fast.', size: 0.22 }),
   merchant: U({ type: 'merchant', category: 'support', domain: 'sea', names: { coalition: 'Merchant Marine', union: 'Merchant Marine' }, short: 'MM', cost: 0, buildTime: 0, hp: 30, speed: 0.36, turn: 0.4, radarAir: 0, radarSurf: 6, sonar: 0, visual: 4, signature: 1, hold: 0, role: 'Hauls resources home. Protect it.', size: 0.09 }),
   lander: U({ type: 'lander', category: 'support', domain: 'sea', names: { coalition: 'Landing Craft', union: 'Landing Craft' }, short: 'LC', cost: 0, buildTime: 0, hp: 14, speed: 0.32, turn: 2, radarAir: 0, radarSurf: 0, sonar: 0, visual: 3, signature: 0.3, hold: 0, role: 'Ferries troops between ships and beaches.', size: 0.03 }),
@@ -269,7 +269,7 @@ export const UNITS: Record<UnitType, UnitDef> = {
 export const HULLS: Record<Faction, Partial<Record<UnitType, Partial<UnitDef>>>> = {
   coalition: {
     corvette: { hp: 58, speed: 0.42, signature: 0.6 },
-    frigate: { hp: 78, radarAir: 20, sonar: 20, signature: 0.75 },
+    frigate: { hp: 78, radarAir: 20, sonar: 13, signature: 0.75 },
     destroyer: { hp: 100, speed: 0.34, radarAir: 24, radarSurf: 15, signature: 1 },
     cruiser: { hp: 205, radarAir: 30, radarSurf: 18, signature: 1.4 },
     sub: { hp: 70, speed: 0.26, sonar: 12, quiet: 0.8 },
@@ -281,7 +281,7 @@ export const HULLS: Record<Faction, Partial<Record<UnitType, Partial<UnitDef>>>>
   },
   union: {
     corvette: { hp: 66, speed: 0.39, turn: 0.46, signature: 0.75 },
-    frigate: { hp: 86, speed: 0.33, sonar: 17, signature: 0.9 },
+    frigate: { hp: 86, speed: 0.33, sonar: 12, signature: 0.9 },
     destroyer: { hp: 102, speed: 0.33, turn: 0.32, radarAir: 22, radarSurf: 16, signature: 1.15 },
     cruiser: { hp: 225, speed: 0.28, radarAir: 26, radarSurf: 19, signature: 1.7 },
     sub: { hp: 75, speed: 0.28, sonar: 10, quiet: 1 },
@@ -700,8 +700,8 @@ export const HQ_INCOME = 1.5; // $/s
 export const MERCHANT_SUNK_WAIT = 45; // s before a site sends a new merchant after one is sunk
 /** Merchant cargo: a base sum plus so much per km of trip (longer trips pay more). */
 export const MERCHANT_PAY = { base: 30, perKm: 6 };
-/** Deployment budget: 16 points (see COST_SCALE); what you don't spend carries into battle. */
-export const START_CASH = 2400;
+/** Deployment budget: 32 points (see COST_SCALE); what you don't spend carries into battle. */
+export const START_CASH = 4800;
 /** Deployment phase: place your starting force, then launch (or wait for the timer). */
 export const SETUP_TIME = 120;
 /** The deployment zone reaches this far (km) beyond the home island's radius. */

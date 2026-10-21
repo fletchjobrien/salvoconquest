@@ -143,6 +143,7 @@ export class Bot {
     const plan: { type: UnitType; at: { x: number; y: number } }[] = [
       { type: 'destroyer', at: nb?.dock ?? hq },
       { type: 'corvette', at: nb?.dock ?? hq },
+      { type: 'destroyer', at: nb?.dock ?? hq },
       { type: 'infantry', at: bk ?? hq },
       { type: 'infantry', at: bk ?? hq },
       { type: 'fighter', at: ab ?? hq },
@@ -151,7 +152,7 @@ export class Bot {
       { type: 'infantry', at: bk ?? hq },
       { type: 'coastal', at: hq },
     ];
-    // Spend the whole opening budget (16 points), like a player.
+    // Spend the whole opening budget (32 points), like a player.
     const reserve = 0;
     for (const it of plan) {
       if (p.cash - unitCost(it.type, p.faction) < reserve) continue;
