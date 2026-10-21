@@ -30,19 +30,19 @@ export interface RadarMount {
 
 export const RADAR_MOUNT: Record<Faction, Partial<Record<string, RadarMount>>> = {
   coalition: {
-    corvette: { at: [0.06, 0.25, 0], size: [0.012, 0.02, 0.08] },
-    frigate: { at: [0.06, 0.27, 0], size: [0.01, 0.018, 0.07] },
-    cruiser: { at: [0.1, 0.31, 0], size: [0.009, 0.018, 0.065] },
+    corvette: { at: [0.07, 0.225, 0], size: [0.012, 0.02, 0.08] },
+    frigate: { at: [0.06, 0.279, 0], size: [0.01, 0.018, 0.07] },
+    cruiser: { at: [0.1, 0.304, 0], size: [0.009, 0.018, 0.065] },
     destroyer: { at: [0.045, 0.3, 0], size: [0.008, 0.016, 0.06] },
     battleship: { at: [0.075, 0.37, 0], size: [0.008, 0.02, 0.075] },
     carrier: { at: [-0.2, 0.235, -0.088], size: [0.006, 0.014, 0.05] },
   },
   union: {
-    corvette: { at: [0.02, 0.26, 0], size: [0.012, 0.02, 0.08] },
-    frigate: { at: [0.04, 0.29, 0], size: [0.01, 0.018, 0.075] },
+    corvette: { at: [0.03, 0.24, 0], size: [0.012, 0.02, 0.08] },
+    frigate: { at: [0.04, 0.249, 0], size: [0.01, 0.018, 0.075] },
     cruiser: { at: [0.06, 0.315, 0], size: [0.012, 0.04, 0.1] },
     destroyer: { at: [0.055, 0.3, 0], size: [0.007, 0.014, 0.05] },
-    battleship: { at: [0.02, 0.3, 0], size: [0.01, 0.022, 0.08] },
+    battleship: { at: [0.03, 0.281, 0], size: [0.01, 0.022, 0.08] },
     carrier: { at: [0.03, 0.27, -0.09], size: [0.008, 0.02, 0.07] },
   },
 };
@@ -94,7 +94,7 @@ function coalitionDestroyer(P: Part[], c: Colors, vi: number) {
   hull(P, c, hullShape(0.13, 0.1), 0.04);
   gunMount(P, 0.34, 0.045, c.S, 1);
   vls(P, 0.22, 0.08, 0.07, 0.045);
-  destroyerKit(P, c, vi, -0.2, 0.045);
+  destroyerKit(P, c, vi, 'coalition', 0.045);
   // Forward deckhouse (sloped sides) and bridge.
   P.push(frustum(0.2, 0.115, 0.16, 0.09, 0.07, 0.06, 0.045, 0, c.S));
   P.push(frustum(0.1, 0.085, 0.075, 0.065, 0.05, 0.08, 0.115, 0, c.S));
@@ -127,7 +127,7 @@ function coalitionDestroyer(P: Part[], c: Colors, vi: number) {
  * carrying flat AESA faces, a single wide funnel, hangar aft. Lighter PLAN grey. */
 function unionDestroyer(P: Part[], c: Colors, vi: number) {
   hull(P, c, hullShape(0.115, 0.04), 0.045);
-  destroyerKit(P, c, vi, -0.16, 0.05);
+  destroyerKit(P, c, vi, 'union', 0.05);
   // Raised forecastle bulwark.
   P.push(prism([[0.42, 0], [0.3, -0.045], [0.26, -0.05], [0.26, 0.05], [0.3, 0.045]], 0.045, 0.055, c.H));
   gunMount(P, 0.33, 0.055, c.S, 1.05);
@@ -153,19 +153,35 @@ function unionDestroyer(P: Part[], c: Colors, vi: number) {
   P.push(cyl(0.02, 0.02, 0.002, -0.41, 0.051, 0, DECK_MARK, 10));
 }
 
-/** Destroyer variant kit amidships (x0 is the space between funnel and hangar). */
-function destroyerKit(P: Part[], c: Colors, vi: number, x0: number, y: number) {
+/** Destroyer variant kit. y is the deck height; everything stands on the deck or on a pedestal. */
+function destroyerKit(P: Part[], c: Colors, vi: number, f: Faction, y: number) {
   if (vi === 0) {
-    // Missiles: angled anti-ship canister racks either side.
-    for (const z of [-0.04, 0.04]) for (const k of [0, 1]) P.push(boxR(0.07, 0.014, 0.014, x0 + 0.03, y + 0.03 + k * 0.016, z, DARK, 0, 0, 0.25));
+    // Missiles: anti-ship canister racks on deck stands either side, between funnel and hangar.
+    const x = f === 'coalition' ? -0.215 : -0.19;
+    const z0 = f === 'coalition' ? 0.045 : 0.046;
+    for (const z of [-z0, z0]) {
+      P.push(box(0.07, 0.012, 0.014, x, y, z, c.S));
+      for (const k of [0, 1]) P.push(boxR(0.07, 0.012, 0.014, x, y + 0.018 + k * 0.013, z, DARK, 0, 0, 0.12));
+    }
   } else if (vi === 1) {
-    // Air defence: a second illuminator mast and extra cells.
-    vls(P, x0 + 0.02, 0.05, 0.06, y + 0.002);
-    P.push(cyl(0.006, 0.008, 0.07, x0 - 0.02, y + 0.035, 0, DARK, 4));
-    P.push(ellipsoid(0.016, 0.016, 0.016, x0 - 0.02, y + 0.08, 0, 0xe6e6df, 6));
+    // Air defence: an illuminator mast with its dish, standing on the deck.
+    const x = f === 'coalition' ? -0.215 : -0.225;
+    P.push(cyl(0.007, 0.01, 0.07, x, y, 0, DARK, 5));
+    P.push(ellipsoid(0.016, 0.016, 0.016, x, y + 0.08, 0, 0xe6e6df, 6));
   } else {
-    // Guns: a second main gun aft.
-    gunMount(P, x0 - 0.02, y, c.S, 0.95, true);
+    // Guns: a second main gun superfiring over the first, on a raised pedestal.
+    const x = f === 'coalition' ? 0.275 : 0.265;
+    const top = f === 'coalition' ? y + 0.016 : y + 0.016;
+    P.push(box(0.05, top - y, 0.05, x, y, 0, c.S));
+    gunMount(P, x, top, c.S, 0.9);
+  }
+}
+
+/** Two smoke-grenade launchers on a base, standing on a roof at height y, either side at ±z. */
+function smokeLaunchers(P: Part[], x: number, y: number, z: number) {
+  for (const s of [-1, 1]) {
+    P.push(box(0.022, 0.008, 0.02, x, y, s * z, DARK));
+    for (const dx of [-0.006, 0.006]) P.push(tube(0.004, 0.024, x + dx, y + 0.016, s * z, BLACK, 1.0, 0, 5));
   }
 }
 
@@ -181,22 +197,22 @@ function coalitionCorvette(P: Part[], c: Colors, vi: number) {
   P.push(frustum(0.08, 0.07, 0.04, 0.04, 0.09, 0.07, 0.125, 0, c.S));
   P.push(box(0.12, 0.002, 0.13, -0.38, 0.036, 0, 0x9aa3a8));
   if (vi === 0) {
-    // Troop transport: an enlarged mission bay with a stern ramp, smoke dispensers on the mast.
+    // Troop transport: an enlarged mission bay with a stern ramp, smoke dispensers on the roof.
     P.push(box(0.2, 0.06, 0.14, -0.22, 0.035, 0, c.S));
-    P.push(ramp(0.06, 0.1, 0.0, 0.03, -0.47, 0.035, 0, DARK));
-    for (const z of [-0.02, 0.02]) P.push(tube(0.006, 0.03, 0.06, 0.2, z, DARK, 0.8, 0, 5));
-    P.push(tube(0.003, 0.04, 0.3, 0.05, 0, DARK, 0, 0, 4));
+    P.push(ramp(0.06, 0.1, 0.0, 0.03, -0.35, 0.035, 0, DARK));
+    smokeLaunchers(P, 0.12, 0.125, 0.045);
+    gunMount(P, 0.3, 0.035, c.S, 0.5);
   } else if (vi === 1) {
-    // LCS: 57 mm forward, a 76 mm on the hangar roof, SeaRAM aft.
+    // LCS: 57 mm forward, a 76 mm and SeaRAM on the hangar roof.
+    P.push(box(0.12, 0.09, 0.13, -0.2, 0.035, 0, c.S));
     gunMount(P, 0.3, 0.035, c.S, 0.75);
     gunMount(P, -0.17, 0.125, c.S, 0.7, true);
-    ciws(P, -0.27, 0.125, 0);
-    P.push(box(0.12, 0.09, 0.13, -0.2, 0.035, 0, c.S));
+    ciws(P, -0.23, 0.125, 0);
   } else {
-    // Swarm: two angled quad canister packs amidships, a light gun forward.
-    P.push(tube(0.003, 0.04, 0.3, 0.05, 0, DARK, 0, 0, 4));
-    for (const z of [-0.04, 0.04]) for (const k of [0, 1]) P.push(boxR(0.09, 0.016, 0.018, -0.2, 0.06 + k * 0.018, z, 0x5a6066, 0, 0, 0.3));
+    // Swarm: two quad canister packs on stands amidships, a light gun forward.
+    gunMount(P, 0.3, 0.035, c.S, 0.5);
     P.push(box(0.12, 0.04, 0.13, -0.2, 0.035, 0, c.S));
+    for (const z of [-0.035, 0.035]) for (const k of [0, 1]) P.push(boxR(0.09, 0.016, 0.018, -0.2, 0.083 + k * 0.018, z, 0x5a6066, 0, 0, 0.18));
   }
 }
 
@@ -213,18 +229,21 @@ function unionCorvette(P: Part[], c: Colors, vi: number) {
   if (vi === 0) {
     // Troop transport: a raised boat deck with davits and smoke dispensers.
     P.push(box(0.16, 0.05, 0.12, -0.22, 0.04, 0, c.S));
-    for (const z of [-0.07, 0.07]) P.push(box(0.08, 0.025, 0.025, -0.22, 0.07, z, 0xc9a24a));
-    for (const z of [-0.02, 0.02]) P.push(tube(0.006, 0.03, 0.12, 0.17, z, DARK, 0.8, 0, 5));
+    for (const z of [-0.048, 0.048]) P.push(box(0.08, 0.022, 0.022, -0.22, 0.09, z, 0xc9a24a));
+    smokeLaunchers(P, 0.11, 0.11, 0.03);
     gunMount(P, 0.3, 0.04, c.S, 0.55);
   } else if (vi === 1) {
     // LCS: 76 mm forward, a second gun aft, CIWS on the hangar.
     gunMount(P, 0.3, 0.04, c.S, 0.8);
     gunMount(P, -0.2, 0.04, c.S, 0.75, true);
-    ciws(P, -0.13, 0.09, 0);
+    ciws(P, -0.08, 0.09, 0);
   } else {
     // Swarm: four YJ-83 boxes in two angled pairs.
     gunMount(P, 0.3, 0.04, c.S, 0.6);
-    for (const z of [-0.035, 0.035]) for (const k of [0, 1]) P.push(boxR(0.1, 0.018, 0.02, -0.18, 0.06 + k * 0.02, z, 0x6a7178, 0, 0, 0.22));
+    for (const z of [-0.035, 0.035]) {
+      P.push(box(0.1, 0.012, 0.022, -0.18, 0.04, z, c.S));
+      for (const k of [0, 1]) P.push(boxR(0.1, 0.018, 0.02, -0.18, 0.064 + k * 0.02, z, 0x6a7178, 0, 0, 0.12));
+    }
   }
 }
 
@@ -240,7 +259,7 @@ function coalitionFrigate(P: Part[], c: Colors, vi: number) {
   P.push(box(0.012, 0.012, 0.07, 0.15, 0.1, 0, GLASS));
   P.push(frustum(0.08, 0.07, 0.05, 0.05, 0.1, 0.06, 0.11, 0, c.S));
   for (const sz of [1, -1]) P.push(panel(0.022, 0.08, 0.15, sz * 0.03, -sz * Q, DARK, 6));
-  P.push(cyl(0.004, 0.006, 0.06, 0.06, 0.23, 0, DARK, 4));
+  P.push(cyl(0.004, 0.006, 0.06, 0.06, 0.21, 0, DARK, 4));
   P.push(frustum(0.06, 0.06, 0.045, 0.045, 0.07, -0.07, 0.04, 0, c.S));
   P.push(box(0.045, 0.008, 0.045, -0.07, 0.11, 0, BLACK));
   P.push(box(0.1, 0.06, 0.11, -0.2, 0.04, 0, c.S));
@@ -271,20 +290,21 @@ function frigateKit(P: Part[], vi: number, y: number) {
   if (vi === 0) {
     // Sub hunter: a helicopter on deck, the towed-array reel at the stern, torpedo tubes.
     P.push(prism(mirrored([[-0.3, 0], [-0.33, 0.014], [-0.38, 0.01], [-0.4, 0]]), y + 0.004, y + 0.022, 0x6d777e));
-    P.push(cyl(0.035, 0.035, 0.002, -0.34, y + 0.026, 0, DARK, 10));
+    P.push(cyl(0.035, 0.035, 0.002, -0.34, y + 0.022, 0, DARK, 10));
     P.push(cyl(0.018, 0.018, 0.03, -0.45, y + 0.015, 0, 0xc9a24a, 8, 'z'));
     for (const z of [-0.055, 0.055]) P.push(tube(0.006, 0.04, -0.13, y + 0.01, z, DARK, 0, 0, 5));
   } else if (vi === 1) {
     // Mine layer: twin mine rails down the stern loaded with mines.
     for (const z of [-0.03, 0.03]) {
       P.push(box(0.2, 0.004, 0.006, -0.38, y + 0.003, z, DARK));
-      for (let i = 0; i < 4; i++) P.push(cyl(0.012, 0.012, 0.016, -0.3 - i * 0.045, y + 0.012, z, 0x3a3f2e, 8));
+      for (let i = 0; i < 4; i++) P.push(cyl(0.012, 0.012, 0.016, -0.3 - i * 0.045, y + 0.007, z, 0x3a3f2e, 8));
     }
   } else {
-    // Air defence: a second launcher block and an extra fire-control director.
-    vls(P, -0.12, 0.05, 0.06, y + 0.022);
-    P.push(cyl(0.007, 0.009, 0.05, -0.2, y + 0.06, 0, DARK, 4));
-    P.push(ellipsoid(0.014, 0.014, 0.014, -0.2, y + 0.09, 0, 0xe6e6df, 6));
+    // Air defence: a launcher block and a fire-control director on the hangar roof.
+    P.push(box(0.06, 0.016, 0.07, -0.185, 0.1, 0, DARK));
+    vls(P, -0.185, 0.05, 0.06, 0.116);
+    P.push(cyl(0.006, 0.008, 0.035, -0.235, 0.1, 0, DARK, 4));
+    P.push(ellipsoid(0.013, 0.013, 0.013, -0.235, 0.145, 0, 0xe6e6df, 6));
   }
 }
 
@@ -324,7 +344,7 @@ function unionSub(P: Part[], vi: number) {
   // X-form tail.
   for (const a of [Q, -Q]) P.push(boxR(0.05, 0.12, 0.004, -0.5, -0.01, 0, C, a));
   // Open propeller.
-  P.push(cyl(0.03, 0.03, 0.006, -0.55, -0.01, 0, 0x3b3426, 7, 'x'));
+  P.push(cyl(0.03, 0.03, 0.006, -0.522, -0.01, 0, 0x3b3426, 7, 'x'));
 }
 
 /** Submarine variant kit: anechoic tile seams (stealth), mine pods (mines), a missile hump (range). */
@@ -370,7 +390,7 @@ function coalitionBattleship(P: Part[], c: Colors) {
   // Armoured box launchers (Tomahawk), secondary 5-inch mounts along the sides.
   for (const z of [-0.042, 0.042]) {
     P.push(boxR(0.045, 0.022, 0.022, -0.05, 0.11, z, DARK, 0, 0, 0.18));
-    for (const x of [0.06, -0.02, -0.1]) P.push(box(0.025, 0.018, 0.022, x, 0.1, z * 1.25, c.S));
+    for (const x of [0.06, -0.02, -0.1]) P.push(box(0.025, 0.018, 0.012, x, 0.05, Math.sign(z) * 0.056, c.S));
   }
   P.push(box(0.035, 0.05, 0.035, -0.16, 0.1, 0, c.S));
   P.push(cyl(0.004, 0.006, 0.07, -0.16, 0.15, 0, DARK, 4));
@@ -393,7 +413,7 @@ function unionCruiser(P: Part[], c: Colors) {
   P.push(frustum(0.08, 0.07, 0.035, 0.032, 0.11, 0.06, 0.185, 0, c.S));
   P.push(box(0.012, 0.012, 0.012, 0.06, 0.295, 0, DARK));
   // Fire-control dishes either side.
-  for (const z of [-0.035, 0.035]) P.push(ellipsoid(0.012, 0.012, 0.012, 0.0, 0.14, z, 0xe6e6df, 6));
+  for (const z of [-0.035, 0.035]) P.push(ellipsoid(0.012, 0.012, 0.012, 0.0, 0.135, z, 0xe6e6df, 6));
   // Funnel block aft with paired uptakes and an aft lattice mast.
   P.push(frustum(0.1, 0.085, 0.08, 0.07, 0.07, -0.13, 0.05, 0, c.S));
   for (const z of [-0.018, 0.018]) P.push(boxR(0.03, 0.03, 0.026, -0.15, 0.135, z, BLACK, 0, 0, -0.35));
@@ -409,22 +429,30 @@ function coalitionCruiser(P: Part[], c: Colors) {
   hull(P, c, hullShape(0.12, 0.08), 0.045);
   gunMount(P, 0.36, 0.045, c.S, 1);
   vls(P, 0.25, 0.1, 0.075, 0.045);
+  // Fore deckhouse (x 0.015..0.165, roof 0.125) with the bridge on top and SPY-1 faces flush on it.
   P.push(box(0.15, 0.08, 0.1, 0.09, 0.045, 0, c.S));
   P.push(box(0.08, 0.05, 0.08, 0.1, 0.125, 0, c.S));
-  P.push(box(0.012, 0.012, 0.075, 0.145, 0.15, 0, GLASS));
-  for (const sz of [1, -1]) P.push(panel(0.028, 0.14, 0.11, sz * 0.05, -sz * Q, DARK));
-  P.push(cyl(0.005, 0.008, 0.13, 0.1, 0.24, 0, DARK, 4));
-  for (const x of [0.0, -0.06]) {
-    P.push(box(0.035, 0.07, 0.05, x, 0.08, 0, c.S));
-    P.push(box(0.03, 0.006, 0.045, x, 0.153, 0, BLACK));
+  P.push(box(0.006, 0.012, 0.07, 0.142, 0.15, 0, GLASS));
+  P.push(panel(0.026, 0.167, 0.085, 0, 0, DARK));
+  P.push(panel(0.026, 0.1, 0.085, 0.052, -Math.PI / 2, DARK));
+  P.push(panel(0.026, 0.1, 0.085, -0.052, Math.PI / 2, DARK));
+  P.push(cyl(0.005, 0.008, 0.12, 0.1, 0.175, 0, DARK, 4));
+  P.push(box(0.008, 0.004, 0.07, 0.1, 0.25, 0, DARK));
+  ciws(P, 0.035, 0.125, 0.03);
+  // Two funnels on the deck between the houses.
+  for (const x of [-0.005, -0.055]) {
+    P.push(box(0.035, 0.11, 0.05, x, 0.045, 0, c.S));
+    P.push(box(0.03, 0.006, 0.045, x, 0.155, 0, BLACK));
   }
+  // Aft deckhouse (x -0.22..-0.08, roof 0.12) with its faces, mast and CIWS.
   P.push(box(0.14, 0.075, 0.1, -0.15, 0.045, 0, c.S));
-  for (const sz of [1, -1]) P.push(panel(0.026, -0.2, 0.1, sz * 0.05, -sz * 3 * Q, DARK));
-  P.push(cyl(0.005, 0.007, 0.08, -0.14, 0.17, 0, DARK, 4));
+  P.push(panel(0.025, -0.222, 0.085, 0, Math.PI, DARK));
+  P.push(panel(0.025, -0.17, 0.085, 0.052, -Math.PI / 2, DARK));
+  P.push(panel(0.025, -0.17, 0.085, -0.052, Math.PI / 2, DARK));
+  P.push(cyl(0.005, 0.007, 0.08, -0.13, 0.12, 0, DARK, 4));
+  ciws(P, -0.19, 0.12, 0);
   vls(P, -0.29, 0.1, 0.075, 0.045);
   gunMount(P, -0.4, 0.045, c.S, 1, true);
-  ciws(P, -0.06, 0.13, 0.04);
-  ciws(P, 0.03, 0.13, -0.04);
 }
 
 /** Fictional Union railgun battleship: a long stealthy hull, two big enclosed twin railgun turrets
@@ -607,21 +635,31 @@ function batteryRadar(P: Part[], f: Faction, x: number, z: number, v: number) {
   }
 }
 
-/** Ground variant kit on one vehicle (heavy APC turret, dozer blade, launcher pods, AA guns). */
-function groundKit(P: Part[], type: 'infantry' | 'coastal' | 'sam', vi: number, vd: number) {
+/** Ground variant kit on one vehicle (armour skirts, heavy APC turret, dozer blade, launcher pods, AA guns). */
+function groundKit(P: Part[], type: 'infantry' | 'coastal' | 'sam', vi: number, vd: number, f: Faction) {
   if (type === 'infantry') {
-    if (vi === 0) P.push(ramp(0.04, 0.1, 0.0, 0.03, 0.15, 0.02, 0, vd));
-    else if (vi === 1) {
-      P.push(box(0.06, 0.028, 0.05, -0.02, 0.098, 0, vd));
-      P.push(tube(0.006, 0.08, 0.04, 0.115, 0, DARK, 0, 0, 5));
-    } else P.push(boxR(0.02, 0.04, 0.12, 0.15, 0.03, 0, DARK, 0, 0, 0.3));
+    // Each vehicle's roof height (turret ring) and nose position.
+    const roof = f === 'coalition' ? 0.093 : 0.063;
+    const nose = f === 'coalition' ? 0.13 : 0.15;
+    if (vi === 0) {
+      // Heavy landing craft: bolt-on armour skirts along both sides.
+      for (const z of [-0.056, 0.056]) P.push(box(0.2, 0.035, 0.012, -0.01, 0.025, z, vd));
+    } else if (vi === 1) {
+      // Heavy APC: a bigger turret with a long autocannon.
+      P.push(box(0.065, 0.028, 0.055, -0.02, roof, 0, vd));
+      P.push(tube(0.006, 0.08, 0.05, roof + 0.016, 0, DARK, 0, 0, 5));
+    } else {
+      // Sappers: a dozer blade on two arms across the nose.
+      for (const z of [-0.035, 0.035]) P.push(box(0.03, 0.008, 0.008, nose, 0.03, z, DARK));
+      P.push(boxR(0.012, 0.04, 0.12, nose + 0.018, 0.034, 0, DARK, 0, 0, 0.2));
+    }
   } else if (type === 'coastal') {
     if (vi === 0) for (const z of [-0.03, 0.03]) P.push(boxR(0.1, 0.03, 0.05, -0.05, 0.14, z, 0x4d5548, 0, 0, -0.35));
     else if (vi === 1) P.push(tube(0.024, 0.24, -0.05, 0.13, 0, 0x56604c, -0.3, 0, 8));
   } else if (vi === 2) {
-    // AA guns: a twin-gun turret instead of the launcher.
+    // AA guns: a twin-gun turret instead of the launcher, barrels raised from its front face.
     P.push(box(0.07, 0.04, 0.07, -0.03, 0.06, 0, vd));
-    for (const z of [-0.02, 0.02]) P.push(tube(0.004, 0.1, 0.03, 0.1, z, DARK, -0.6, 0, 4));
+    for (const z of [-0.02, 0.02]) P.push(tube(0.004, 0.1, 0.005 + Math.cos(0.6) * 0.05, 0.085 + Math.sin(0.6) * 0.05, z, DARK, 0.6, 0, 4));
   }
 }
 
@@ -647,7 +685,7 @@ export function groundParts(P: Part[], type: 'infantry' | 'coastal' | 'sam', f: 
       P.push(box(0.2, 0.04, 0.1, 0, 0.02, 0, v));
     } else if (f === 'coalition') patriot(P, v, vd);
     else hq9(P, v, vd);
-    groundKit(P, type, vi, vd);
+    groundKit(P, type, vi, vd, f);
     for (let i = start; i < P.length; i++) P[i][0].translate(x, 0, z);
   }
   // Batteries bring a radar vehicle, except anti-ship launchers that rely on outside radar.
@@ -710,7 +748,7 @@ const J15: Parameters<typeof jet>[3] = {
   wing: [[0.12, 0.08], [-0.24, 0.38], [-0.3, 0.38], [-0.28, 0.08]],
   tail: [[-0.36, 0.08], [-0.46, 0.21], [-0.5, 0.21], [-0.5, 0.08]],
   canard: [[0.2, 0.05], [0.12, 0.13], [0.08, 0.13], [0.1, 0.05]],
-  fins: [{ x: -0.36, z: 0.1, cant: 0, h: 0.12, len: 0.12 }],
+  fins: [{ x: -0.36, z: 0.1, cant: 0, h: 0.12, len: 0.12, y: 0.068 }],
   nacelles: 0.055,
   col: 0x8d9aa6,
   canopy: 0x2e3a44,
@@ -721,7 +759,7 @@ const J15: Parameters<typeof jet>[3] = {
  * E-2 has four fins on its tailplane; the KJ-600 has two large end fins and a longer nose. */
 function aew(P: Part[], f: Faction, vi = 0) {
   // Variants: drop tanks (endurance), a bigger rotodome (range), a sonobuoy pod (buoys).
-  if (vi === 0) for (const s of [-1, 1]) P.push(tube(0.022, 0.2, -0.02, -0.02, s * 0.32, 0x8f9ba6, 0, 0, 6));
+  if (vi === 0) for (const s of [-1, 1]) P.push(tube(0.022, 0.2, 0.0, -0.002, s * 0.32, 0x8f9ba6, 0, 0, 6));
   if (vi === 2) P.push(box(0.16, 0.03, 0.05, -0.12, -0.055, 0, 0xc9a24a));
   const col = f === 'coalition' ? 0x9aa3a8 : 0x8f9ba6;
   const wc = new THREE.Color(col).multiplyScalar(0.88).getHex();
@@ -730,7 +768,7 @@ function aew(P: Part[], f: Faction, vi = 0) {
   P.push(prism(mirrored([[0.12, 0.05], [0.12, 0.5], [0.04, 0.5], [0.02, 0.05]]), 0.02, 0.032, wc));
   for (const s of [-1, 1]) {
     P.push(box(0.16, 0.035, 0.035, 0.06, 0.0, s * 0.17, wc));
-    P.push(cyl(0.06, 0.06, 0.004, 0.15, 0.018, s * 0.17, DARK, 8, 'x'));
+    P.push(cyl(0.06, 0.06, 0.004, 0.141, 0.018, s * 0.17, DARK, 8, 'x'));
   }
   P.push(prism(mirrored([[-0.36, 0.03], [-0.36, 0.2], [-0.44, 0.2], [-0.45, 0.03]]), 0.0, 0.012, wc));
   const fins = f === 'coalition' ? [0.2, 0.07] : [0.2];
@@ -745,7 +783,8 @@ function aew(P: Part[], f: Faction, vi = 0) {
 function stores(P: Part[], ox: number, oz: number, kind: 'aam' | 'aam_big' | 'aam_x' | 'tank' | 'asm' | 'bomb' | 'torp') {
   const spec = { aam: [0.004, 0.16, 0xd8d8d0, 2], aam_big: [0.006, 0.24, 0xd8d8d0, 1], aam_x: [0.0045, 0.15, 0xe2c76a, 3], tank: [0.014, 0.22, 0x6f7880, 1], asm: [0.009, 0.28, 0x8a8f86, 1], bomb: [0.01, 0.14, 0x55604e, 1], torp: [0.009, 0.22, 0xc9a24a, 1] } as const;
   const [r, len, col, n] = spec[kind];
-  for (const s of [-1, 1]) for (let i = 0; i < n; i++) P.push(tube(r, len, ox - 0.1, -0.035, oz + s * (0.16 + i * 0.07), col, 0, 0, 5));
+  // Hung right under the wing (its underside is at y -0.006).
+  for (const s of [-1, 1]) for (let i = 0; i < n; i++) P.push(tube(r, len, ox - 0.1, -0.006 - r, oz + s * (0.16 + i * 0.07), col, 0, 0, 5));
 }
 
 export function airParts(P: Part[], type: 'fighter' | 'strike' | 'recon', f: Faction, vi = 0) {
