@@ -84,6 +84,8 @@ export interface ModuleDef {
   seeker?: number;
   /** Interceptors kill it this much less often (sea-skimming stealth, supersonic sprint): 1 = normal. */
   evade?: number;
+  /** Heat-seeking (not radar-guided): aircraft dodge it more often (see AIR_DODGE). */
+  ir?: boolean;
   /** Manually triggered ability instead of automatic fire. */
   ability?: 'mines' | 'buoys';
   // Utility modifiers.
@@ -148,7 +150,7 @@ export const MODULES: Record<string, ModuleDef> = {
   air_torp: M({ id: 'air_torp', name: 'ASW Torpedo', short: 'TORP', slots: ['hard'], desc: 'Drop torpedoes on submarine contacts.', proj: 'torpedo', range: 4, dmg: { sub: 45, sea: 25 }, cooldown: 2, ammo: 2, speed: 0.5, accuracy: 0.8, seeker: 2.5 }),
   aam_long: M({ id: 'aam_long', faction: 'coalition', name: 'AIM-120D AMRAAM', short: 'AAM', slots: ['hard'], desc: 'Beyond-visual-range missiles with an active seeker: 16 km, accurate.', proj: 'sam', range: 16, dmg: { air: 40 }, cooldown: 2, ammo: 2, speed: 1.8, accuracy: 0.8, seeker: 2.5 }),
   pl15: M({ id: 'pl15', faction: 'union', name: 'PL-15', short: 'AAM', slots: ['hard'], desc: 'Very long-range air-to-air missiles with an active seeker: 20 km, less accurate.', proj: 'sam', range: 20, dmg: { air: 40 }, cooldown: 2, ammo: 2, speed: 2.0, accuracy: 0.62, seeker: 2.5 }),
-  aam_short: M({ id: 'aam_short', name: 'Dogfight AAM', short: 'SRM', slots: ['hard'], desc: 'Agile short-range missiles.', proj: 'sam', range: 5, dmg: { air: 32 }, cooldown: 1.5, ammo: 2, speed: 2, accuracy: 0.8 }),
+  aam_short: M({ id: 'aam_short', name: 'Dogfight AAM', short: 'SRM', slots: ['hard'], desc: 'Agile short-range heat-seekers. Jets dodge them more often than radar missiles.', proj: 'sam', range: 5, dmg: { air: 32 }, cooldown: 1.5, ammo: 2, speed: 2, accuracy: 0.8, ir: true }),
   gunpod: M({ id: 'gunpod', name: 'Cannon', short: 'GUN', slots: ['pod'], desc: 'Close range gun. Never runs dry.', proj: 'bullet', range: 1.6, dmg: { air: 6, land: 3, sea: 2 }, cooldown: 0.8, ammo: -1, accuracy: 0.5 }),
   droptank: M({ id: 'droptank', name: 'Drop Tank', short: 'FUEL', slots: ['pod', 'hard'], desc: '+60% time on station.', mods: { fuel: 1.6 } }),
   radarpod: M({ id: 'radarpod', name: 'Surveillance Radar', short: 'AEW', slots: ['pod'], desc: 'Huge radar bubble with good accuracy.', mods: { radarAir: 34, radarSurf: 28 } }),
@@ -158,7 +160,7 @@ export const MODULES: Record<string, ModuleDef> = {
   atgm: M({ id: 'atgm', faction: 'coalition', name: 'Javelin Teams', short: 'ATGM', slots: ['arms'], desc: 'Top-attack anti-tank missiles. Also hit boats near the beach.', proj: 'missile', range: 3, dmg: { land: 18, sea: 8 }, cooldown: 4, ammo: -1, speed: 0.5, accuracy: 0.85, seeker: 0.8 }),
   hj12: M({ id: 'hj12', faction: 'union', name: 'HJ-12 Teams', short: 'ATGM', slots: ['arms'], desc: 'Anti-tank missiles with a little more reach. Also hit boats near the beach.', proj: 'missile', range: 3.4, dmg: { land: 16, sea: 9 }, cooldown: 4, ammo: -1, speed: 0.5, accuracy: 0.8, seeker: 0.8 }),
   mortar: M({ id: 'mortar', name: 'Mortars', short: 'MORT', slots: ['arms'], desc: 'Indirect fire. Longer range than rifles.', proj: 'shell', range: 4, dmg: { land: 7 }, cooldown: 3, ammo: -1, speed: 0.6, accuracy: 0.45 }),
-  manpads: M({ id: 'manpads', name: 'MANPADS', short: 'AA', slots: ['arms', 'kit'], desc: 'Shoulder-fired missiles against low aircraft.', proj: 'sam', range: 4, dmg: { air: 22 }, cooldown: 4, ammo: 4, regen: 0.05, speed: 1.4, accuracy: 0.6 }),
+  manpads: M({ id: 'manpads', name: 'MANPADS', short: 'AA', slots: ['arms', 'kit'], desc: 'Shoulder-fired heat-seekers against low aircraft. Jets dodge them more often than radar missiles.', proj: 'sam', range: 4, dmg: { air: 22 }, cooldown: 4, ammo: 4, regen: 0.05, speed: 1.4, accuracy: 0.6, ir: true }),
   coastal_ashm: M({ id: 'coastal_ashm', building: true, name: 'Coastal Anti-Ship Missiles', short: 'ASM', slots: ['arms'], desc: 'Truck-launched missiles against ships.', proj: 'missile', range: 18, dmg: { sea: 40 }, cooldown: 10, ammo: 4, regen: 0.04, speed: 0.85, accuracy: 0.9, seeker: 5 }),
   nsm_coastal: M({ id: 'nsm_coastal', faction: 'coalition', name: 'NMESIS (NSM)', short: 'NSM', slots: ['arms'], desc: 'Stealthy truck-launched anti-ship missiles: 20 km.', proj: 'missile', range: 20, dmg: { sea: 40 }, cooldown: 10, ammo: 4, regen: 0.04, speed: 0.85, accuracy: 0.9, seeker: 5, evade: 0.8 }),
   yj12c: M({ id: 'yj12c', faction: 'union', name: 'YJ-12 Coastal', short: 'YJ12', slots: ['arms'], desc: 'Supersonic heavy anti-ship missiles: 22 km, bigger warhead, slower to reload.', proj: 'missile', range: 22, dmg: { sea: 48 }, cooldown: 12, ammo: 4, regen: 0.035, speed: 1.2, accuracy: 0.9, seeker: 5, evade: 0.7 }),
@@ -285,6 +287,12 @@ export const COST_SCALE = 3;
  * Chaff (warships, aircraft): a cloud of foil that pulls homing missiles off the unit.
  * Smoke (ground units): a screen that hides the units inside it and spoils the aim of shots already fired.
  */
+/**
+ * Chance that an aircraft out-turns a heat-seeking missile (flares and a hard break). Radar-guided
+ * missiles are not dodged this way; ECM works against those.
+ */
+export const AIR_DODGE: Partial<Record<UnitType, number>> = { fighter: 0.4, strike: 0.3, recon: 0.15 };
+
 export const COUNTER = {
   /** Chaff: chance to decoy each enemy missile homing on the unit (hypersonic ones less often). */
   chaffChance: 0.6,

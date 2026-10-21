@@ -8,6 +8,7 @@ import {
   FACTION_MOD,
   Faction,
   HQ_INCOME,
+  AIR_DODGE,
   MERCHANT_SUNK_WAIT,
   Loadouts,
   MODULES,
@@ -2679,6 +2680,8 @@ export class Game {
     if (p.kind === 'missile') chance *= (1 - t.ecm);
     if (UNITS[t.type].domain === 'land' && this.inSmoke(t.x, t.y)) chance *= COUNTER.smokeHit;
     if (p.kind === 'sam' && cls === 'air') chance *= 1 - t.ecm * 0.5;
+    // Heat-seekers: the aircraft breaks hard and drops flares.
+    if (p.kind === 'sam' && cls === 'air' && p.mod.ir) chance *= 1 - (AIR_DODGE[t.type] ?? 0);
     const w = this.weatherAt(t.x, t.y);
     chance *= 1 - 0.25 * w.storm;
     if (this.rng.next() < chance) {

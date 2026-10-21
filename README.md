@@ -65,6 +65,9 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
   (60% chance each, 40% for hypersonic missiles), while the unit stays within 2.5 km of the cloud (8 s). Smoke hides
   ground units inside it from everything further than 350 m, makes shots already on the way hit less than half as
   often, and keeps laying more smoke behind the unit for 12 s so it can run. Loads refill when the unit rearms.
+- **Dodging heat-seekers:** aircraft out-turn short-range heat-seeking missiles (dogfight AAMs, MANPADS) on their
+  own, no button needed: fighters dodge 40% of the shots that would hit, strike aircraft 30%, AEW 15%.
+  Radar-guided missiles (SAMs, long-range AAMs) are not dodged this way; ECM works against those.
 - **Computer opponents** use only what their side detects. They focus fire by class matchup (destroyers on
   subs, battleships on destroyers), keep carriers behind the screen, pull capital ships away from known subs,
   send subs after carriers, battleships and merchant lanes while dodging destroyers, strike only lightly
