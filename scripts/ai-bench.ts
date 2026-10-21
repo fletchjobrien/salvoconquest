@@ -215,10 +215,13 @@ if (!isMainThread) {
     let w = 0;
     let l = 0;
     let d = 0;
+    const margins: number[] = [];
     for (const r of results) {
       const ni = r.job.ais.indexOf('new');
       const last = (pid: number) => r.snaps[pid][r.snaps[pid].length - 1];
       const score = (pid: number) => (last(pid) ? last(pid).islands * 4 + last(pid).res * 2 + last(pid).kills * 3 - last(pid).losses : 0);
+      // An outright win counts as a 40-point margin.
+      margins.push(r.over ? (r.winner === ni ? 40 : -40) : score(ni) - score(1 - ni));
       if (r.over) {
         if (r.winner === ni) w++;
         else l++;
@@ -226,7 +229,10 @@ if (!isMainThread) {
       else if (score(ni) < score(1 - ni)) l++;
       else d++;
     }
-    console.log(`\nCurrent AI vs AI @ ${VS}: ${w} wins / ${l} losses / ${d} draws (outright wins, otherwise islands x4 + resource sites x2 + kills x3 - losses)`);
+    const mean = margins.reduce((a, b) => a + b, 0) / margins.length;
+    const se = Math.sqrt(margins.reduce((a, b) => a + (b - mean) ** 2, 0) / Math.max(1, margins.length - 1) / margins.length);
+    console.log(`\nMean score margin of the current AI: ${mean.toFixed(1)} ± ${(se * 1.96).toFixed(1)} (95%)`);
+    console.log(`Current AI vs AI @ ${VS}: ${w} wins / ${l} losses / ${d} draws (outright wins, otherwise islands x4 + resource sites x2 + kills x3 - losses)`);
   }
   // Why operations ended (current AI only).
   const why: Record<string, number> = {};

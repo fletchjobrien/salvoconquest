@@ -1,5 +1,5 @@
 // Computer opponent. Uses only what its team can detect for targeting.
-import { BUILDABLE, CLASSES, UNITS, UnitType, unitCost, counterOf } from './defs';
+import { BUILDINGS, CLASSES, UNITS, UnitType, unitCost, counterOf } from './defs';
 import { canDeployAt, deployZone } from './game';
 import type { Contact, Game, Unit, SiteState } from './game';
 import { cellOf, islandAt } from './map';
@@ -272,6 +272,10 @@ export class Bot {
       for (const st of g.sites) if (st.type === 'battery' && st.owner >= 0 && g.team(st.owner) === myTeam && Math.hypot(st.x - x, st.y - y) < 18) c += 5;
       return c;
     };
+    // Troop carriers closing on our islands die first: every landing craft sunk is a squad that never lands.
+    const ourSites = g.sites.filter((st) => st.owner >= 0 && g.team(st.owner) === myTeam);
+    const landing = (e: Unit, k: { x: number; y: number }) => (e.type === 'lander' || e.type === 'corvette') && ourSites.some((st) => Math.hypot(st.x - k.x, st.y - k.y) < 14);
+    let groupFree = false;
     if (group.size >= 2) {
       const ours = surf.filter((s) => group.has(s.id)).reduce((a, u) => a + power(u), 0) + cover(gx, gy);
       const theirs = theirPower(gx, gy) + navalFoes.reduce((a, { e, k }) => a + (e.type !== 'merchant' && e.type !== 'lander' && e.type !== 'sub' && Math.hypot(k.x - gx, k.y - gy) >= 15 && Math.hypot(k.x - gx, k.y - gy) < 24 ? power(e) * 0.6 : 0), 0);
@@ -287,6 +291,8 @@ export class Bot {
         }
       } else {
         let bs = 0;
+        // Clearly stronger here: weapons free, so the fight ends before their reinforcements arrive.
+        groupFree = ours > theirs * 1.6;
         const hasDdg = surf.some((s) => group.has(s.id) && s.type === 'frigate');
         for (const { e, k } of navalFoes) {
           const d = Math.hypot(k.x - gx, k.y - gy);
@@ -295,6 +301,7 @@ export class Bot {
           if (match <= 0) continue;
           if (d > 14 && ourPower(k.x, k.y) + cover(k.x, k.y) < theirPower(k.x, k.y) * 0.9) continue;
           if (CAPITAL.has(e.type)) match *= 1.2;
+          if (landing(e, k)) match *= 3;
           const score = ((VALUE[e.type] ?? 1) * match * (1.6 - (e.hp / e.maxHp) * 0.6)) / (1 + d / 14);
           if (score > bs) {
             bs = score;
@@ -330,8 +337,8 @@ export class Bot {
       if (s.type === 'carrier') continue;
       if (groupTarget && group.has(s.id) && !(groupTarget.type === 'sub' && s.type !== 'frigate')) {
         attack(s, groupTarget);
-        // Weapons free only on capital ships; otherwise two rounds at a time, like the player's fleet.
-        s.fireMode = CAPITAL.has(groupTarget.type) ? 2 : 1;
+        // Weapons free on capital ships, or on any warship when we clearly outgun them; otherwise two rounds at a time.
+        s.fireMode = CAPITAL.has(groupTarget.type) || (groupFree && WARSHIP.has(groupTarget.type)) ? 2 : 1;
         // A cruiser empties its magazines into a defended capital target.
         if (s.type === 'cruiser' && CAPITAL.has(groupTarget.type) && !g.salvoOn(s)) g.command(this.pid, { c: 'salvo', ids: [s.id] });
         continue;
@@ -347,6 +354,7 @@ export class Bot {
         if ((s.type === 'battleship' || s.type === 'cruiser') && e.type === 'destroyer') match = 1.6;
         if (e.type === 'sub' && s.type !== 'frigate') match = 0; // no anti-sub weapons
         if (e.type === 'merchant') match = 0.6;
+        if (landing(e, k)) match *= 3;
         if (match > 0 && d > 12 && ourPower(k.x, k.y) < theirPower(k.x, k.y) * 0.9) continue;
         const score = ((VALUE[e.type] ?? 1) * match * (1.6 - (e.hp / e.maxHp) * 0.6) * (1 + 0.4 * Math.min(2, focus.get(e.id) ?? 0))) / (1 + d / 12);
         if (score > bs) {
@@ -395,13 +403,13 @@ export class Bot {
         // Strike only what is lightly defended (the target's own SAMs count as one).
         const t = known
           .filter(({ e, k }) => {
-            if (UNITS[e.type].domain !== 'sea' || e.type === 'lander') return false;
+            if (UNITS[e.type].domain !== 'sea' || (e.type === 'lander' && !landing(e, k))) return false;
             const threat = samThreat(k.x, k.y, 26);
             const ownSam = LINE.has(e.type) || e.type === 'carrier' ? 1 : 0;
             // Unescorted soft targets, or a lone SAM ship that is already badly hurt.
             return threat === 0 || (threat === ownSam && ownSam === 1 && e.hp < e.maxHp * 0.5);
           })
-          .sort((a, b) => (VALUE[b.e.type] ?? 1) / (1 + Math.hypot(b.k.x - pl.x, b.k.y - pl.y) / 25) - (VALUE[a.e.type] ?? 1) / (1 + Math.hypot(a.k.x - pl.x, a.k.y - pl.y) / 25))[0];
+          .sort((a, b) => ((VALUE[b.e.type] ?? 1) * (landing(b.e, b.k) ? 4 : 1)) / (1 + Math.hypot(b.k.x - pl.x, b.k.y - pl.y) / 25) - ((VALUE[a.e.type] ?? 1) * (landing(a.e, a.k) ? 4 : 1)) / (1 + Math.hypot(a.k.x - pl.x, a.k.y - pl.y) / 25))[0];
         if (t && Math.hypot(t.k.x - pl.x, t.k.y - pl.y) < 60) attack(pl, t.e);
       } else if (pl.type === 'fighter') {
         // Enemy aircraft threatening any of our units (merchants included), closest to the fighter first.
@@ -429,6 +437,14 @@ export class Bot {
     }
   }
 
+  /**
+   * Spend every dollar on what wins fights. Money is scarce, so the bot walks one priority list
+   * each think and buys the first thing it still lacks: troop lift and a landing party first (no
+   * landing, no islands), then destroyers (the most firepower per dollar), submarines and strike
+   * flights to bleed the enemy's merchants, the counters to what it has seen, and a capital ship
+   * only once the destroyer line exists. When a warship on the list is too dear, the money is held
+   * for it: items further down may only spend what is left over.
+   */
   private produce() {
     const g = this.game;
     const p = g.players[this.pid];
@@ -436,111 +452,70 @@ export class Bot {
     const count = new Map<UnitType, number>();
     for (const u of this.mine()) count.set(u.type, (count.get(u.type) ?? 0) + 1);
     for (const cat of ['naval', 'ground', 'air'] as const) for (const it of p.queues[cat]) count.set(it.type, (count.get(it.type) ?? 0) + 1);
-    // The navy comes first: it carries the troops and decides every landing. Troops are built only
-    // as far as we can ship them, so cash does not pile up in idle infantry at home.
-    const rich = 1 + Math.min(2, p.cash / 5000);
+    const n = (k: UnitType) => count.get(k) ?? 0;
     let lift = 0;
     for (const u of this.mine()) if (u.holdCap > 0 && UNITS[u.type].category === 'naval') lift += u.holdCap;
     const spare = this.spareTroops().filter((u) => u.type === 'infantry').length + p.queues.ground.filter((it) => it.type === 'infantry').length;
-    // Two troops per free hull is a full load; more only waits at home.
-    const free = this.freeTransports().reduce((a, u) => a + u.holdCap - u.cargo.length, 0);
-    // Only a real shortage may spend the money saved for warships; the landing force for the next
-    // operation fills up from what is left over (and not at all while the enemy fleet outweighs ours).
     const pressed = this.underPressure();
-    // Troops on hand (garrisons, troops in holds and in the queue): one for most islands we hold plus
-    // a landing party is enough. More only sits at home while the money is needed for warships.
     const team = p.team;
     const held = new Set(g.sites.filter((s) => s.owner >= 0 && g.team(s.owner) === team).map((s) => s.island)).size;
-    const troops = count.get('infantry') ?? 0;
-    const cap = pressed ? Math.ceil(held / 2) + 1 : Math.ceil(held * 0.6) + 3;
-    const short = spare < Math.min(2, lift) && troops < cap;
-    const goal = pressed ? 0 : this.troopGoal;
-    // The capital ship our fleet comp chose (battleship, cruiser or carrier).
-    const capType = CLASSES.capital.variants[p.fleet.capital].type;
-    const capWant = capType === 'carrier' ? (t > 720 && p.cash > 3000 ? 1 : 0) : t > 600 ? (t > 1200 ? 2 : 1) * Math.floor(rich) : 0;
-    const want: Record<UnitType, number> = {
-      infantry: troops < cap && spare < Math.max(2, pressed ? 0 : Math.min(free, 4), goal) ? troops + 1 : 0,
-      coastal: t > 150 ? (t > 600 ? 2 : 1) : 0,
-      sam: t > 120 ? (t > 600 ? 2 : 1) : 0,
-      // Corvettes are our only troop lift; frigates our only sub hunters; destroyers the main force.
-      corvette: Math.min(4, 1 + Math.floor(t / 300) + (this.troopGoal > lift ? 1 : 0)),
-      frigate: t > 120 ? Math.min(3, 1 + Math.floor(t / 500)) : 1,
-      destroyer: Math.min(8, (2 + t / 180) * rich),
-      sub: t > 240 ? Math.min(3, 1 + Math.floor((t - 240) / 360)) : 0,
-      battleship: capType === 'battleship' ? capWant : 0,
-      cruiser: capType === 'cruiser' ? capWant : 0,
-      carrier: capType === 'carrier' ? capWant : 0,
-      fighter: Math.min(3, 1 + Math.floor(t / 240)),
-      strike: t > 240 ? Math.min(3, 1 + Math.floor(t / 360)) : 0,
-      recon: t > 180 ? 1 : 0,
-      merchant: 0,
-      lander: 0,
-    };
-    // Counter-build against what we have seen: destroyers hunt subs, subs kill capital ships,
-    // a battleship outguns a destroyer group.
-    const know = g.knowledge.get(p.team);
+    // Counter-build against what we have seen: frigates hunt subs, subs kill capital ships,
+    // fighters meet strike flights.
+    const know = g.knowledge.get(team);
     if (know) {
       for (const [id, k] of know) {
         const e = g.units.get(id);
         if (e && k.ident >= 1 && (e.type === 'sub' || WARSHIP.has(e.type) || e.type === 'strike')) this.spotted.set(id, e.type);
       }
     }
-    const seen = { sub: 0, destroyer: 0, battleship: 0, carrier: 0, strike: 0 } as Record<string, number>;
+    const seen: Partial<Record<UnitType, number>> = {};
     for (const [id, type] of this.spotted) {
       if (!g.units.get(id) || g.units.get(id)!.dead) this.spotted.delete(id);
       else seen[type] = (seen[type] ?? 0) + 1;
     }
-    want.frigate += Math.min(3, seen.sub);
-    want.fighter += Math.min(3, seen.strike);
-    want.sub += Math.min(3, (seen.battleship ?? 0) + (seen.carrier ?? 0) + (seen.cruiser ?? 0));
-    if ((seen.destroyer ?? 0) >= 3 && t > 240 && capType !== 'carrier') want[capType] = Math.max(want[capType], 1);
-    // Under pressure (the enemy fleet we know of outweighs ours): stop saving for big hulls and
-    // extras; destroyers and coastal batteries (cheap, hard-hitting defenders) come first.
-    if (pressed) {
-      // Build the counter to what is beating us: battleships beat destroyers, submarines beat
-      // battleships and carriers, destroyers beat submarines. Batteries hold the coast meanwhile.
-      const mix = this.enemyFleetMix();
-      const n = (t: UnitType) => count.get(t) ?? 0;
-      // Never save for a big hull we cannot afford soon: hulls in the water now beat one later.
-      want.destroyer = Math.max(want.destroyer, n('destroyer') + 2);
-      const bbOk = capType !== 'carrier' && p.cash >= unitCost(capType, p.faction) * 0.8;
-      if (mix.destroyer >= mix.battleship + mix.carrier) {
-        if (capType !== 'carrier') want[capType] = bbOk ? Math.max(want[capType], n(capType) + 1) : n(capType);
-        want.sub = Math.min(want.sub, Math.max(1, n('sub')));
-      } else {
-        want.sub = Math.max(want.sub, n('sub') + 1);
-        if (!bbOk && capType !== 'carrier') want[capType] = n(capType);
-      }
-      if (mix.sub > 0) want.frigate = Math.max(want.frigate, n('frigate') + 1);
-      want.carrier = Math.min(want.carrier, n('carrier'));
-      want.strike = Math.min(want.strike, 1);
-      want.recon = Math.min(want.recon, 1);
-      want.coastal = Math.max(want.coastal, Math.min(5, 2 + Math.floor(this.enemyFleetPower() / 12)));
-    }
-    // Save up for the warship we want: cheaper ground and air units only spend what is left over,
-    // except when we have nothing to land with at all.
+    const capType = CLASSES.capital.variants[p.fleet.capital].type;
+    // Troops: enough for the next landing plus a few garrisons, never a crowd idling at home.
+    const troopCap = Math.min(10, Math.ceil(held * 0.5) + 2 + Math.max(this.troopGoal, 2));
+    const troopWant = Math.min(troopCap, n('infantry') + Math.max(0, Math.max(2, this.troopGoal) - spare));
+    const ddg = n('destroyer');
+    const capitals = (seen.battleship ?? 0) + (seen.carrier ?? 0) + (seen.cruiser ?? 0);
+    const plan: { type: UnitType; want: number; save?: boolean }[] = [
+      // Nothing to land with is the worst shortage of all.
+      { type: 'corvette', want: lift < 2 ? n('corvette') + 1 : 0 },
+      { type: 'infantry', want: spare < 2 ? Math.min(troopCap, n('infantry') + 2 - spare) : 0 },
+      // Under pressure, batteries hold the coast while the fleet is rebuilt.
+      { type: 'coastal', want: pressed ? Math.min(3, 1 + Math.floor(this.enemyFleetPower() / 15)) : 0 },
+      // One hull ferries garrisons to open islands; the others carry the next assault.
+      { type: 'corvette', want: (t > 200 ? 2 : 1) + (t > 720 ? 1 : 0) },
+      // The landing party for the next operation: cheap, and without it the fleet takes nothing.
+      { type: 'infantry', want: troopWant },
+      { type: 'frigate', want: Math.min(2, (seen.sub ?? 0) > 0 ? 1 + Math.floor((seen.sub ?? 0) / 2) : t > 420 ? 1 : 0), save: true },
+      { type: 'destroyer', want: 2, save: true },
+      // A quiet boat on their merchant lanes pays for itself many times over.
+      { type: 'sub', want: t > 240 ? 1 + (t > 720 ? 1 : 0) + Math.min(2, capitals) : 0, save: true },
+      { type: 'strike', want: t > 150 ? 1 : 0 },
+      { type: 'fighter', want: Math.min(3, Math.ceil((seen.strike ?? 0) / 2)) },
+      { type: 'destroyer', want: 4, save: true },
+      { type: 'strike', want: t > 480 ? 2 : 1 },
+      { type: 'recon', want: t > 600 ? 1 : 0 },
+      { type: capType, want: capType === 'carrier' ? (ddg >= 4 ? 1 : 0) : ddg >= 3 ? 1 + Math.floor(Math.max(0, ddg - 4) / 2) : 0, save: true },
+      { type: 'destroyer', want: 12, save: true },
+    ];
+    // Only what one of our buildings can produce.
+    const can = new Set(g.sites.filter((s) => s.owner === this.pid).map((s) => BUILDINGS[s.type].produces));
     let reserve = 0;
-    for (const cat of ['naval', 'ground', 'air'] as const) {
-      if (p.queues[cat].length >= (p.cash > 4000 ? 3 : 2)) continue;
-      let best: UnitType | null = null;
-      let bestNeed = 0;
-      for (const type of BUILDABLE[cat]) {
-        const need = (want[type] - (count.get(type) ?? 0)) / Math.max(1, want[type]);
-        if (need > bestNeed) {
-          bestNeed = need;
-          best = type;
-        }
+    for (const it of plan) {
+      if (n(it.type) >= it.want) continue;
+      const cat = UNITS[it.type].category as 'naval' | 'ground' | 'air';
+      if (!can.has(cat) || p.queues[cat].length >= 3) continue;
+      const cost = unitCost(it.type, p.faction);
+      if (p.cash - reserve >= cost) {
+        g.command(this.pid, { c: 'build', cat, type: it.type });
+        count.set(it.type, n(it.type) + 1);
+        continue;
       }
-      // Short of troops to land: that comes before batteries. Under pressure, batteries first.
-      if (cat === 'ground' && short) best = 'infantry';
-      if (cat === 'ground' && pressed && (count.get('coastal') ?? 0) < want.coastal) best = 'coastal';
-      if (!best) continue;
-      const cost = unitCost(best, p.faction);
-      const urgent = (best === 'infantry' && short) || (best === 'coastal' && pressed);
-      if (p.cash - (urgent ? 0 : reserve) >= cost) {
-        g.command(this.pid, { c: 'build', cat, type: best });
-        count.set(best, (count.get(best) ?? 0) + 1);
-      } else if (cat === 'naval' && bestNeed >= 0.3) reserve = cost;
+      if (it.save) reserve = Math.max(reserve, Math.min(p.cash, cost));
+      if (reserve >= p.cash) break;
     }
   }
 
@@ -622,18 +597,6 @@ export class Bot {
     let p = 0;
     for (const m of this.intel.values()) if (this.game.time - m.t <= 180 && WARSHIP.has(m.type)) p += NAVAL_POWER[m.type] ?? 0;
     return p;
-  }
-
-  /** Power of each enemy warship type we know of (seen in the last 3 minutes). */
-  private enemyFleetMix(): Record<'destroyer' | 'battleship' | 'carrier' | 'sub', number> {
-    const m = { destroyer: 0, battleship: 0, carrier: 0, sub: 0 };
-    // Escorts count with destroyers, cruisers with battleships (the same counters beat them).
-    const bucket: Partial<Record<UnitType, keyof typeof m>> = { corvette: 'destroyer', frigate: 'destroyer', destroyer: 'destroyer', cruiser: 'battleship', battleship: 'battleship', carrier: 'carrier', sub: 'sub' };
-    for (const x of this.intel.values()) {
-      const k = bucket[x.type];
-      if (this.game.time - x.t <= 180 && k) m[k] += NAVAL_POWER[x.type] ?? 0;
-    }
-    return m;
   }
 
   /** The enemy fleet we know of outweighs ours. */
@@ -772,7 +735,7 @@ export class Bot {
       // Only fights we expect to win: clear naval superiority at the target.
       const best = plans
         .filter((p) => p.contested && !(this.avoid.get(p.island)! > g.time))
-        .filter((p) => g.time > 300 || p.centre || easy === 0)
+        .filter((p) => g.time > 180 || p.centre || easy === 0)
         .filter((p) => power >= p.naval * 1.4 + 4)
         .sort((a, b) => b.value / (1 + b.dist / 25) / (1 + b.naval / 10) - a.value / (1 + a.dist / 25) / (1 + a.naval / 10))[0];
       // Build up the landing force first; production reads this.
@@ -834,7 +797,7 @@ export class Bot {
       if (ids.length) g.command(this.pid, { c: 'move', ids, x: port.x, y: port.y, mode: 'move' });
       for (const id of ids) this.noEngage.set(id, g.time + 45);
       this.stats.breakoffs++;
-      end(false, 'beaten');
+      end(false, power < op.startPower * 0.4 ? 'beaten' : 'outgunned');
       return;
     }
     if (!all.length) {
@@ -976,6 +939,11 @@ export class Bot {
       const near = outgunned ?? { x: hq.x, y: hq.y };
       rally = this.nearestOwnPort(near.x, near.y) ?? { x: hq.x, y: hq.y };
     }
+    if (!rally && !this.op) {
+      // Nothing of ours to defend: take the fight to them where we are stronger.
+      const h = this.huntTarget(surface, power);
+      if (h) rally = h;
+    }
     if (!rally) {
       // Screen the next objective from our side, or join the operation's staging point.
       const f = this.op ? { x: this.op.sx, y: this.op.sy } : this.frontPoint();
@@ -990,6 +958,51 @@ export class Bot {
       g.command(this.pid, { c: 'move', ids: cvs.map((s) => s.id), x: rally.x + (dx / dl) * Math.min(12, dl), y: rally.y + (dy / dl) * Math.min(12, dl) });
     }
     // Submarines are handled by subRaids().
+  }
+
+  /** Current objective of the free fleet, kept for a while so it does not dither. */
+  private hunt: { x: number; y: number; until: number; kind: string } | null = null;
+
+  /**
+   * Where the free fleet attacks: a known enemy squadron it outguns, or else the enemy's merchant
+   * lanes (the docks of their resource islands, where every cargo run starts), or an enemy-held
+   * island with weak defences. Merchants pay most of the enemy's income, and a fleet parked on a
+   * lane both starves them and draws their fleet into a fight on our terms.
+   */
+  private huntTarget(surface: Unit[], power: number): { x: number; y: number } | null {
+    const g = this.game;
+    // A lone hull is picked off: hunt in pairs at least.
+    if (surface.length < 2 || power < 8) return null;
+    const team = g.players[this.pid].team;
+    const cx = surface.reduce((a, u) => a + u.x, 0) / surface.length;
+    const cy = surface.reduce((a, u) => a + u.y, 0) / surface.length;
+    // Stay on an objective while it is still safe; leave it when the defence there gets too strong.
+    if (this.hunt && g.time < this.hunt.until && this.navalThreat(this.hunt.x, this.hunt.y, 16, 60) * 1.2 <= power) return this.hunt;
+    const cands: { x: number; y: number; score: number; kind: string }[] = [];
+    // Enemy squadrons we have seen lately.
+    for (const m of this.intel.values()) {
+      if (g.time - m.t > 60 || !WARSHIP.has(m.type)) continue;
+      const th = this.navalThreat(m.x, m.y, 14, 60);
+      if (th * 1.25 > power) continue;
+      cands.push({ x: m.x, y: m.y, score: (6 + th) / (1 + Math.hypot(m.x - cx, m.y - cy) / 30), kind: 'fleet' });
+    }
+    // Merchant lanes and weakly held enemy islands.
+    for (const st of g.sites) {
+      if (st.owner < 0 || g.team(st.owner) === team) continue;
+      const at = st.dock ?? st;
+      // Unseen defences assumed at their home: batteries and the home fleet.
+      const th = Math.max(this.navalThreat(at.x, at.y, 16, 120), st.home !== undefined || st.type === 'hq' ? 10 : 0);
+      if (th * 1.3 > power) continue;
+      const v = st.type === 'resource' ? 5 : st.type === 'hq' ? 3 : 1.5;
+      cands.push({ x: at.x, y: at.y, score: v / (1 + Math.hypot(at.x - cx, at.y - cy) / 30) / (1 + th / 8), kind: st.type });
+    }
+    const best = cands.sort((a, b) => b.score - a.score)[0];
+    if (!best) {
+      this.hunt = null;
+      return null;
+    }
+    this.hunt = { x: best.x, y: best.y, until: g.time + 60, kind: best.kind };
+    return this.hunt;
   }
 
   /** Strike flights support the operation (enemy ground units and soft ships at the target); otherwise loiter at the front. */
@@ -1009,7 +1022,13 @@ export class Bot {
           continue;
         }
       }
-      g.command(this.pid, { c: 'move', ids: [pl.id], x: front.x, y: front.y });
+      // Nothing to support: hunt merchants on an enemy lane that their warships do not cover.
+      const lane =
+        this.raidTargets()
+          .filter((r) => r.unit === undefined && Math.hypot(r.x - pl.x, r.y - pl.y) < 55 && this.navalThreat(r.x, r.y, 14, 120) < 4)
+          .sort((a, b) => Math.hypot(a.x - pl.x, a.y - pl.y) - Math.hypot(b.x - pl.x, b.y - pl.y))[pl.id % 2] ?? null;
+      const to = lane ?? front;
+      g.command(this.pid, { c: 'move', ids: [pl.id], x: to.x, y: to.y });
     }
   }
 

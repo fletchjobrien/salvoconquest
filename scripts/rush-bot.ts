@@ -3,6 +3,7 @@
 // warships in one fleet, and from minute 6 sends that fleet at the enemy's islands, one after
 // another, never stopping. It is not shipped in the game.
 import { Bot } from '../src/shared/ai';
+import { unitCost } from '../src/shared/defs';
 import type { Game, Unit } from '../src/shared/game';
 
 export function makeRusher(g: Game, pid: number): Bot {
@@ -15,8 +16,8 @@ export function makeRusher(g: Game, pid: number): Bot {
     const p = g.players[pid];
     const mine = [...g.units.values()].filter((u) => u.owner === pid && !u.dead);
     const inf = mine.filter((u) => u.type === 'infantry').length + p.queues.ground.length;
-    if (p.queues.naval.length < 2 && p.cash >= 1200) g.command(pid, { c: 'build', cat: 'naval', type: 'destroyer' });
-    if (p.queues.ground.length < 2 && inf < 10 && p.cash >= 450 + (p.queues.naval.length ? 0 : 900)) g.command(pid, { c: 'build', cat: 'ground', type: 'infantry' });
+    if (p.queues.naval.length < 2 && p.cash >= unitCost('destroyer', p.faction)) g.command(pid, { c: 'build', cat: 'naval', type: 'destroyer' });
+    if (p.queues.ground.length < 2 && inf < 10 && p.cash >= unitCost('infantry', p.faction) * 3 + (p.queues.naval.length ? 0 : unitCost('destroyer', p.faction) * 0.75)) g.command(pid, { c: 'build', cat: 'ground', type: 'infantry' });
   };
   // Fleet: one stack. Before minute 6 it gathers off home; then it attacks enemy islands in turn.
   bot.fleet = () => {
