@@ -2,7 +2,7 @@
 import { BUILDABLE, BUILDINGS, CRIT, MODULES, UNITS, UnitType, unitBuildTime, unitCost, counterOf, unitDef, deriveStats, FACTION_MOD } from '../../shared/defs';
 import { ORDER_CODES, F_ABOARD, F_DARK, F_PAINTED, F_HOLD, F_FREE } from '../../shared/protocol';
 import type { World, UView } from '../state';
-import { FACTION_STYLE, SIDE, unitName } from '../theme';
+import { FACTION_STYLE, SIDE, playerColor, unitName } from '../theme';
 import { SymDomain, glyphFor, symbolDataUrl, SITE_GLYPH } from '../render/symbols';
 import { matchLoadoutOf } from '../loadouts';
 import { audio } from '../audio/sfx';
@@ -296,7 +296,7 @@ export class Hud {
     const total = w.map.sites.filter((s) => s.type === 'resource').length;
     const html = w.players
       .map((p) => {
-        const col = p.id === w.me ? SIDE.own : p.team === w.myTeam ? SIDE.ally : SIDE.hostile;
+        const col = playerColor(p.id) ?? (p.id === w.me ? SIDE.own : p.team === w.myTeam ? SIDE.ally : SIDE.hostile);
         const dom = p.dom > 0 ? `<span class="domin">DOM ${Math.max(0, 180 - p.dom)}s</span>` : '';
         return `<div class="p ${p.defeated ? 'dead' : ''}"><i style="background:${col}"></i>${esc(p.name)} <b>${p.res}/${total}</b>${dom}</div>`;
       })
@@ -402,7 +402,7 @@ export class Hud {
     const affil = sv.owner === -2 ? 'unknown' : sv.owner < 0 ? 'neutral' : sv.owner === w.me ? 'own' : w.teamOf(sv.owner) === w.myTeam ? 'ally' : 'hostile';
     const owner = sv.owner === -2 ? 'UNKNOWN · NOT SCOUTED' : sv.owner < 0 ? 'NEUTRAL' : w.players[sv.owner].name;
     const isl = w.map.islands[s.island];
-    return `<div class="sp-head"><img src="${symbolDataUrl(affil, 'site', SITE_GLYPH[s.type], 13)}"><div><div class="nm">${b.name.toUpperCase()}</div><div class="ty">${esc(isl.home >= 0 ? (w.players.some((p) => p.slot === isl.home) ? 'HOME ISLAND' : 'UNCLAIMED ISLAND') : isl.name)} · ${esc(owner)}</div></div></div>
+    return `<div class="sp-head"><img src="${symbolDataUrl(affil, 'site', SITE_GLYPH[s.type], 13, playerColor(sv.owner))}"><div><div class="nm">${b.name.toUpperCase()}</div><div class="ty">${esc(isl.home >= 0 ? (w.players.some((p) => p.slot === isl.home) ? 'HOME ISLAND' : 'UNCLAIMED ISLAND') : isl.name)} · ${esc(owner)}</div></div></div>
       <div class="tt-r" style="color:var(--dim);font-size:10px;line-height:1.5">${b.desc}</div>
       ${sv.cap > 0 ? `<div class="status">CAPTURE ${Math.round(sv.cap * 100)}%</div><div class="bar"><i style="width:${sv.cap * 100}%;background:var(--warn)"></i></div>` : ''}`;
   }

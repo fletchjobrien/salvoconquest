@@ -5,7 +5,7 @@ import { heightAt } from '../../shared/map';
 import type { GameEvent } from '../../shared/protocol';
 import { F_LANDED, F_FIRE, F_ABOARD, PROJ_KINDS } from '../../shared/protocol';
 import type { World } from '../state';
-import { PALETTES, Palette } from '../theme';
+import { PALETTES, Palette, playerColor } from '../theme';
 import { Renderer, CameraRig } from './renderer';
 import { TerrainView, VSCALE } from './terrain';
 import { Fx } from './fx';
@@ -589,7 +589,7 @@ export class GameScene {
       }
       case 'capture': {
         const s = map.sites[e.site];
-        this.overlay?.shock(s.x, s.y, groundY(map, s.x, s.y), 2.2, e.o === w.me ? '#6fd0ff' : w.teamOf(e.o) === w.myTeam ? '#8dffb4' : '#ff5d4f', 1.4);
+        this.overlay?.shock(s.x, s.y, groundY(map, s.x, s.y), 2.2, playerColor(e.o) ?? '#ff5d4f', 1.4);
         break;
       }
       case 'lightning': {

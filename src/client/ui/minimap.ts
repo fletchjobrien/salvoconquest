@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { WEATHER_AXES, WIND_ANGLE } from '../../shared/weather';
 import type { World } from '../state';
-import { SIDE } from '../theme';
+import { SIDE, playerColor } from '../theme';
 import { UNITS, UNIT_TYPES } from '../../shared/defs';
 import { sensorCoverage, unionOutline, COVER_COLORS, Disc, Loop } from '../sensors';
 import { deployZone } from '../../shared/game';
@@ -228,7 +228,7 @@ export class Minimap {
     // sites
     for (const s of w.map.sites) {
       const sv = w.sites[s.id];
-      const col = sv.owner === -2 ? 'rgba(232,210,122,0.5)' : sv.owner < 0 ? 'rgba(220,225,230,0.55)' : sv.owner === w.me ? SIDE.own : w.teamOf(sv.owner) === w.myTeam ? SIDE.ally : SIDE.hostile;
+      const col = sv.owner === -2 ? 'rgba(232,210,122,0.5)' : sv.owner < 0 ? 'rgba(220,225,230,0.55)' : playerColor(sv.owner) ?? SIDE.hostile;
       ctx.fillStyle = col;
       const z = s.type === 'resource' ? 2 : 3;
       if (s.type === 'resource') {
@@ -261,7 +261,7 @@ export class Minimap {
     // units
     for (const u of w.units.values()) {
       if (u.flags & F_ABOARD) continue;
-      const col = u.owner === w.me ? SIDE.own : w.teamOf(u.owner) === w.myTeam ? SIDE.ally : SIDE.hostile;
+      const col = playerColor(u.owner) ?? (u.owner === w.me ? SIDE.own : w.teamOf(u.owner) === w.myTeam ? SIDE.ally : SIDE.hostile);
       ctx.fillStyle = col;
       const air = UNITS[u.type].domain === 'air';
       const z = u.type === 'merchant' || u.type === 'lander' ? 1.5 : air ? 2 : 2.5;

@@ -15,7 +15,7 @@ import { Hud, fireModeOf } from './ui/hud';
 import { Minimap, screenToGround } from './ui/minimap';
 import { audio, Sfx } from './audio/sfx';
 import { voices, VoiceCat } from './audio/voice';
-import { unitName } from './theme';
+import { setPlayerColors, unitName } from './theme';
 import { matchLoadoutOf, freezeForMatch } from './loadouts';
 
 type Cat = 'naval' | 'ground' | 'air';
@@ -52,6 +52,7 @@ export class Match {
   ) {
     freezeForMatch(info.players.find((p) => p.id === info.you)?.faction ?? 'coalition');
     this.world = new World(info);
+    setPlayerColors(info.you, info.players);
     this.rig = new CameraRig(r.camera);
     this.overlay = new Overlay(document.getElementById('ov') as HTMLCanvasElement);
     this.overlay.resize(r.width, r.height);

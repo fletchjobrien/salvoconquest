@@ -43,8 +43,9 @@ export function sideColor(a: Affil): string {
 const cache = new Map<string, HTMLCanvasElement>();
 
 /** Returns a cached canvas; draw it centred at the unit position. */
-export function symbolCanvas(affil: Affil, domain: SymDomain, glyph: string, size: number, hi = false): HTMLCanvasElement {
-  const key = `${affil}|${domain}|${glyph}|${size}|${hi ? 1 : 0}`;
+export function symbolCanvas(affil: Affil, domain: SymDomain, glyph: string, size: number, hi = false, color?: string): HTMLCanvasElement {
+  const col = color ?? SIDE[affil];
+  const key = `${affil}|${domain}|${glyph}|${size}|${hi ? 1 : 0}|${col}`;
   const hit = cache.get(key);
   if (hit) return hit;
   const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -57,7 +58,6 @@ export function symbolCanvas(affil: Affil, domain: SymDomain, glyph: string, siz
   const ctx = c.getContext('2d')!;
   ctx.scale(dpr, dpr);
   ctx.translate(w / 2, h / 2);
-  const col = SIDE[affil];
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
   // Glow pass.
@@ -247,6 +247,6 @@ function drawGlyph(ctx: CanvasRenderingContext2D, g: string, s: number, col: str
 }
 
 /** Small inline symbol image for HTML UI. */
-export function symbolDataUrl(affil: Affil, domain: SymDomain, glyph: string, size = 12): string {
-  return symbolCanvas(affil, domain, glyph, size).toDataURL();
+export function symbolDataUrl(affil: Affil, domain: SymDomain, glyph: string, size = 12, color?: string): string {
+  return symbolCanvas(affil, domain, glyph, size, false, color).toDataURL();
 }

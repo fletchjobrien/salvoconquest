@@ -8,7 +8,7 @@ import type { Renderer, CameraRig } from './renderer';
 import type { World, UView } from '../state';
 import { DOMAINS, GHOST_LIFE } from '../state';
 import { Affil, FONT, SITE_GLYPH, SymDomain, glyphFor, sideColor, symbolCanvas } from './symbols';
-import { SIDE, unitName } from '../theme';
+import { SIDE, playerColor, unitName } from '../theme';
 import { matchLoadoutOf } from '../loadouts';
 import { groundY, visAlt, weaponY } from './coords';
 import { weatherOutline } from '../../shared/weather';
@@ -262,14 +262,15 @@ export class Overlay {
       const sx = P.x;
       const sy = P.y - lift * 18;
       const affil = this.affilOf(w, sv.owner);
+      const scol = playerColor(sv.owner) ?? sideColor(affil);
       const hov = v.hover?.kind === 'site' && v.hover.id === s.id;
-      const img = symbolCanvas(affil, 'site', SITE_GLYPH[s.type], symSize - 1, hov);
+      const img = symbolCanvas(affil, 'site', SITE_GLYPH[s.type], symSize - 1, hov, scol);
       ctx.globalAlpha = 0.95;
       this.blit(img, sx, sy);
       ctx.globalAlpha = 1;
       this.items.push({ kind: 'site', id: s.id, sx, sy, own: sv.owner === w.me, type: null });
       if (sv.cap > 0 && sv.capBy >= 0) {
-        const col = sideColor(this.affilOf(w, sv.capBy));
+        const col = playerColor(sv.capBy) ?? sideColor(this.affilOf(w, sv.capBy));
         ctx.strokeStyle = col;
         ctx.lineWidth = 2.5;
         ctx.beginPath();
@@ -291,14 +292,14 @@ export class Overlay {
       }
       if (lift > 0.3 || hov) {
         ctx.globalAlpha = Math.max(lift, hov ? 1 : 0) * 0.8;
-        ctx.fillStyle = sideColor(affil);
+        ctx.fillStyle = scol;
         ctx.textAlign = 'center';
         ctx.font = `500 9px ${FONT}`;
         ctx.fillText(BUILDINGS[s.type].name.toUpperCase(), sx, sy + symSize + 12);
         ctx.globalAlpha = 1;
       }
       if (hov && (BUILDINGS[s.type].radarAir > 0 || BUILDINGS[s.type].radarSurf > 0)) {
-        ctx.strokeStyle = sideColor(affil);
+        ctx.strokeStyle = scol;
         ctx.globalAlpha = 0.35;
         ctx.setLineDash([2, 5]);
         if (this.circle(v, s.x, s.y, Math.max(BUILDINGS[s.type].radarAir, BUILDINGS[s.type].radarSurf))) ctx.stroke();
@@ -402,7 +403,7 @@ export class Overlay {
       let sx = P.x;
       let sy = P.y;
       const affil = this.affilOf(w, u.owner);
-      const col = sideColor(affil);
+      const col = playerColor(u.owner) ?? sideColor(affil);
       if (air && !(u.flags & F_LANDED)) {
         // Altitude stalk down to the surface.
         const gx = sx;
@@ -453,7 +454,7 @@ export class Overlay {
       // Radar warning: like a radar-warning receiver, a thin amber arc on the side the enemy radar
       // is painting from, with a faint glint sweeping along it (the beam brushing past).
       if (u.flags & F_PAINTED && u.owner === w.me) this.drawRadarLock(v, u, y3, sx, sy, sz);
-      const img = symbolCanvas(affil, dom as SymDomain, glyphFor(u.type), sz, sel || hov);
+      const img = symbolCanvas(affil, dom as SymDomain, glyphFor(u.type), sz, sel || hov, col);
       const born = Math.min(1, (w.clock - u.born) / 0.4);
       ctx.globalAlpha = (small ? 0.75 : 1) * born;
       if (born < 1) {

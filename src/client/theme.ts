@@ -101,11 +101,37 @@ export const PALETTES: Record<Theme, Palette> = {
 /** Overlay colours, relative to the viewer (APP-6 style). */
 export const SIDE = {
   own: '#6fd0ff',
-  ally: '#8dffb4',
+  ally: '#93a2ff',
   hostile: '#ff5d4f',
   unknown: '#ffd84a',
   neutral: '#d9dde0',
 };
+
+/**
+ * Per-player colours, so every opponent can be told apart: you keep SIDE.own, allies take shades of
+ * blue, enemies shades of red (in player order). Used wherever the owner of a thing is known;
+ * unidentified contacts stay SIDE.hostile / SIDE.unknown.
+ */
+const ALLY_SHADES = ['#93a2ff', '#b3a6ff', '#7fb0ff'];
+const ENEMY_SHADES = ['#ff5d4f', '#ff9b45', '#ff6fc4'];
+const playerCols = new Map<number, string>();
+
+export function setPlayerColors(me: number, players: { id: number; team: number }[]) {
+  playerCols.clear();
+  const myTeam = players.find((p) => p.id === me)?.team;
+  let a = 0;
+  let e = 0;
+  for (const p of [...players].sort((x, y) => x.id - y.id)) {
+    if (p.id === me) playerCols.set(p.id, SIDE.own);
+    else if (p.team === myTeam) playerCols.set(p.id, ALLY_SHADES[a++ % ALLY_SHADES.length]);
+    else playerCols.set(p.id, ENEMY_SHADES[e++ % ENEMY_SHADES.length]);
+  }
+}
+
+/** Colour of a player's units, sites and list entry (undefined for no owner / unknown). */
+export function playerColor(owner: number): string | undefined {
+  return playerCols.get(owner);
+}
 
 export const FACTION_STYLE: Record<Faction, { accent: string; hull: number; deck: number; superstructure: number; trim: number; emblem: string }> = {
   coalition: { accent: '#6fd0ff', hull: 0x8a949c, deck: 0x5b636a, superstructure: 0xaeb6bd, trim: 0x2d3338, emblem: '✦' },
