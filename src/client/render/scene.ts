@@ -132,7 +132,7 @@ export class GameScene {
       seen.add(u.id);
       let o = this.units.get(u.id);
       if (!o) {
-        const m = makeUnitModel(u.type, w.faction(u.owner), this.pal);
+        const m = makeUnitModel(u.type, w.faction(u.owner), this.pal, u.variant);
         scene.add(m.root);
         o = { m, type: u.type, lastX: u.x, lastY: u.y, lastH: u.h, speed: 0, roll: 0, emit: Math.random(), phase: Math.random() * 10 };
         this.units.set(u.id, o);

@@ -18,7 +18,8 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
 | Ctrl + RMB | Move without stopping to fight |
 | WASD / MMB drag / screen edge | Pan · Q/E rotate · wheel zoom |
 | U | Unload troops: a ring shows the landing range, click land inside it (every selected ship with troops lands there) |
-| F / C / G / M / R / T / X | Fire control (hold fire → weapons tight → weapons free) · chaff or smoke · radar on/off · drop mines or a sonobuoy · aircraft return to base · toggle auto-retreat · stop |
+| F / C / G / M / R / T / X | Fire control (hold fire → weapons tight → weapons free) · chaff or smoke · radar on/off · drop mines, a sonobuoy or a minefield · aircraft return to base · toggle auto-retreat · stop |
+| B | Missile cruiser: **SALVO** (every anti-ship missile and SAM goes out in quick succession) · battleship: **BOMBARD** (then click an area: 45 s of gunfire on it) |
 | Ctrl+1–9 / 1–9 | Save / recall group (press twice to jump the camera) |
 | Tab / V | Show weapon ranges / sensor view (darkens what you cannot see) |
 | Space · Enter · F1 · Esc | Jump to last alert · chat (online) · field manual · menu |
@@ -43,7 +44,7 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
   its site waits 45 s before it sends the next one.
 - Other buildings give bonuses: radar stations (24 km air / 18 km surface radar), airbases, barracks and dockyards (forward production, repair, rearm),
   missile batteries (fire for whoever owns them).
-- Ships carry troops (destroyer 2, battleship 3; a Troop Bay module adds 2). Carriers carry air flights instead (Coalition 5, Union 4): right-click a carrier with aircraft selected to base them there. Flights that land are stowed on deck (not drawn on the map); select the carrier and press **LAUNCH** (**L**), then click the area: fighters fly CAP there, strike flights hunt there, AEW orbits there. The dashed ring shows the strike radius. Aircraft are built at airbases only.
+- Only **corvettes** carry troops (2, the Troop Transport 4, the Swarm 1). Carriers carry air flights instead (Coalition 5, Union 4): right-click a carrier with aircraft selected to base them there. Flights that land are stowed on deck (not drawn on the map); select the carrier and press **LAUNCH** (**L**), then click the area: fighters fly CAP there, strike flights hunt there, AEW orbits there. The dashed ring shows the strike radius. Aircraft are built at airbases only.
   RMB a ship with troops selected and they walk to the shore and ride landing craft out to it.
 - **Ship damage** (like WARNO tank combat): hits can knock out systems, not just hull points. An **engine** hit
   stops the ship dead for 8 s, then leaves it at 55% speed; **steering** jams (quarter turn rate), **radar** drops
@@ -68,9 +69,10 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
 - **Dodging heat-seekers:** aircraft out-turn short-range heat-seeking missiles (dogfight AAMs, MANPADS) on their
   own, no button needed: fighters dodge 40% of the shots that would hit, strike aircraft 30%, AEW 15%.
   Radar-guided missiles (SAMs, long-range AAMs) are not dodged this way; ECM works against those.
-- **Computer opponents** use only what their side detects. They focus fire by class matchup (destroyers on
-  subs, battleships on destroyers), keep carriers behind the screen, pull capital ships away from known subs,
-  send subs after carriers, battleships and merchant lanes while dodging destroyers, strike only lightly
+- **Computer opponents** use only what their side detects. They focus fire by class matchup (frigates on
+  subs, battleships and cruisers on destroyers), keep carriers behind the screen, pull capital ships away from known subs,
+  send subs after capital ships and merchant lanes while dodging frigates, carry troops in corvettes,
+  shell landing beaches with battleships, fire cruiser salvos at capital ships, strike only lightly
   defended ships, cover raided merchant lanes with fighters, seed sonobuoys from the AEW, ferry troops from
   any island they hold, and counter-build what they see.
 - **Map:** 160 × 160 km. Every home gets the same mix of neutral islands (one quarter's layout is copied, rotated, to
@@ -85,16 +87,19 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
 
 ### Ship counters
 
-The navy works as a rock-paper-scissors triangle. Each counter wins its 1-vs-1 duel clearly (tested in 30
-duels per pair, both factions):
+The navy works as a rock-paper-scissors triangle. Each counter wins its 1-vs-1 duel clearly (30 duels per pair,
+both factions, default variants): frigate beats submarine 29–1, submarine beats battleship 30–0 and cruiser
+30–0, battleship beats destroyer 23–5 (2 draws), destroyer beats frigate 30–0.
 
 | Ship | Beats | Loses to | Why |
 |---|---|---|---|
-| Submarine ($1,140) | Battleship, carrier | Destroyer | Passive sonar hears ships at 1.3× its sonar range, so it finds them first and stays hidden. Heavy torpedoes explode under the keel: ×1.6 damage to battleships and carriers. Those two ships are nearly deaf to subs (sonar 2 km) and have no anti-sub weapons. |
-| Destroyer ($1,200) | Submarine | Battleship | Bow and towed sonar (15–18 km) and ASW rockets that reach 11–12 km, further than a sub's 9.5–10 km torpedoes. Towed torpedo decoys halve torpedo hits. |
-| Battleship ($2,700) | Destroyer | Submarine | 16 km main guns, a thick hull and its own air defence. Two destroyers (about the same price) are an even fight. |
+| Submarine ($1,140) | Capital ships | Frigate | Passive sonar hears ships at 1.3× its sonar range, so it finds them first and stays hidden. Heavy torpedoes explode under the keel: ×1.6 damage to battleships, cruisers and carriers. Destroyers and capital ships are deaf or nearly deaf to subs and have no anti-sub weapons. |
+| Frigate ($900) | Submarine | Destroyer | The only surface ship with sonar (17–20 km; the Sub Hunter's towed array nearly doubles it) and ASW rockets that reach 11–12 km, further than a sub's torpedoes. Towed torpedo decoys halve torpedo hits. |
+| Destroyer ($1,200) | Frigates, corvettes | Battleship, cruiser | The main fighter: the most firepower for the price. No sonar. |
+| Battleship ($2,700) | Destroyer | Submarine | Railguns, a thick armoured hull and its own air defence. |
 
-Escort battleships and carriers with destroyers. Hunt destroyers with battleships and aircraft.
+Escort capital ships with frigates. Hunt destroyers with battleships, cruisers and aircraft. Corvettes carry the
+troops: keep them behind the warships until the beach is clear.
 
 ### Sensors and fog of war
 
@@ -125,7 +130,7 @@ that scaled range; it becomes an exact track (error radius 0) closer still, or a
 (about 6 km). So a 15 km surface radar identifies a typical destroyer at about 9 km. Aircraft (AEW), sonobuoys
 and more ships close to the target raise the quality.
 
-**Sonobuoys (M).** The AEW carries 8 sonobuoys. Press M to drop one below it (only over water). Each buoy
+**Sonobuoys (M).** The Sonobuoys AEW carries 8 sonobuoys. Press M to drop one below it (only over water). Each buoy
 listens for 150 s: it hears submarines within 6 km, and ships further away, and shows as a small purple ring.
 
 **Markers.** Every contact is drawn where the unit really is; the quality of the track only decides whether it is
@@ -152,9 +157,12 @@ utility kit such as CIWS, ECM, mines, sonar and armour is shared). See `HULLS` a
 
 | Unit | Atlantic Coalition (US pattern) | Pacific Union (PLAN / Russian pattern) |
 |---|---|---|
-| Destroyer | Hull 100, sonar 18 km, air radar 24 km, radar signature 1.0. Mk 45 5-inch (10 km), **NSM** (21 km, stealthy: 30% harder to intercept), **SM-6** (24 km, best interceptor, 5 rounds), VL-ASROC (12 km) | Hull 102, sonar 15 km, air radar 22 km, signature 1.15. 130mm gun (12 km), **YJ-18** (22 km, supersonic sprint: 25% harder to intercept), **HQ-9B** (20 km, 6 rounds), CY-5 ASW (11 km) |
+| Corvette | Freedom LCS: hull 58, fastest (0.42), stealthier (0.6). Swarm: NSM quad packs (16 km) | Type 056: hull 66, slower. Swarm: YJ-83 quad packs (16 km, harder to intercept) |
+| Frigate | Constellation: hull 78, sonar 20 km, ESSM (14 km), VL-ASROC (12 km) | Type 054B: hull 86, sonar 17 km, HQ-16 (15 km), CY-5 ASW (11 km) |
+| Destroyer | Hull 100, air radar 24 km, radar signature 1.0. Mk 45 5-inch (10 km), **NSM** (21 km, stealthy: 30% harder to intercept), **SM-6** (24 km, best interceptor, 5 rounds) | Hull 102, air radar 22 km, signature 1.15. 130mm gun (12 km), **YJ-18** (22 km, supersonic sprint: 25% harder to intercept), **HQ-9B** (20 km, 6 rounds) |
+| Missile cruiser | Ticonderoga-II: hull 205, radar 30 km, 3× NSM, 3× SM-6, Tomahawk | Type 60 (Kirov-type): hull 225, heavy anti-ship missiles (25 km), 2× YJ-18, 3× HQ-9B, CJ-10 |
 | Submarine | Hull 70, quieter hull (noise 80%), sonar 12 km. Mk 48 ADCAP (10 km, wide seeker), Sub Harpoon (17 km) | Hull 75, faster (0.28), sonar 10 km. Yu-6 (9.5 km, bigger warhead), sub-launched YJ-18 (18 km, supersonic) |
-| Battleship | Iowa: hull 265, two **16-inch triple turrets** (17 km, never run dry), NSM, SM-6 | Kirov-type: hull 230, faster, better radar. **Heavy anti-ship missiles** (25 km, 55 damage, 3 rounds, hard to stop), AK-130 twin gun (13 km), YJ-18, HQ-9B |
+| Battleship | Iowa-II: hull 265 (+35% armour), two **railguns** (22 km, never run dry), Mk 45, SM-6 | Type 70: hull 240, faster. Two **Type-726 railguns** (21 km), 130mm gun, HQ-9B |
 | Carrier | Ford: hull 210, **5 flights** on deck, SM-6 | Hull 200, 4 flights, bigger radar (32 km), HQ-9B |
 | Infantry | ACV: hull 60, faster, Javelin (stronger) | ZBD-05: hull 70, slower, HJ-12 (longer reach) |
 | Coastal / SAM | NMESIS (NSM, 20 km, stealthy), Patriot PAC-3 (16 km, best vs missiles) | YJ-12 (22 km, supersonic, bigger warhead), HQ-9 (20 km) |
@@ -167,21 +175,44 @@ Each side has its own models, after real equipment of the type:
 
 | Unit | Coalition | Union |
 |---|---|---|
+| Corvette | Freedom LCS (tall slab superstructure, big flight deck) | Type 056 (compact superstructure, missile boxes) |
+| Frigate | Constellation (three SPY-6 faces, one funnel) | Type 054B (integrated mast, twin uptakes) |
 | Destroyer | Arleigh Burke (four SPY-1 faces, two funnels) | Type 055 (integrated mast, one funnel) |
+| Missile cruiser | Ticonderoga (two deckhouses, VLS fore and aft) | Kirov-type strike cruiser (missile hatch grid) |
 | Submarine | Virginia (pump-jet, no sail planes) | Type 09x (hull hump, sail planes, X tail) |
-| Battleship | Iowa (three triple 16-inch turrets) | Kirov-type strike cruiser (missile hatch grid) |
+| Battleship | Iowa (three triple turrets) | Railgun battleship (enclosed twin turrets, integrated mast) |
 | Carrier | Ford (catapults, small island aft) | Ski-jump carrier (big island amidships) |
 | Infantry | ACV 8x8, theatre camouflage | ZBD-05 tracked amphibious IFV, blue-grey camouflage |
 | Coastal / SAM | NMESIS, Patriot | YJ-12 TEL, HQ-9 (upright tubes) |
 | Aircraft | F-22, F-35, E-2 Hawkeye | J-20 (canards), J-15 (Flanker), KJ-600 |
 
-### Loadouts
+Every model comes in three versions, one per variant: the kit shows on deck (extra launchers, a second gun,
+mine rails, a missile hump on the sub, drop tanks under the wings...).
 
-![Loadout editor](docs/loadout.png)
+### Fleet comp
 
-Every unit has slots (deck mount, VLS, torpedo room, auxiliary, hardpoints, pods, arms, kit). Open **Loadouts** from the
-menu, pick the faction, and drag modules into slots: e.g. give destroyers **Mine Rails**, swap a VLS for land-attack missiles, add a Troop Bay,
-or swap the AEW's sonobuoys for a drop tank. The defaults are the recommended fit.
+![Fleet comp](docs/fleetcomp.png)
+
+Before a match, open **Fleet Comp** from the menu and pick one of three variants for every class (per faction).
+Your build bar then has one button per class; every unit of that class is built as the variant you picked. The
+capital class is a choice of ship: you build cruisers, carriers **or** battleships in a match. The defaults
+(★) are the recommended picks. Computer players pick their own.
+
+| Class | Variants |
+|---|---|
+| **Corvette** (carries troops, good in swarms) | **Troop Transport**: 4 troops, smoke screen [C] that also hides ships, almost unarmed · **Littoral Combat Ship**: 57 mm + 76 mm guns and CIWS against troops and boats near the shore, 2 troops · **Swarm**: two anti-ship missile quad packs, 1 troop |
+| **Frigate** (hunts subs, lays mines) | **Sub Hunter**: towed sonar, two ASW launchers, torpedo tubes, drops a sonobuoy every 4 km it sails · **Mine Layer**: 3 loads of mines [M] instead of 1 · **Air Defence**: two extra SAM launchers |
+| **Destroyer** (main fighter) | **Missiles**: two anti-ship launchers · **Air Defence**: two long-range SAM launchers · **Guns**: two main guns |
+| **Submarine** (assassin) | **Stealth**: 15% slower, much quieter · **Mines**: lays 2 loads of mines [M] · **Long Range**: half its torpedoes swapped for anti-ship missiles |
+| **Capital ship** | **Missile Cruiser**: huge magazines; SALVO [B] fires every anti-ship missile and SAM in quick succession until empty · **Carrier**: as before · **Battleship**: railguns and armour to soak up hits up close; BOMBARD [B]: 45 s of gunfire on an area (rounds burst over 0.45 km and hurt everything hostile on the surface, seen or not) |
+| **Infantry** | **Heavy Landing Craft**: armoured landing craft with 3× the hull · **Heavy APCs**: autocannon and mortars against troops · **Sappers**: dig in (−30% damage while holding) and lay one minefield [M] |
+| **Anti-ship battery** | **Short Range**: 14 km, 8 missiles · **Long Range**: 27 km, 2 missiles (both need outside radar) · **Radar Independent**: brings its own radar truck |
+| **SAM battery** | **Missile Defence**: 10 km, 12 rounds, better interceptor · **Anti-Air**: 25% more reach, 5 rounds · **AA Guns**: never run out, 3.5 km, inaccurate |
+| **Fighter** | **Anti-Missile**: 9 km missiles, 4 of them, that also shoot down anti-ship missiles · **Anti-Air**: longer reach, more accurate, 1 round · **Long Endurance**: drop tanks (+60% time on station), no dogfight missiles |
+| **Attack aircraft** | **Anti-Ship**: heavy anti-ship missiles · **Anti-Ground**: stand-off missiles and guided bombs · **Anti-Sub**: two loads of ASW torpedoes |
+| **AEW** | **Long Endurance**: drop tanks · **Long Range**: 46 km air / 38 km surface radar · **Sonobuoys**: drops listening buoys [M] |
+
+Variants are defined in `CLASSES` in `src/shared/defs.ts`.
 
 ### Computer opponent
 

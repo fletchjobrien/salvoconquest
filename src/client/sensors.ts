@@ -1,12 +1,12 @@
 // Our side's sensor coverage, for the minimap outlines and the sensor view (V).
 // Mirrors the simulation's sensor ranges: eyes and surface radar, air-search radar, sonar, cut by
 // weather the same way. A ship with a knocked-out radar shows its reduced (35 %) range.
-import { BUILDINGS, BUOY, UNITS, deriveStats, unitDef } from '../shared/defs';
+import { BUILDINGS, BUOY, UNITS, deriveStats } from '../shared/defs';
 import { F_DARK, F_LANDED } from '../shared/protocol';
 import { THEME_INFO } from '../shared/map';
 import { weatherStrength } from '../shared/weather';
 import type { World } from './state';
-import { matchLoadoutOf } from './loadouts';
+import { unitLoadout } from './loadouts';
 
 export type Disc = [number, number, number];
 /** Closed outline in map km: x0, y0, x1, y1, ... */
@@ -40,7 +40,7 @@ function sources(w: World): { src: Source[]; sonar: Disc[] } {
     if (w.teamOf(u.owner) !== w.myTeam || u.flags & F_LANDED) continue;
     const def = UNITS[u.type];
     const fac = w.players[u.owner]?.faction ?? w.myFaction;
-    const lo = u.owner === w.me ? matchLoadoutOf(u.type) : unitDef(u.type, fac).defaults;
+    const lo = unitLoadout(u.type, u.variant, fac);
     const st = deriveStats(u.type, fac, lo);
     const radarDown = u.flags & F_DARK ? 0 : u.owner === w.me && (w.details.get(u.id)?.[13]?.[2] ?? 0) > 0 ? 0.35 : 1;
     const near = Math.max(st.radarSurf * radarDown, st.visual);

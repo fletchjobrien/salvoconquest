@@ -1,6 +1,6 @@
 // Wire protocol between client and the authoritative simulation.
 // The same messages are used for online rooms (WebSocket) and offline play (in-browser host).
-import type { Faction, Loadouts, ProjKind, UnitType } from './defs';
+import type { Faction, Fleet, ProjKind, UnitType } from './defs';
 import type { Theme } from './map';
 
 export type Command =
@@ -27,7 +27,11 @@ export type Command =
   // Carrier: launch every flight stowed aboard toward a point (fighters patrol, strike flights attack, AEW orbits). Hotkey L:
   | { c: 'launch'; ship: number; x: number; y: number }
   // Ships and aircraft follow and protect a friendly ship or aircraft (RMB on it):
-  | { c: 'escort'; ids: number[]; target: number };
+  | { c: 'escort'; ids: number[]; target: number }
+  // Missile cruiser: fire every anti-ship missile and SAM in quick succession. Hotkey B:
+  | { c: 'salvo'; ids: number[] }
+  // Battleship: sustained gunfire on an area. Hotkey B, then click:
+  | { c: 'bombard'; ids: number[]; x: number; y: number };
 
 export interface LobbySlot {
   slot: number;
@@ -49,7 +53,7 @@ export interface LobbyState {
 }
 
 export type ClientMsg =
-  | { t: 'hello'; name: string; faction: Faction; loadouts: Loadouts }
+  | { t: 'hello'; name: string; faction: Faction; fleet: Fleet }
   | { t: 'lobby'; theme?: Theme; addBot?: boolean; removeSlot?: number; teams?: 'ffa' | '2v2'; faction?: Faction; ready?: boolean; botFaction?: { slot: number; faction: Faction } }
   | { t: 'start' }
   | { t: 'cmd'; cmd: Command }
@@ -63,8 +67,8 @@ export interface StartInfo {
   players: { id: number; name: string; faction: Faction; team: number; slot: number; bot: boolean }[];
 }
 
-/** Unit row: id, type index, owner, x, y, alt, heading, hp 0-100, flags. */
-export type UnitRow = [number, number, number, number, number, number, number, number, number];
+/** Unit row: id, type index, owner, x, y, alt, heading, hp 0-100, flags, fleet-comp variant. */
+export type UnitRow = [number, number, number, number, number, number, number, number, number, number];
 /** Contact row: id, kind (domain index 0-3 or 10+type index when classified), x, y, error radius, flags (1 = ESM only). */
 export type ContactRow = [number, number, number, number, number, number];
 /** Projectile row: id, kind index, x, y, alt, team-relative owner (1 = friendly, 0 = hostile). */
@@ -175,4 +179,4 @@ export const F_ABOARD = 16384; // aircraft stowed on a carrier: not drawn, launc
 export type CritPart = 'engine' | 'rudder' | 'radar' | 'weapon' | 'fire' | 'flood' | 'stun';
 
 // Order codes for DetailRow
-export const ORDER_CODES = ['idle', 'move', 'attack', 'board', 'patrol', 'rtb', 'retreat', 'unload', 'merchant', 'lander', 'escort'] as const;
+export const ORDER_CODES = ['idle', 'move', 'attack', 'board', 'patrol', 'rtb', 'retreat', 'unload', 'merchant', 'lander', 'escort', 'bombard'] as const;

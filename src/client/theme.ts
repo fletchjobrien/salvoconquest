@@ -144,7 +144,7 @@ export const SHIP_NAMES: Record<Faction, string[]> = {
 };
 
 export function unitName(faction: Faction, type: string, id: number): string {
-  if (type === 'destroyer' || type === 'battleship' || type === 'carrier' || type === 'sub') {
+  if (type === 'corvette' || type === 'frigate' || type === 'destroyer' || type === 'cruiser' || type === 'battleship' || type === 'carrier' || type === 'sub') {
     const list = SHIP_NAMES[faction];
     const n = list[(id * 7 + type.length * 3) % list.length];
     return faction === 'coalition' ? n : n;

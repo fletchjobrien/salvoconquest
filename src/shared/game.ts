@@ -10,7 +10,15 @@ import {
   HQ_INCOME,
   AIR_DODGE,
   MERCHANT_SUNK_WAIT,
-  Loadouts,
+  Fleet,
+  ClassId,
+  CounterKind,
+  CLASSES,
+  classOf,
+  sanitizeFleet,
+  botFleet,
+  variantIndex,
+  variantLoadout,
   MODULES,
   ModuleDef,
   START_CASH,
@@ -25,7 +33,6 @@ import {
   UNLOAD_RANGE,
   BOARD_RANGE,
   UnitType,
-  sanitizeLoadout,
   deriveStats,
   unitBuildTime,
   unitCost,
@@ -98,7 +105,8 @@ export interface PlayerInit {
   team: number;
   slot: number;
   bot: boolean;
-  loadouts?: Loadouts;
+  /** Fleet comp: variant per class (computer players pick their own). */
+  fleet?: Fleet;
 }
 
 export interface Weapon {
@@ -117,7 +125,16 @@ export type Order =
   | { k: 'rtb' }
   | { k: 'retreat'; x: number; y: number }
   | { k: 'unload'; x: number; y: number; ids: number[] }
-  | { k: 'escort'; target: number };
+  | { k: 'escort'; target: number }
+  | { k: 'bombard'; x: number; y: number; until: number };
+
+/** Missile cruiser salvo: how long it lasts (s) and how fast launchers cycle meanwhile (share of the reload). */
+const SALVO_TIME = 30;
+const SALVO_CD = 0.15;
+/** Battleship bombardment: duration (s), scatter (km) around the aim point, blast radius (km), damage share, reload factor. */
+const BOMBARD = { time: 45, spread: 0.7, blast: 0.45, dmg: 0.7, cd: 0.75 };
+/** Sub-hunter frigates drop a sonobuoy every this many km, each lasting this long (s). */
+const AUTOBUOY = { every: 4, life: 90 };
 
 const OVERKILL_CHECK = new Set<string>(['missile', 'torpedo', 'bomb', 'atgm']);
 const GUIDED = new Set<string>(['missile', 'torpedo', 'sam', 'atgm']);
@@ -126,6 +143,9 @@ const REPAIR_CALM = { hit: 30, fired: 20 };
 /** Target priority by how dangerous a unit is to us. */
 const THREAT: Partial<Record<UnitType, number>> = {
   battleship: 1.3,
+  cruiser: 1.3,
+  frigate: 1.0,
+  corvette: 0.9,
   destroyer: 1.2,
   sub: 1.2,
   strike: 1.1,
@@ -242,6 +262,18 @@ export interface Unit {
   pendingDmg: number;
   dead: boolean;
   lastThink: number;
+  /** Fleet-comp variant (index in its class). */
+  variant: number;
+  /** Countermeasure this unit carries (chaff or smoke), if any. */
+  cmKind: CounterKind | null;
+  /** Hotkey B ability: cruiser salvo or battleship bombardment. */
+  special?: 'salvo' | 'bombard';
+  /** Salvo running until this time. */
+  salvoUntil?: number;
+  /** Troops that come ashore in armoured landing craft. */
+  heavyLander?: boolean;
+  /** Sub-hunter frigate: where it dropped its last automatic sonobuoy. */
+  autobuoy?: { x: number; y: number } | null;
   // merchant
   site?: number;
   mstate?: 'out' | 'load' | 'back';
@@ -290,6 +322,8 @@ export interface Projectile {
   decoy?: { alt: number };
   /** Already rolled against a chaff cloud. */
   chaffed?: boolean;
+  /** Bombardment shell: blast radius (km), hurts every enemy ship or ground unit inside. */
+  aoe?: number;
 }
 
 interface Mine {
@@ -299,6 +333,8 @@ interface Mine {
   x: number;
   y: number;
   armAt: number;
+  /** A land minefield (sappers): hits ground units. */
+  land?: boolean;
 }
 
 export interface Contact {
@@ -336,7 +372,7 @@ export interface Player {
   earned: number;
   income: number;
   queues: Record<Cat, { type: UnitType; t: number; total: number; rally?: { x: number; y: number }; site?: number }[]>;
-  loadouts: Record<string, string[]>;
+  fleet: Record<ClassId, number>;
   defeated: boolean;
   kills: number;
   losses: number;
@@ -408,8 +444,7 @@ export class Game {
       this.sites.push({ ...s, owner: -1, cap: 0, capBy: -1, weapons: w, merchantCd: 0 });
     }
     players.forEach((p, i) => {
-      const loadouts: Record<string, string[]> = {};
-      for (const t of UNIT_TYPES) loadouts[t] = sanitizeLoadout(t, p.loadouts?.[t], p.faction);
+      const fleet = p.bot && !p.fleet ? botFleet(seed + i * 7919) : sanitizeFleet(p.fleet);
       this.players.push({
         id: i,
         name: p.name,
@@ -421,7 +456,7 @@ export class Game {
         earned: 0,
         income: 0,
         queues: { naval: [], ground: [], air: [] },
-        loadouts,
+        fleet,
         defeated: false,
         kills: 0,
         losses: 0,
@@ -470,8 +505,13 @@ export class Game {
   spawn(owner: number, type: UnitType, x: number, y: number): Unit {
     const p = this.players[owner];
     const def = unitDef(type, p.faction);
-    const lo = type === 'merchant' || type === 'lander' ? [] : p.loadouts[type] ?? def.defaults;
-    const st = deriveStats(type, p.faction, lo);
+    // The player's variant for this type (a capital ship of another kind uses its own variant).
+    const cls = classOf(type);
+    let vi = variantIndex(p.fleet, type) ?? -1;
+    if (vi < 0 && cls) vi = CLASSES[cls].variants.findIndex((v) => v.type === type);
+    const v = cls && vi >= 0 ? CLASSES[cls].variants[vi] : null;
+    const lo = v ? variantLoadout(v, p.faction) : [];
+    const st = deriveStats(type, p.faction, lo, v);
     const weapons: Weapon[] = [];
     for (const id of lo) {
       const m = MODULES[id];
@@ -522,7 +562,12 @@ export class Game {
       stillFor: 0,
       pendingDmg: 0,
       sys: newSystems(),
-      cm: counterOf(type) ? 1 : 0,
+      cm: counterOf(type, v) ? 1 : 0,
+      cmKind: counterOf(type, v),
+      variant: Math.max(0, vi),
+      special: v?.special,
+      heavyLander: v?.heavyLander,
+      autobuoy: lo.some((id) => MODULES[id]?.autobuoy) ? null : undefined,
       cmAt: -999,
       radarOn: true,
       fireMode: 1,
@@ -658,6 +703,18 @@ export class Game {
       case 'counter':
         for (const u of own(cmd.ids)) this.useCounter(u);
         break;
+      case 'salvo':
+        // Missile cruiser: every anti-ship missile and SAM goes out in quick succession.
+        for (const u of own(cmd.ids)) if (u.special === 'salvo' && this.inWorld(u)) u.salvoUntil = this.time + SALVO_TIME;
+        break;
+      case 'bombard': {
+        // Battleship: sustained gunfire on an area, seen targets or not.
+        const x = num(cmd.x);
+        const y = num(cmd.y);
+        if (Number.isNaN(x) || Number.isNaN(y)) return;
+        for (const u of own(cmd.ids)) if (u.special === 'bombard' && this.inWorld(u)) this.setOrder(u, { k: 'bombard', x, y, until: this.time + BOMBARD.time });
+        break;
+      }
       case 'firemode': {
         const mode = Math.max(0, Math.min(2, Math.floor(Number(cmd.mode) || 0)));
         for (const u of own(cmd.ids)) u.fireMode = mode;
@@ -711,6 +768,8 @@ export class Game {
         if (!CATS.includes(cmd.cat)) return;
         const def = UNITS[cmd.type];
         if (!def || def.category !== cmd.cat) return;
+        // Only the capital ship this player's fleet comp chose.
+        if (variantIndex(p.fleet, cmd.type) === null) return;
         const cost = unitCost(cmd.type, p.faction);
         if (p.cash < cost || p.queues[cmd.cat].length >= 8) return;
         // A placed build must be reachable from one of our factories; it is built at the nearest.
@@ -807,9 +866,15 @@ export class Game {
     }
   }
 
+  /** Landing craft for heavy-lander infantry: three times the hull. */
+  private armourLander(lc: Unit) {
+    lc.maxHp *= 3;
+    lc.hp = lc.maxHp;
+  }
+
   /** Fire the unit's countermeasure: chaff (warships, aircraft) or smoke (ground units). One charge. */
   useCounter(u: Unit) {
-    const kind = counterOf(u.type);
+    const kind = u.cmKind;
     if (!kind || u.cm < 1 || u.landed || !this.inWorld(u)) return;
     u.cm--;
     u.cmAt = this.time;
@@ -871,12 +936,29 @@ export class Game {
     if (!w || w.ammo <= 0 || w.cd > 0 || u.inside >= 0) return;
     w.ammo--;
     w.cd = w.mod.cooldown ?? 4;
+    if (w.mod.land) {
+      // Sappers: one hidden minefield where they stand.
+      if (UNITS[u.type].domain !== 'land') return;
+      this.mines.push({ id: this.nextId++, owner: u.owner, team: u.team, x: u.x, y: u.y, armAt: this.time + 4, land: true });
+      this.emit({ k: 'mine', x: u.x, y: u.y }, u.x, u.y, u.team);
+      return;
+    }
     for (let i = 0; i < 2; i++) {
       const bx = u.x - Math.cos(u.heading) * (0.3 + i * 0.35) + this.rng.range(-0.15, 0.15);
       const by = u.y - Math.sin(u.heading) * (0.3 + i * 0.35) + this.rng.range(-0.15, 0.15);
       this.mines.push({ id: this.nextId++, owner: u.owner, team: u.team, x: bx, y: by, armAt: this.time + 4 });
     }
     this.emit({ k: 'mine', x: u.x, y: u.y }, u.x, u.y, u.team);
+  }
+
+  /** Sub-hunter frigate: a fresh sonobuoy every few km sailed, so its sonar picture trails behind it. */
+  private autoBuoy(u: Unit) {
+    if (u.inside >= 0 || heightAt(this.map, u.x, u.y) > -0.01) return;
+    const last = u.autobuoy;
+    if (last && Math.hypot(u.x - last.x, u.y - last.y) < AUTOBUOY.every) return;
+    u.autobuoy = { x: u.x, y: u.y };
+    this.buoys.push({ x: u.x, y: u.y, team: u.team, until: this.time + AUTOBUOY.life });
+    this.emit({ k: 'buoy', x: u.x, y: u.y }, u.x, u.y, u.team);
   }
 
   /** An aircraft drops one sonobuoy below it (only over water). */
@@ -957,7 +1039,7 @@ export class Game {
         const x = num(cmd.x);
         const y = num(cmd.y);
         if (!UNITS[type] || Number.isNaN(x) || Number.isNaN(y)) return;
-        if (!Object.values(BUILDABLE).some((l) => l.includes(type))) return;
+        if (!Object.values(BUILDABLE).some((l) => l.includes(type)) || variantIndex(p.fleet, type) === null) return;
         const cost = unitCost(type, p.faction);
         if (p.cash < cost || !canDeployAt(this.map, p.slot, type, x, y)) return;
         p.cash -= cost;
@@ -1226,6 +1308,7 @@ export class Game {
       u.lastThink -= 1;
       this.considerRetreat(u);
       if (def.domain === 'land' && u.order.k === 'idle') this.autoAggro(u);
+      if (u.autobuoy !== undefined) this.autoBuoy(u);
       if (u.retreating && u.hp >= u.maxHp * 0.85 && (!u.rearming || this.magazinesFull(u))) {
         u.retreating = false;
         u.rearming = false;
@@ -1236,6 +1319,18 @@ export class Game {
     }
 
     switch (u.order.k) {
+      case 'bombard': {
+        const o = u.order;
+        if (this.time > o.until) {
+          u.order = { k: 'idle' };
+          u.path = null;
+          break;
+        }
+        const reach = this.bombardRange(u);
+        if (Math.hypot(o.x - u.x, o.y - u.y) > reach * 0.85) this.navTo(u, o.x, o.y);
+        else u.path = null;
+        break;
+      }
       case 'escort': {
         const t = this.units.get(u.order.target);
         if (!t || t.dead || t.team !== u.team) {
@@ -1325,7 +1420,7 @@ export class Game {
           u.sys.dockedUntil = this.time + 0.6;
           u.hp = Math.min(u.maxHp, u.hp + 3 * dt);
           for (const w of u.weapons) if (w.max > 0) w.ammo = Math.min(w.max, w.ammo + dt * 0.5);
-          if (counterOf(u.type) && this.time - u.cmAt > COUNTER.chaffLife) u.cm = 1;
+          if (u.cmKind && this.time - u.cmAt > (u.cmKind === 'smoke' ? COUNTER.smokeLife : COUNTER.chaffLife)) u.cm = 1;
           return;
         }
       }
@@ -1509,6 +1604,7 @@ export class Game {
       if (wc < 0) return;
       const [wx, wy] = cellCenter(this.map, wc);
       const lc = this.spawn(u.owner, 'lander', wx, wy);
+      if (u.heavyLander) this.armourLander(lc);
       lc.ferry = { mode: 'board', ship: ship.id, dest: { x: ship.x, y: ship.y }, then: null, island: isl };
       lc.cargo = [u.id];
       lc.heading = Math.atan2(ship.y - wy, ship.x - wx);
@@ -1594,6 +1690,7 @@ export class Game {
       if (!g || g.dead) return;
       const ang = ship.heading + Math.PI / 2 + (n - (ids.length - 1) / 2) * 0.5;
       const lc = this.spawn(ship.owner, 'lander', ship.x + Math.cos(ang) * 0.15, ship.y + Math.sin(ang) * 0.15);
+      if (g.heavyLander) this.armourLander(lc);
       const [jx, jy] = this.rng.inDisc(0.5);
       lc.ferry = { mode: 'unload', ship: ship.id, dest: { x: bx + jx * 0.5, y: by + jy * 0.5 }, then: { x: o.x + jx, y: o.y + jy }, island: isl };
       lc.cargo = [id];
@@ -2268,11 +2365,47 @@ export class Game {
             continue;
           }
         }
-        if (sh.unit && sh.unit.fireMode === 0) continue;
+        const su = sh.unit;
+        // Bombardment: the guns fire on the area, whatever is (or is not) seen there.
+        if (su && su.order.k === 'bombard' && w.mod.proj === 'shell') {
+          const o = su.order;
+          if (Math.hypot(o.x - su.x, o.y - su.y) <= (w.mod.range ?? 0)) {
+            this.fireArea(sh, w, o.x, o.y);
+            continue;
+          }
+        }
+        if (su && su.fireMode === 0 && !this.salvoOn(su)) continue;
         const t = this.pickTarget(sh, w);
-        if (t) this.fire(sh, w, t.unit, t.x, t.y, t.exact);
+        if (t) {
+          this.fire(sh, w, t.unit, t.x, t.y, t.exact);
+          if (su && this.salvoOn(su) && (w.mod.proj === 'missile' || w.mod.proj === 'sam')) w.cd *= SALVO_CD;
+        }
       }
+      // A salvo ends once the missile magazines are empty.
+      const su = sh.unit;
+      if (su && this.salvoOn(su) && !su.weapons.some((w) => (w.mod.proj === 'missile' || w.mod.proj === 'sam') && w.ammo >= 1)) su.salvoUntil = 0;
     }
+  }
+
+  salvoOn(u: Unit): boolean {
+    return (u.salvoUntil ?? 0) > this.time;
+  }
+
+  /** Longest gun reach (km) of a ship: how close it must sail to bombard. */
+  bombardRange(u: Unit): number {
+    let r = 0;
+    for (const w of u.weapons) if (w.mod.proj === 'shell') r = Math.max(r, w.mod.range ?? 0);
+    return r;
+  }
+
+  /** One bombardment round at a random spot around the aim point; it bursts over an area on impact. */
+  private fireArea(sh: { x: number; y: number; alt: number; team: number; owner: number; unit: Unit | null; dmgMul: number }, w: Weapon, x: number, y: number) {
+    w.cd = (w.mod.cooldown ?? 1) * BOMBARD.cd * (0.9 + this.rng.next() * 0.2);
+    const [ox, oy] = this.rng.inDisc(BOMBARD.spread);
+    if (sh.unit) sh.unit.firingUntil = this.time + 1.5;
+    const p = this.launchProj(sh, w, -1, x + ox, y + oy);
+    p.aoe = BOMBARD.blast;
+    p.dmgMul = sh.dmgMul;
   }
 
   /** Guided rounds one unit has in flight at one target. */
@@ -2365,9 +2498,9 @@ export class Game {
       // Guns are not held back: their rounds are free and arrive in seconds.
       // Fire control. Weapons free: everything that bears, no holding back. Weapons tight (default):
       // at most two of our own guided rounds in flight at one target, and no overkill.
-      const free = sh.unit?.fireMode === 2;
+      const free = sh.unit?.fireMode === 2 || (!!sh.unit && this.salvoOn(sh.unit));
       if (!free && OVERKILL_CHECK.has(w.mod.proj!) && t.pendingDmg >= t.hp * 1.2) continue;
-      if (sh.unit && sh.unit.fireMode === 1 && GUIDED.has(w.mod.proj!) && this.inFlightFrom(sh.unit.id, id) >= 2) continue;
+      if (sh.unit && !free && sh.unit.fireMode === 1 && GUIDED.has(w.mod.proj!) && this.inFlightFrom(sh.unit.id, id) >= 2) continue;
       // Ground small arms only fight on the same island.
       if (sh.unit && UNITS[sh.unit.type].domain === 'land' && cls === 'land' && islandAt(this.map, t.x, t.y) !== islandAt(this.map, sh.x, sh.y)) continue;
       // Biggest threat first: warships and attack aircraft before support craft; distance and
@@ -2632,6 +2765,21 @@ export class Game {
       } else this.emit({ k: 'boom', x: p.x, y: p.y, s: 0.2, w: false, a: p.alt }, p.x, p.y);
       return;
     }
+    if (p.aoe) {
+      // Bombardment round: everything hostile on the surface inside the blast is hurt.
+      const water = heightAt(this.map, p.x, p.y) < 0;
+      for (const u of this.units.values()) {
+        if (!this.inWorld(u) || u.team === p.team) continue;
+        const dom = UNITS[u.type].domain;
+        if (dom === 'air' || dom === 'sub') continue;
+        const d = Math.hypot(u.x - p.x, u.y - p.y);
+        if (d > p.aoe) continue;
+        const dmg = (p.mod.dmg?.[this.dmgClass(u)] ?? 0) * p.dmgMul * BOMBARD.dmg * (1 - (0.5 * d) / p.aoe);
+        if (dmg > 0) this.damage(u, dmg, p.owner, p.kind, p.shooter);
+      }
+      this.emit({ k: 'boom', x: p.x, y: p.y, s: 0.9, w: water, p: PROJ_KINDS.indexOf(p.kind) }, p.x, p.y);
+      return;
+    }
     let t = p.target >= 0 ? this.units.get(p.target) : undefined;
     if (p.kind === 'shell' || p.kind === 'bomb') {
       // Area check around impact point.
@@ -2662,7 +2810,7 @@ export class Game {
       chance *= TORPEDO_VS[t.type]?.hit ?? 1;
     }
     if (p.kind === 'missile') chance *= (1 - t.ecm);
-    if (UNITS[t.type].domain === 'land' && this.inSmoke(t.x, t.y)) chance *= COUNTER.smokeHit;
+    if (UNITS[t.type].domain !== 'air' && UNITS[t.type].domain !== 'sub' && this.inSmoke(t.x, t.y)) chance *= COUNTER.smokeHit;
     if (p.kind === 'sam' && cls === 'air') chance *= 1 - t.ecm * 0.5;
     // Heat-seekers: the aircraft breaks hard and drops flares.
     if (p.kind === 'sam' && cls === 'air' && p.mod.ir) chance *= 1 - (AIR_DODGE[t.type] ?? 0);
@@ -2842,12 +2990,12 @@ export class Game {
       for (const u of this.units.values()) {
         if (!this.inWorld(u) || u.team === m.team) continue;
         const dom = UNITS[u.type].domain;
-        if (dom !== 'sea' && dom !== 'sub') continue;
-        if (Math.hypot(u.x - m.x, u.y - m.y) < 0.45) {
+        if (m.land ? dom !== 'land' : dom !== 'sea' && dom !== 'sub') continue;
+        if (Math.hypot(u.x - m.x, u.y - m.y) < (m.land ? 0.35 : 0.45)) {
           m.armAt = Infinity;
-          const dmg = dom === 'sub' ? 40 : 50;
+          const dmg = m.land ? 35 : dom === 'sub' ? 40 : 50;
           this.damage(u, dmg, m.owner, 'mine');
-          this.emit({ k: 'boom', x: m.x, y: m.y, s: 1.2, w: true }, m.x, m.y);
+          this.emit({ k: 'boom', x: m.x, y: m.y, s: m.land ? 0.8 : 1.2, w: !m.land }, m.x, m.y);
           break;
         }
       }
@@ -2995,7 +3143,7 @@ export class Game {
         let viaSonar = false;
         let viaEsm = false;
         // Ground units inside a smoke screen are seen only from point-blank range.
-        const smoked = dom === 'land' && this.inSmoke(e.x, e.y);
+        const smoked = (dom === 'land' || dom === 'sea') && this.inSmoke(e.x, e.y);
         // Is an active enemy radar holding this unit? (Its radar warning receiver lights up.)
         if (dom !== 'sub' && !smoked) {
           const sig = dom === 'air' ? airSig(e.sig) : dom === 'land' ? 0.45 : Math.sqrt(e.sig);
@@ -3158,7 +3306,7 @@ export class Game {
         if (x.hp < x.maxHp * 0.5) flags |= F_DAMAGED;
         if (x.type === 'merchant' && x.mstate === 'back') flags |= F_LOADING;
         flags |= this.sysFlags(x);
-        if (x.inside < 0) u.push([x.id, UNIT_TYPES.indexOf(x.type), x.owner, r2(x.x), r2(x.y), r2(x.alt), r2(x.heading), Math.ceil((x.hp / x.maxHp) * 100), flags]);
+        if (x.inside < 0) u.push([x.id, UNIT_TYPES.indexOf(x.type), x.owner, r2(x.x), r2(x.y), r2(x.alt), r2(x.heading), Math.ceil((x.hp / x.maxHp) * 100), flags, x.variant]);
         if (x.owner === pid) {
           const o = x.order;
           const oc = ORDER_CODES.indexOf(x.type === 'merchant' ? 'merchant' : x.type === 'lander' ? 'lander' : o.k);
@@ -3193,7 +3341,7 @@ export class Game {
       if (x.landed) flags |= F_LANDED;
       flags |= this.sysFlags(x);
       if (k.ident === 2) {
-        u.push([x.id, UNIT_TYPES.indexOf(x.type), x.owner, r2(x.x), r2(x.y), r2(x.alt), r2(x.heading), Math.ceil((x.hp / x.maxHp) * 100), flags]);
+        u.push([x.id, UNIT_TYPES.indexOf(x.type), x.owner, r2(x.x), r2(x.y), r2(x.alt), r2(x.heading), Math.ceil((x.hp / x.maxHp) * 100), flags, x.variant]);
       } else {
         const dom = UNITS[x.type].domain;
         const kind = k.ident === 1 ? 10 + UNIT_TYPES.indexOf(x.type) : DOMAIN_IDX[dom];

@@ -21,6 +21,8 @@ export interface UView {
   h: number;
   hp: number;
   flags: number;
+  /** Fleet-comp variant (index in its class): picks the model and the weapons. */
+  variant: number;
   /** Authoritative samples, oldest first (server time). */
   hist: Sample[];
   /** Server time of the first snapshot that no longer had it (Infinity while it is still sent). */
@@ -211,13 +213,13 @@ export class World {
     const now = this.clock;
     const seen = new Set<number>();
     for (const r of s.u) {
-      const [id, ti, owner, x, y, alt, h, hp, flags] = r;
+      const [id, ti, owner, x, y, alt, h, hp, flags, variant] = r;
       seen.add(id);
       let u = this.uTrack.get(id);
       if (!u || u.gone !== Infinity) {
         // New, or back in sight before its old track was drawn out: start a fresh history.
         if (u) this.units.delete(id);
-        u = { id, type: UNIT_TYPES[ti], owner, x, y, alt, h, hp, flags, hist: [], gone: Infinity, born: now, seen: now };
+        u = { id, type: UNIT_TYPES[ti], owner, x, y, alt, h, hp, flags, variant: variant ?? 0, hist: [], gone: Infinity, born: now, seen: now };
         this.uTrack.set(id, u);
       }
       push(u.hist, { t: T, x, y, alt, h });

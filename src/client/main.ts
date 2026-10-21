@@ -6,11 +6,11 @@ import { World } from './state';
 import { Match } from './match';
 import { LocalConn, OnlineConn, Conn } from './net';
 import { titleScreen, skirmishScreen, LobbyScreen, settingsScreen, endScreen, pauseScreen } from './ui/menu';
-import { LoadoutEditor } from './ui/loadout';
+import { FleetBuilder } from './ui/loadout';
 import { settings } from './settings';
 import { audio } from './audio/sfx';
 import { voices } from './audio/voice';
-import { getLoadouts } from './loadouts';
+import { getFleet } from './loadouts';
 import type { ServerMsg, StartInfo } from '../shared/protocol';
 import { FACTIONS, Faction } from '../shared/defs';
 import { THEMES } from '../shared/map';
@@ -74,7 +74,7 @@ function showTitle() {
     join: joinRoom,
     loadouts: () => {
       overlayEl?.classList.add('hidden');
-      new LoadoutEditor(ui, () => overlayEl?.classList.remove('hidden'));
+      new FleetBuilder(ui, () => overlayEl?.classList.remove('hidden'));
     },
     settings: () => {
       overlayEl?.classList.add('hidden');
@@ -105,7 +105,7 @@ function showSkirmish() {
         const f = settings.teams === '2v2' && i === 1 ? settings.faction : i % 2 === 0 ? other : FACTIONS[Math.floor(Math.random() * 2)];
         bots.push({ faction: f });
       }
-      const lc = new LocalConn({ name: settings.name, faction: settings.faction, theme: settings.theme, bots, teams: settings.teams, loadouts: getLoadouts(settings.faction) });
+      const lc = new LocalConn({ name: settings.name, faction: settings.faction, theme: settings.theme, bots, teams: settings.teams, fleet: getFleet(settings.faction) });
       conn = lc;
       lc.onMessage = onServer;
       lc.start();
@@ -142,7 +142,7 @@ function joinRoom(code: string) {
       if (err) err.textContent = reason;
     }
   };
-  oc.send({ t: 'hello', name: settings.name, faction: settings.faction, loadouts: getLoadouts(settings.faction) });
+  oc.send({ t: 'hello', name: settings.name, faction: settings.faction, fleet: getFleet(settings.faction) });
   clearUi();
   lobby = new LobbyScreen(ui, {
     send: (m) => oc.send(m),

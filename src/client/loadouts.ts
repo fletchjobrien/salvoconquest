@@ -1,32 +1,26 @@
-// Player loadouts, persisted in localStorage, one set per faction (each faction has its own
-// weapons). Defaults are the recommended setup.
-import { FACTIONS, Faction, Loadouts, UNIT_TYPES, UnitType, sanitizeLoadout } from '../shared/defs';
+// Fleet comp: the variant picked for each class, persisted in localStorage, one pick per faction
+// (each faction has its own weapons). Defaults are the recommended picks.
+import { CLASSES, ClassId, FACTIONS, Faction, UnitType, sanitizeFleet, variantDef, variantIndex, variantLoadout } from '../shared/defs';
 
-const KEY = 'salvo.loadouts.v2';
-let current: Record<Faction, Loadouts> = load();
+const KEY = 'salvo.fleet.v1';
+let current: Record<Faction, Record<ClassId, number>> = load();
 
-function load(): Record<Faction, Loadouts> {
-  const out = { coalition: {}, union: {} } as Record<Faction, Loadouts>;
+function load(): Record<Faction, Record<ClassId, number>> {
+  let raw: Record<string, unknown> = {};
   try {
-    const raw = JSON.parse(localStorage.getItem(KEY) ?? '{}');
-    for (const f of FACTIONS) for (const t of UNIT_TYPES) if (raw[f]?.[t]) out[f][t] = sanitizeLoadout(t, raw[f][t], f);
+    raw = JSON.parse(localStorage.getItem(KEY) ?? '{}');
   } catch {
     /* storage unavailable or corrupt: defaults */
   }
-  return out;
+  return { coalition: sanitizeFleet(raw.coalition), union: sanitizeFleet(raw.union) };
 }
 
-export function getLoadouts(faction: Faction): Loadouts {
+export function getFleet(faction: Faction): Record<ClassId, number> {
   return current[faction];
 }
 
-export function loadoutOf(type: UnitType, faction: Faction): string[] {
-  return sanitizeLoadout(type, current[faction][type], faction);
-}
-
-export function setLoadout(type: UnitType, faction: Faction, lo: string[] | null) {
-  if (lo) current[faction][type] = sanitizeLoadout(type, lo, faction);
-  else delete current[faction][type];
+export function setVariant(faction: Faction, cls: ClassId, index: number) {
+  current[faction][cls] = Math.max(0, Math.min(2, index));
   try {
     localStorage.setItem(KEY, JSON.stringify(current));
   } catch {
@@ -34,13 +28,32 @@ export function setLoadout(type: UnitType, faction: Faction, lo: string[] | null
   }
 }
 
-/** Loadouts in effect for the current match (frozen at start, for the faction we play). */
-let matchLoadouts: Loadouts = {};
+export function resetFleet(faction: Faction) {
+  current[faction] = sanitizeFleet({});
+  setVariant(faction, 'corvette', CLASSES.corvette.def);
+}
+
+/** The fleet in effect for the current match (frozen at start, for the faction we play). */
+let matchFleet: Record<ClassId, number> = sanitizeFleet({});
 let matchFaction: Faction = 'coalition';
 export function freezeForMatch(faction: Faction) {
   matchFaction = faction;
-  matchLoadouts = JSON.parse(JSON.stringify(current[faction]));
+  matchFleet = { ...current[faction] };
 }
-export function matchLoadoutOf(type: UnitType): string[] {
-  return sanitizeLoadout(type, matchLoadouts[type], matchFaction);
+export function getMatchFleet(): Record<ClassId, number> {
+  return matchFleet;
 }
+
+/** Modules of a unit of one of our types as our fleet builds it. */
+export function fleetLoadout(type: UnitType): string[] {
+  const v = variantDef(type, variantIndex(matchFleet, type) ?? 0);
+  return v ? variantLoadout(v, matchFaction) : [];
+}
+
+/** Modules of any unit we can see: its type, its variant (from the snapshot) and its owner's faction. */
+export function unitLoadout(type: UnitType, variant: number, faction: Faction): string[] {
+  const v = variantDef(type, variant);
+  return v ? variantLoadout(v, faction) : [];
+}
+
+export const ALL_FACTIONS = FACTIONS;

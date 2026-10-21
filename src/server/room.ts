@@ -1,6 +1,6 @@
 // One Durable Object per room: lobby, authoritative simulation loop, and snapshot fan-out.
 import { DurableObject } from 'cloudflare:workers';
-import { FACTIONS, Faction, Loadouts, TICK } from '../shared/defs';
+import { FACTIONS, Faction, Fleet, TICK, sanitizeFleet } from '../shared/defs';
 import { Game } from '../shared/game';
 import { Bot } from '../shared/ai';
 import { THEMES, Theme } from '../shared/map';
@@ -8,7 +8,7 @@ import type { ClientMsg, LobbySlot, LobbyState, ServerMsg } from '../shared/prot
 
 interface Slot extends LobbySlot {
   ws: WebSocket | null;
-  loadouts: Loadouts;
+  fleet: Fleet | undefined;
   pid: number; // player index once started
   needFull: boolean;
   /** Token bucket for commands and chat. */
@@ -63,7 +63,7 @@ export class GameRoom extends DurableObject {
       }
       if (msg.t === 'ping') return this.send(ws, { t: 'pong', n: msg.n });
       if (msg.t === 'hello') {
-        slot = this.join(ws, msg.name, msg.faction, msg.loadouts);
+        slot = this.join(ws, msg.name, msg.faction, msg.fleet);
         return;
       }
       if (!slot) return;
@@ -84,10 +84,10 @@ export class GameRoom extends DurableObject {
     ws.addEventListener('error', drop);
   }
 
-  private join(ws: WebSocket, rawName: unknown, rawFaction: unknown, loadouts: unknown): Slot | null {
+  private join(ws: WebSocket, rawName: unknown, rawFaction: unknown, rawFleet: unknown): Slot | null {
     const name = String(rawName ?? 'PLAYER').replace(/[^\w .\-]/g, '').slice(0, 16).toUpperCase() || 'PLAYER';
     const faction: Faction = FACTIONS.includes(rawFaction as Faction) ? (rawFaction as Faction) : 'coalition';
-    const lo = (loadouts && typeof loadouts === 'object' ? loadouts : {}) as Loadouts;
+    const fleet = sanitizeFleet(rawFleet);
     if (this.game) {
       // Rejoin a running game by name.
       const s = this.slots.find((s) => !s.bot && !s.ws && s.name === name);
@@ -118,7 +118,7 @@ export class GameRoom extends DurableObject {
     let uniqueName = name;
     let k = 2;
     while (this.slots.some((s) => s.name === uniqueName)) uniqueName = `${name}${k++}`;
-    const s: Slot = { slot: slotNo, name: uniqueName, faction, team: slotNo, bot: false, ready: false, ws, loadouts: lo, pid: -1, needFull: true, tokens: BUCKET, refill: Date.now() };
+    const s: Slot = { slot: slotNo, name: uniqueName, faction, team: slotNo, bot: false, ready: false, ws, fleet, pid: -1, needFull: true, tokens: BUCKET, refill: Date.now() };
     this.slots.push(s);
     this.ensureHost();
     this.send(ws, { t: 'welcome', slot: slotNo, code: this.code });
@@ -163,7 +163,7 @@ export class GameRoom extends DurableObject {
           const used = new Set(this.slots.map((s) => s.slot));
           const slotNo = [0, 2, 1, 3].find((n) => !used.has(n))!;
           const bf: Faction = slot.faction === 'coalition' ? 'union' : 'coalition';
-          this.slots.push({ slot: slotNo, name: BOT_NAMES[slotNo % BOT_NAMES.length], faction: bf, team: slotNo, bot: true, ready: true, ws: null, loadouts: {}, pid: -1, needFull: false, tokens: 0, refill: 0 });
+          this.slots.push({ slot: slotNo, name: BOT_NAMES[slotNo % BOT_NAMES.length], faction: bf, team: slotNo, bot: true, ready: true, ws: null, fleet: undefined, pid: -1, needFull: false, tokens: 0, refill: 0 });
         }
         if (typeof msg.removeSlot === 'number') this.slots = this.slots.filter((s) => !(s.bot && s.slot === msg.removeSlot));
         if (msg.botFaction) {
@@ -226,7 +226,7 @@ export class GameRoom extends DurableObject {
     this.game = new Game(
       seed,
       this.theme,
-      ordered.map((s) => ({ name: s.name, faction: s.faction, team: this.teamOf(s), slot: s.slot, bot: s.bot, loadouts: s.loadouts })),
+      ordered.map((s) => ({ name: s.name, faction: s.faction, team: this.teamOf(s), slot: s.slot, bot: s.bot, fleet: s.fleet })),
     );
     this.bots = ordered.filter((s) => s.bot).map((s) => new Bot(this.game!, s.pid));
     for (const s of ordered) {

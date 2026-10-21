@@ -2,7 +2,7 @@
 import { Game } from '../shared/game';
 import { Bot } from '../shared/ai';
 import type { ClientMsg, ServerMsg, StartInfo } from '../shared/protocol';
-import { TICK, Faction, Loadouts } from '../shared/defs';
+import { TICK, Faction, Fleet } from '../shared/defs';
 import type { Theme } from '../shared/map';
 
 export interface Conn {
@@ -77,7 +77,7 @@ export interface SkirmishSettings {
   theme: Theme;
   bots: { faction: Faction }[];
   teams: 'ffa' | '2v2';
-  loadouts: Loadouts;
+  fleet: Fleet;
 }
 
 const BOT_NAMES = ['ADM. HALSEY', 'CDR. ZHENG', 'CAPT. NIMITZ', 'ADM. YI', 'CDR. RICKOVER'];
@@ -99,7 +99,7 @@ export class LocalConn implements Conn {
     const slots = n === 2 ? [0, 2] : [0, 2, 1, 3].slice(0, n);
     const teamOf = (slot: number) => (s.teams === '2v2' ? (slot === 0 || slot === 1 ? 0 : 1) : slot);
     const players = [
-      { name: s.name, faction: s.faction, team: teamOf(slots[0]), slot: slots[0], bot: false, loadouts: s.loadouts },
+      { name: s.name, faction: s.faction, team: teamOf(slots[0]), slot: slots[0], bot: false, fleet: s.fleet },
       ...s.bots.map((b, i) => ({ name: BOT_NAMES[i], faction: b.faction, team: teamOf(slots[i + 1]), slot: slots[i + 1], bot: true })),
     ];
     const seed = (Math.random() * 2 ** 31) | 0;

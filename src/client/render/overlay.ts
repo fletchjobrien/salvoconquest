@@ -1,5 +1,5 @@
 // Crisp 2D tactical overlay drawn over the pixelated world: symbols, contacts, rings, orders.
-import { BUILDINGS, MODULES, UNITS, UNIT_TYPES, UNLOAD_RANGE, UnitType, unitCost, unitDef } from '../../shared/defs';
+import { BUILDINGS, MODULES, UNITS, UNIT_TYPES, UNLOAD_RANGE, UnitType, unitCost } from '../../shared/defs';
 import { canDeployAt, deployZone, rallySite } from '../../shared/game';
 import { cellOf } from '../../shared/map';
 import { sensorCoverage, coverageStale, unionOutline, COVER_COLORS, Coverage, Disc, Loop } from '../sensors';
@@ -9,7 +9,7 @@ import type { World, UView } from '../state';
 import { DOMAINS, GHOST_LIFE } from '../state';
 import { Affil, FONT, SITE_GLYPH, SymDomain, glyphFor, sideColor, symbolCanvas } from './symbols';
 import { SIDE, playerColor, unitName } from '../theme';
-import { matchLoadoutOf } from '../loadouts';
+import { unitLoadout } from '../loadouts';
 import { groundY, visAlt, weaponY } from './coords';
 import { weatherOutline } from '../../shared/weather';
 
@@ -25,7 +25,7 @@ export interface OverlayView {
   selected: Set<number>;
   hover: Hover | null;
   dragRect: { x0: number; y0: number; x1: number; y1: number } | null;
-  mode: { k: 'unload'; ships: { ship: number; ids: number[] }[] } | { k: 'launch'; ships: number[] } | { k: 'deploy'; type: UnitType } | { k: 'build'; type: UnitType } | null;
+  mode: { k: 'unload'; ships: { ship: number; ids: number[] }[] } | { k: 'launch'; ships: number[] } | { k: 'bombard'; ships: number[] } | { k: 'deploy'; type: UnitType } | { k: 'build'; type: UnitType } | null;
   mouse: { x: number; y: number; wx: number; wy: number; valid: boolean };
   showRanges: boolean;
   showSensors: boolean;
@@ -56,6 +56,8 @@ export interface ScreenItem {
 }
 
 const P = { x: 0, y: 0, z: 0 };
+/** Radius (km) of a battleship bombardment's beaten zone (as BOMBARD.spread in the simulation). */
+const BOMBARD_ZONE = 0.7;
 
 interface Floater {
   x: number;
@@ -251,6 +253,7 @@ export class Overlay {
     if (selUnits.length && (v.showRanges || selUnits.length <= 12)) this.drawRanges(v, selUnits, selUnits.length > 6 ? 0.6 : 1);
     if (v.mode?.k === 'unload') this.drawUnloadMode(v);
     if (v.mode?.k === 'launch') this.drawLaunchMode(v);
+    if (v.mode?.k === 'bombard') this.drawBombardMode(v);
     if (w.setup) this.drawDeployZone(v);
     else this.drawBuildGhosts(v);
 
@@ -1371,6 +1374,8 @@ export class Overlay {
     } else if (code === 'move' || code === 'retreat' || code === 'patrol' || code === 'unload') {
       if (code === 'retreat') color = 'rgba(255,200,80,0.8)';
       if (code === 'unload') color = 'rgba(140,255,170,0.85)';
+    } else if (code === 'bombard') {
+      color = 'rgba(255,150,80,0.9)';
     } else if (code === 'board' || code === 'escort') {
       const s = w.units.get(d[5]);
       if (!s) return;
@@ -1394,6 +1399,13 @@ export class Overlay {
     if (code === 'patrol') {
       ctx.globalAlpha = 0.6;
       if (this.circle(v, d[5], d[6], 2.6, 2, 32)) ctx.stroke();
+      ctx.globalAlpha = 1;
+    } else if (code === 'bombard') {
+      // The beaten zone: rounds fall anywhere inside it.
+      ctx.globalAlpha = 0.7;
+      ctx.setLineDash([3, 3]);
+      if (this.circle(v, d[5], d[6], BOMBARD_ZONE, ty3, 40)) ctx.stroke();
+      ctx.setLineDash([]);
       ctx.globalAlpha = 1;
     } else {
       ctx.arc(P.x, P.y, 3, 0, Math.PI * 2);
@@ -1587,6 +1599,44 @@ export class Overlay {
     }
   }
 
+  /** Bombardment: each battleship's gun range, and the beaten zone under the cursor. */
+  private drawBombardMode(v: OverlayView) {
+    const w = v.world;
+    const m = v.mode;
+    if (m?.k !== 'bombard') return;
+    const ctx = this.ctx;
+    const col = '#ff9a50';
+    const reach: [UView, number][] = [];
+    for (const id of m.ships) {
+      const u = w.units.get(id);
+      if (!u) continue;
+      let r = 0;
+      for (const md of weaponModsFor(w, u)) if (md.proj === 'shell') r = Math.max(r, md.range ?? 0);
+      reach.push([u, r]);
+    }
+    ctx.lineWidth = 1.5;
+    ctx.globalAlpha = 0.55;
+    ctx.strokeStyle = col;
+    ctx.setLineDash([8, 5]);
+    ctx.lineDashOffset = -w.clock * 10;
+    for (const [u, r] of reach) if (this.circle(v, u.x, u.y, r, 0, 96)) ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.lineDashOffset = 0;
+    ctx.globalAlpha = 1;
+    if (!v.mouse.valid) return;
+    const gy = groundY(w.map, v.mouse.wx, v.mouse.wy);
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 2;
+    if (this.circle(v, v.mouse.wx, v.mouse.wy, BOMBARD_ZONE, gy, 40)) ctx.stroke();
+    if (this.proj(v, v.mouse.wx, gy, v.mouse.wy)) {
+      const ok = reach.every(([u, r]) => Math.hypot(v.mouse.wx - u.x, v.mouse.wy - u.y) <= r);
+      ctx.fillStyle = col;
+      ctx.font = `600 9px ${FONT}`;
+      ctx.textAlign = 'left';
+      ctx.fillText(ok ? 'BOMBARD HERE' : 'BOMBARD HERE · SHIPS CLOSE TO GUN RANGE FIRST', P.x + 14, P.y - 6);
+    }
+  }
+
   /** Carrier launch: each carrier's strike radius (out and back on full fuel) and the chosen point. */
   private drawLaunchMode(v: OverlayView) {
     const w = v.world;
@@ -1639,7 +1689,7 @@ export class Overlay {
 
 export function weaponModsFor(w: World, u: UView) {
   // Own units use our match loadout; others are assumed to carry their faction's defaults.
-  const ids = u.owner === w.me ? matchLoadoutOf(u.type) : unitDef(u.type, w.faction(u.owner)).defaults;
+  const ids = unitLoadout(u.type, u.variant, w.faction(u.owner));
   return ids.map((id) => MODULES[id]).filter((m) => m && m.proj);
 }
 

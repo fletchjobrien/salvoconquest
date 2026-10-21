@@ -8,6 +8,9 @@ export type SymDomain = 'sea' | 'sub' | 'air' | 'land' | 'site';
 export const FONT = "'IBM Plex Mono', ui-monospace, Menlo, monospace";
 
 const GLYPH: Record<UnitType, string> = {
+  corvette: 'FS',
+  frigate: 'FF',
+  cruiser: 'CG',
   destroyer: 'DD',
   sub: 'SS',
   battleship: 'BB',

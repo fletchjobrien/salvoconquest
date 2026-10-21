@@ -38,7 +38,7 @@ export function titleScreen(ui: HTMLElement, a: { skirmish(): void; create(): vo
       <button class="btn primary" data-a="skirmish">Skirmish vs AI <span class="hint">offline</span></button>
       <button class="btn" data-a="create">Create online room <span class="hint">invite friends</span></button>
       <div class="menu-row"><input class="field" id="code" placeholder="ROOM CODE" maxlength="8" style="flex:1"><button class="btn" data-a="join">Join</button></div>
-      <button class="btn" data-a="loadouts">Loadouts <span class="hint">fleet editor</span></button>
+      <button class="btn" data-a="loadouts">Fleet Comp <span class="hint">pick your variants</span></button>
       <button class="btn" data-a="settings">Settings</button>
       <div class="err" id="err"></div>
     </div>

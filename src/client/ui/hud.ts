@@ -1,10 +1,10 @@
 // DOM heads-up display: top bar, radio log, build bar, selection panel, tooltips, banners.
-import { BUILDABLE, BUILDINGS, CRIT, MODULES, UNITS, UnitType, unitBuildTime, unitCost, counterOf, unitDef, deriveStats, FACTION_MOD } from '../../shared/defs';
+import { BUILDABLE, BUILDINGS, CRIT, MODULES, UNITS, UnitType, unitBuildTime, unitCost, counterOf, unitDef, deriveStats, FACTION_MOD, variantDef, variantIndex } from '../../shared/defs';
 import { ORDER_CODES, F_ABOARD, F_DARK, F_PAINTED, F_HOLD, F_FREE } from '../../shared/protocol';
 import type { World, UView } from '../state';
 import { FACTION_STYLE, SIDE, playerColor, unitName } from '../theme';
 import { SymDomain, glyphFor, symbolDataUrl, SITE_GLYPH } from '../render/symbols';
-import { matchLoadoutOf } from '../loadouts';
+import { fleetLoadout, getMatchFleet, unitLoadout } from '../loadouts';
 import { audio } from '../audio/sfx';
 
 type Cat = 'naval' | 'ground' | 'air';
@@ -15,7 +15,7 @@ export interface HudActions {
   selectOnly(ids: number[]): void;
   unloadMode(ship: number, ids: number[]): void;
   toggleCargo(id: number): void;
-  ability(name: 'mines' | 'rtb' | 'retreat' | 'stop' | 'refund' | 'counter' | 'radar' | 'firemode' | 'launch'): void;
+  ability(name: 'mines' | 'rtb' | 'retreat' | 'stop' | 'refund' | 'counter' | 'radar' | 'firemode' | 'launch' | 'salvo' | 'bombard'): void;
   ready(on: boolean): void;
 }
 
@@ -126,7 +126,8 @@ export class Hud {
       head.appendChild(fl);
       this.factoryLabels.set(cat, fl);
       const row = h('div', 'bb');
-      for (const type of BUILDABLE[cat]) {
+      // One button per class: the capital class shows the capital ship this fleet comp chose.
+      for (const type of BUILDABLE[cat].filter((t) => variantIndex(getMatchFleet(), t) !== null)) {
         const d = UNITS[type];
         const b = h('div', 'bbtn');
         const img = h('img');
@@ -159,21 +160,22 @@ export class Hud {
     const w = this.world;
     const fac = w.myFaction;
     const d = unitDef(type, fac);
-    const lo = matchLoadoutOf(type);
-    const st = deriveStats(type, fac, lo);
+    const lo = fleetLoadout(type);
+    const v = variantDef(type, variantIndex(getMatchFleet(), type) ?? 0);
+    const st = deriveStats(type, fac, lo, v);
     const weapons = lo
       .map((id) => MODULES[id])
       .filter(Boolean)
       .map((m) => m.short)
       .join(' · ');
     const hold = st.hold;
-    return `<div class="tt-h">${d.names[fac]}</div><div class="tt-r">${d.role}</div>
+    return `<div class="tt-h">${d.names[fac]}${v && !d.names[fac].includes(v.name) ? ` · ${v.name.toUpperCase()}` : ''}</div><div class="tt-r">${v?.desc ?? d.role}</div>
       <div class="tt-s"><span>COST</span><span>${fmtMoney(unitCost(type, fac))} · ${Math.round(unitBuildTime(type, fac))}s</span>
       <span>HULL</span><span>${st.hp} · speed ${Math.round(st.speed * 100)}</span>
       <span>FIT</span><span>${weapons}</span>
       ${hold ? `<span>HOLD</span><span>${hold} units</span>` : ''}
       ${d.deck ? `<span>DECK</span><span>${d.deck} air flights</span>` : ''}
-      ${d.fuel ? `<span>FUEL</span><span>${d.fuel}s · ${Math.round((d.fuel * d.speed) / 2)} km radius</span>` : ''}
+      ${st.fuel ? `<span>FUEL</span><span>${Math.round(st.fuel)}s · ${Math.round((st.fuel * st.speed) / 2)} km radius</span>` : ''}
       ${st.radarAir || st.radarSurf ? `<span>RADAR</span><span>${Math.round(Math.max(st.radarAir, st.radarSurf))} km</span>` : ''}
       ${st.sonar ? `<span>SONAR</span><span>${Math.round(st.sonar)} km</span>` : ''}
       ${d.domain !== 'land' ? `<span>SIGNATURE</span><span>${d.domain === 'sub' ? `noise ${Math.round(st.quiet * 100)}%` : `radar ${Math.round(st.signature * 100)}%`}</span>` : ''}</div>
@@ -313,7 +315,8 @@ export class Hud {
       const canBuild = w.map.sites.some((s) => BUILDINGS[s.type].produces === cat && w.sites[s.id].owner === w.me);
       const q = w.queues[cat];
       for (const type of BUILDABLE[cat]) {
-        const b = this.buttons.get(type)!;
+        const b = this.buttons.get(type);
+        if (!b) continue;
         const n = q.filter((i) => i.type === type).length;
         const cost = unitCost(type, fac);
         b.classList.toggle('poor', w.cash < cost || (!canBuild && !w.setup));
@@ -412,7 +415,8 @@ export class Hud {
     const def = unitDef(u.type, this.world.myFaction);
     const fac = w.myFaction;
     const d = w.details.get(u.id);
-    const lo = matchLoadoutOf(u.type);
+    const lo = unitLoadout(u.type, u.variant, fac);
+    const variant = variantDef(u.type, u.variant);
     const col = u.hp > 60 ? 'var(--good)' : u.hp > 30 ? 'var(--warn)' : 'var(--bad)';
     const order = d ? ORDER_CODES[d[4]] : 'idle';
     const statusTxt: Record<string, string> = {
@@ -427,9 +431,10 @@ export class Hud {
       merchant: 'HAULING CARGO',
       lander: 'FERRYING',
       escort: 'ESCORTING',
+      bombard: 'BOMBARDING',
     };
     const kills = d?.[15] ?? 0;
-    let html = `<div class="sp-head"><img src="${symbolDataUrl('own', def.domain as SymDomain, glyphFor(u.type), 13)}"><div><div class="nm">${esc(unitName(fac, u.type, u.id))}</div><div class="ty">${def.names[fac]}</div></div><div class="kc${kills ? '' : ' z'}" title="Enemy units destroyed">${kills}<span>KILLS</span></div></div>`;
+    let html = `<div class="sp-head"><img src="${symbolDataUrl('own', def.domain as SymDomain, glyphFor(u.type), 13)}"><div><div class="nm">${esc(unitName(fac, u.type, u.id))}</div><div class="ty">${def.names[fac]}${variant && !def.names[fac].includes(variant.name) ? ` · ${variant.name}` : ''}</div></div><div class="kc${kills ? '' : ' z'}" title="Enemy units destroyed">${kills}<span>KILLS</span></div></div>`;
     const portFlags = d ? d[7] : 0;
     const where = def.domain === 'land' ? 'AT BASE' : 'IN PORT';
     const port = portFlags & 8 ? ` · <span style="color:var(--bad)">${where} · IN COMBAT, REPAIRS HELD</span>` : portFlags & 4 ? ` · <span style="color:var(--good)">${where} · REPAIRING &amp; REARMING</span>` : '';
@@ -459,7 +464,7 @@ export class Hud {
         html += `<div class="wrow${this.hoverMod === m.id ? ' hl' : ''}" data-mod="${m.id}"><span>${m.name}${m.ability ? '<span class="kbd">M</span>' : ''}</span><span class="pips">${pips}</span></div>`;
       }
       if (def.domain === 'sea' || def.domain === 'sub') html += this.damageHtml(d[13]);
-      if (this.hasRadar(u.type)) {
+      if (this.hasRadar(u)) {
         const dark = (u.flags & F_DARK) !== 0;
         const painted = (u.flags & F_PAINTED) !== 0;
         html += `<div class="wrow"><span>RADAR<span class="kbd">G</span></span><span class="pips" style="color:${dark ? 'var(--faint)' : 'var(--good)'}">${dark ? 'OFF · SILENT' : 'ACTIVE · EMITTING'}</span></div>`;
@@ -527,8 +532,12 @@ export class Hud {
     const any = (f: (u: UView) => boolean) => sel.some(f);
     const ships = sel.filter((u) => (w.details.get(u.id)?.[2].length ?? 0) > 0);
     if (ships.length >= 1) b.push(`<button class="btn small" data-act="unload">UNLOAD${ships.length > 1 ? ` ×${ships.length}` : ''}<span class="kbd">U</span></button>`);
-    if (any((u) => matchLoadoutOf(u.type).includes('mines'))) b.push(`<button class="btn small" data-act="mines">DROP MINES<span class="kbd">M</span></button>`);
-    if (any((u) => matchLoadoutOf(u.type).includes('sonobuoy'))) b.push(`<button class="btn small" data-act="mines">DROP BUOY<span class="kbd">M</span></button>`);
+    const fac = w.myFaction;
+    const ability = (u: UView, a: 'mines' | 'buoys') => unitLoadout(u.type, u.variant, fac).some((id) => MODULES[id]?.ability === a);
+    if (any((u) => ability(u, 'mines'))) b.push(`<button class="btn small" data-act="mines">${sel.some((u) => UNITS[u.type].domain === 'land') ? 'LAY MINEFIELD' : 'DROP MINES'}<span class="kbd">M</span></button>`);
+    if (any((u) => ability(u, 'buoys'))) b.push(`<button class="btn small" data-act="mines">DROP BUOY<span class="kbd">M</span></button>`);
+    if (!w.setup && any((u) => variantDef(u.type, u.variant)?.special === 'salvo')) b.push(`<button class="btn small" data-act="salvo" title="Fire every anti-ship missile and SAM in quick succession until empty">SALVO<span class="kbd">B</span></button>`);
+    if (!w.setup && any((u) => variantDef(u.type, u.variant)?.special === 'bombard')) b.push(`<button class="btn small" data-act="bombard" title="Sustained gunfire on an area for 45 s, seen targets or not">BOMBARD<span class="kbd">B</span></button>`);
     if (any((u) => UNITS[u.type].domain === 'air')) b.push(`<button class="btn small" data-act="rtb">RTB<span class="kbd">R</span></button>`);
     // Carriers with flights on deck: launch them at a point.
     if (any((u) => (w.details.get(u.id)?.[12] ?? []).some((a) => (w.units.get(a)?.flags ?? 0) & F_ABOARD))) b.push(`<button class="btn small" data-act="launch">LAUNCH<span class="kbd">L</span></button>`);
@@ -541,20 +550,20 @@ export class Hud {
       return b.join('');
     }
     // Fire control: hold fire / weapons tight / weapons free (the button shows the current state).
-    if (sel.some((u) => matchLoadoutOf(u.type).some((id) => MODULES[id]?.proj))) {
+    if (sel.some((u) => unitLoadout(u.type, u.variant, fac).some((id) => MODULES[id]?.proj))) {
       const modes = new Set(sel.map((u) => fireModeOf(u.flags)));
       const m = modes.size === 1 ? [...modes][0] : -1;
       const label = m === 0 ? 'HOLD FIRE' : m === 2 ? 'WEAPONS FREE' : m === 1 ? 'WEAPONS TIGHT' : 'FIRE: MIXED';
       b.push(`<button class="btn small ${m === 0 ? '' : m === 2 ? 'on' : ''}" data-act="firemode" title="Hold fire: only self-defence against missiles · Weapons tight: at most 2 guided rounds in flight per target · Weapons free: fire everything that bears">${label}<span class="kbd">F</span></button>`);
     }
     // Radar on/off (only units that have a radar of their own).
-    const radars = sel.filter((u) => this.hasRadar(u.type));
+    const radars = sel.filter((u) => this.hasRadar(u));
     if (radars.length) {
       const anyOn = radars.some((u) => !(u.flags & F_DARK));
       b.push(`<button class="btn small ${anyOn ? '' : 'on'}" data-act="radar">${anyOn ? 'RADAR OFF' : 'RADAR ON'}<span class="kbd">G</span></button>`);
     }
     // Countermeasures: chaff (warships, aircraft), smoke (ground units).
-    const cms = new Set(sel.map((u) => counterOf(u.type)).filter(Boolean));
+    const cms = new Set(sel.map((u) => counterOf(u.type, variantDef(u.type, u.variant))).filter(Boolean));
     if (cms.size) b.push(`<button class="btn small" data-act="counter">${cms.size === 1 ? [...cms][0]!.toUpperCase() : 'CHAFF / SMOKE'}<span class="kbd">C</span></button>`);
     b.push(`<button class="btn small" data-act="stop">STOP<span class="kbd">X</span></button>`);
     return b.join('');
@@ -583,9 +592,9 @@ export class Hud {
   }
 
   /** Does this unit type carry a radar of its own (hull radar, radar pod or radar truck)? */
-  private hasRadar(type: UnitType): boolean {
-    if (UNITS[type].radarAir > 0 || UNITS[type].radarSurf > 0) return true;
-    return matchLoadoutOf(type).some((id) => !!(MODULES[id]?.mods?.radarAir || MODULES[id]?.mods?.radarSurf));
+  private hasRadar(u: UView): boolean {
+    if (UNITS[u.type].radarAir > 0 || UNITS[u.type].radarSurf > 0) return true;
+    return unitLoadout(u.type, u.variant, this.world.myFaction).some((id) => !!(MODULES[id]?.mods?.radarAir || MODULES[id]?.mods?.radarSurf));
   }
 
   invalidate() {

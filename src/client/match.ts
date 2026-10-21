@@ -1,5 +1,5 @@
 // A running match: wires world state, rendering, overlay, HUD, input, audio and the connection.
-import { UNITS, UNIT_TYPES, UnitType, MODULES, UNLOAD_RANGE, unitCost, counterOf } from '../shared/defs';
+import { UNITS, UNIT_TYPES, UnitType, MODULES, UNLOAD_RANGE, unitCost, counterOf, variantDef } from '../shared/defs';
 import { canDeployAt, rallySite } from '../shared/game';
 import { islandAt } from '../shared/map';
 import { weatherStrength } from '../shared/weather';
@@ -16,7 +16,7 @@ import { Minimap, screenToGround } from './ui/minimap';
 import { audio, Sfx } from './audio/sfx';
 import { voices, VoiceCat } from './audio/voice';
 import { setPlayerColors, unitName } from './theme';
-import { matchLoadoutOf, freezeForMatch } from './loadouts';
+import { freezeForMatch, unitLoadout } from './loadouts';
 
 type Cat = 'naval' | 'ground' | 'air';
 
@@ -179,7 +179,7 @@ export class Match {
       this.view.mode.ships = this.view.mode.ships.filter((s) => w.units.has(s.ship));
       if (!this.view.mode.ships.length) this.view.mode = null;
     }
-    if (this.view.mode?.k === 'launch') {
+    if (this.view.mode?.k === 'launch' || this.view.mode?.k === 'bombard') {
       this.view.mode.ships = this.view.mode.ships.filter((id) => w.units.has(id));
       if (!this.view.mode.ships.length) this.view.mode = null;
     }
@@ -335,6 +335,15 @@ export class Match {
   private commandAt(x: number, y: number, hover: Hover | null, forceMove: boolean) {
     const w = this.world;
     const ids = this.ownSelectedIds();
+    if (this.view.mode?.k === 'bombard') {
+      const ships = this.view.mode.ships.filter((id) => w.units.has(id));
+      this.send({ c: 'bombard', ids: ships, x, y });
+      this.ping(x, y, 'attack');
+      audio.play('order');
+      this.hud.log('GUNNERY', `Bombarding${ships.length > 1 ? ` with ${ships.length} battleships` : ''}: 45 s of gunfire on the area.`, 'warn');
+      this.view.mode = null;
+      return;
+    }
     if (this.view.mode?.k === 'launch') {
       const ships = this.view.mode.ships;
       for (const ship of ships) this.send({ c: 'launch', ship, x, y });
@@ -397,7 +406,7 @@ export class Match {
             return;
           }
         }
-        if (t && t.owner === w.me && UNITS[t.type].hold > 0 || (t && t.owner === w.me && matchLoadoutOf(t.type).includes('troopbay'))) {
+        if (t && t.owner === w.me && (variantDef(t.type, t.variant)?.hold ?? UNITS[t.type].hold) > 0) {
           // (Troops board; ships and aircraft fall through to escort below.)
           const ground = ids.filter((id) => UNITS[w.units.get(id)!.type].domain === 'land');
           if (ground.length) {
@@ -482,13 +491,46 @@ export class Match {
     this.hud.log('AIR OPS', 'Pick the area to launch to. The dashed ring is the strike radius.', 'good');
   }
 
-  private ability(a: 'mines' | 'rtb' | 'retreat' | 'stop' | 'refund' | 'counter' | 'radar' | 'firemode' | 'launch') {
+  /** Battleship bombardment: the next click picks the area. */
+  private enterBombard() {
+    const w = this.world;
+    const ships = [...this.selected].filter((id) => {
+      const u = w.units.get(id);
+      return u && u.owner === w.me && variantDef(u.type, u.variant)?.special === 'bombard';
+    });
+    if (!ships.length || w.setup) {
+      audio.play('deny');
+      return;
+    }
+    this.view.mode = { k: 'bombard', ships };
+    audio.play('click');
+    this.hud.log('GUNNERY', 'Pick the area to bombard. The ships close to gun range and fire on it for 45 s.', 'good');
+  }
+
+  private ability(a: 'mines' | 'rtb' | 'retreat' | 'stop' | 'refund' | 'counter' | 'radar' | 'firemode' | 'launch' | 'salvo' | 'bombard') {
     const ids = this.ownSelectedIds();
     const w = this.world;
     switch (a) {
       case 'launch':
         this.enterLaunch();
         break;
+      case 'bombard':
+        this.enterBombard();
+        break;
+      case 'salvo': {
+        const cgs = ids.filter((id) => {
+          const u = w.units.get(id);
+          return u && variantDef(u.type, u.variant)?.special === 'salvo';
+        });
+        if (!cgs.length || w.setup) {
+          audio.play('deny');
+          break;
+        }
+        this.send({ c: 'salvo', ids: cgs });
+        audio.play('order');
+        this.hud.log('GUNNERY', `Salvo! Every anti-ship missile and SAM goes out until the magazines are empty${cgs.length > 1 ? ` (${cgs.length} cruisers)` : ''}.`, 'warn');
+        break;
+      }
       case 'firemode': {
         // Cycle hold fire -> weapons tight -> weapons free; a mixed selection goes to tight.
         const us = ids.map((id) => w.units.get(id)).filter((u) => !!u);
@@ -502,7 +544,7 @@ export class Match {
       }
       case 'radar': {
         // Toggle as a group: if any selected radar is on, switch them all off; otherwise all on.
-        const radars = ids.map((id) => w.units.get(id)).filter((u) => !!u && (UNITS[u.type].radarAir > 0 || UNITS[u.type].radarSurf > 0 || matchLoadoutOf(u.type).some((m) => !!(MODULES[m]?.mods?.radarAir || MODULES[m]?.mods?.radarSurf))));
+        const radars = ids.map((id) => w.units.get(id)).filter((u) => !!u && (UNITS[u.type].radarAir > 0 || UNITS[u.type].radarSurf > 0 || unitLoadout(u.type, u.variant, w.myFaction).some((m) => !!(MODULES[m]?.mods?.radarAir || MODULES[m]?.mods?.radarSurf))));
         if (!radars.length) {
           audio.play('deny');
           break;
@@ -517,7 +559,7 @@ export class Match {
         // Every selected unit that still has its chaff or smoke fires it.
         const ready = ids.filter((id) => {
           const u = w.units.get(id);
-          return u && counterOf(u.type) && (w.details.get(id)?.[14] ?? 0) > 0 && !(u.flags & F_LANDED);
+          return u && counterOf(u.type, variantDef(u.type, u.variant)) && (w.details.get(id)?.[14] ?? 0) > 0 && !(u.flags & F_LANDED);
         });
         if (!ready.length || w.setup) {
           audio.play('deny');
@@ -802,7 +844,7 @@ export class Match {
         } else audio.play('deny');
         return;
       }
-      if ((this.view.mode?.k === 'unload' || this.view.mode?.k === 'launch') && !d.moved) {
+      if ((this.view.mode?.k === 'unload' || this.view.mode?.k === 'launch' || this.view.mode?.k === 'bombard') && !d.moved) {
         const m = this.view.mouse;
         if (m.valid) this.commandAt(m.wx, m.wy, null, false);
         return;
@@ -880,6 +922,12 @@ export class Match {
       if (e.code === 'KeyG') this.ability('radar');
       if (e.code === 'KeyU') this.enterUnload();
       if (e.code === 'KeyL') this.enterLaunch();
+      if (e.code === 'KeyB') {
+        // Cruisers fire their salvo; battleships pick an area to bombard.
+        const sel = ids.map((id) => this.world.units.get(id)).filter((u) => !!u);
+        if (sel.some((u) => variantDef(u!.type, u!.variant)?.special === 'salvo')) this.ability('salvo');
+        if (sel.some((u) => variantDef(u!.type, u!.variant)?.special === 'bombard')) this.enterBombard();
+      }
       if (e.code === 'KeyM') this.ability('mines');
       if (e.code === 'KeyR') this.ability('rtb');
       if (e.code === 'KeyT') this.ability('retreat');

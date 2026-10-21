@@ -990,6 +990,39 @@ input[type='range'] {
   color: var(--accent);
   margin-top: 3px;
 }
+.lo-var {
+  cursor: pointer;
+}
+.lo-var.sel {
+  border-color: var(--accent);
+  background: rgba(111, 208, 255, 0.08);
+}
+.lo-var.sel .h span {
+  color: var(--good);
+}
+.lo-var .kit {
+  margin-top: 6px;
+  border-top: 1px solid var(--line);
+  padding-top: 5px;
+}
+.lo-var .kit .w {
+  font-size: 9.5px;
+  color: #dfe9ef;
+  line-height: 1.45;
+  margin-bottom: 3px;
+}
+.lo-var .kit .w .st {
+  display: block;
+  margin: 0;
+  font-size: 8.5px;
+  color: var(--accent);
+}
+.lo-list .it .vn {
+  display: block;
+  font-size: 9px;
+  color: var(--faint);
+  letter-spacing: 0.04em;
+}
 .lo-note {
   font-size: 10px;
   color: var(--good);

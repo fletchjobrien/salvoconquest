@@ -19,6 +19,9 @@ patchMaterial(MAT);
 
 /** Visual length (km) for each type. Models are exaggerated for readability. */
 export const VIS_LEN: Record<UnitType, number> = {
+  corvette: 0.5,
+  frigate: 0.62,
+  cruiser: 0.9,
   destroyer: 0.72,
   sub: 0.58,
   battleship: 1.05,
@@ -33,17 +36,20 @@ export const VIS_LEN: Record<UnitType, number> = {
   recon: 0.32,
 };
 
-function unitGeometry(type: UnitType, faction: Faction, pal: Palette): THREE.BufferGeometry {
-  const key = `${type}:${faction}:${pal.treeKind}`;
+function unitGeometry(type: UnitType, faction: Faction, pal: Palette, vi: number): THREE.BufferGeometry {
+  const key = `${type}:${faction}:${pal.treeKind}:${vi}`;
   const hit = cache.get(key);
   if (hit) return hit;
   const P: Part[] = [];
   switch (type) {
+    case 'corvette':
+    case 'frigate':
     case 'destroyer':
+    case 'cruiser':
     case 'battleship':
     case 'carrier':
     case 'sub':
-      shipParts(P, type, faction);
+      shipParts(P, type, faction, vi);
       break;
     case 'merchant': {
       P.push(prism(hullShape(0.17, 0.25, 1), -0.03, 0.06, 0x23262b));
@@ -73,12 +79,12 @@ function unitGeometry(type: UnitType, faction: Faction, pal: Palette): THREE.Buf
     case 'infantry':
     case 'coastal':
     case 'sam':
-      groundParts(P, type, faction, pal);
+      groundParts(P, type, faction, pal, vi);
       break;
     case 'fighter':
     case 'strike':
     case 'recon':
-      airParts(P, type, faction);
+      airParts(P, type, faction, vi);
       break;
   }
   const g = finalize(P, 1);
@@ -93,9 +99,10 @@ export interface UnitModel {
   baseLen: number;
 }
 
-export function makeUnitModel(type: UnitType, faction: Faction, pal: Palette): UnitModel {
+/** A unit's model; vi is its fleet-comp variant (each variant shows its kit). */
+export function makeUnitModel(type: UnitType, faction: Faction, pal: Palette, vi = 0): UnitModel {
   const root = new THREE.Group();
-  const geo = unitGeometry(type, faction, pal);
+  const geo = unitGeometry(type, faction, pal, vi);
   const body = new THREE.Mesh(geo, MAT);
   body.castShadow = true;
   body.receiveShadow = false;
