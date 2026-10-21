@@ -10,7 +10,7 @@ import { Renderer, CameraRig } from './renderer';
 import { TerrainView, VSCALE } from './terrain';
 import { Fx } from './fx';
 import { UnitModel, makeSiteModel, makeUnitModel, SiteModel, VIS_LEN } from './models';
-import { groundY, visAlt, setAirZoom, airY, weaponY } from './coords';
+import { groundY, visAlt, airY, weaponY } from './coords';
 import type { Overlay } from './overlay';
 import { Wakes } from './wakes';
 import { setWeatherCells } from './weatherfx';
@@ -119,7 +119,6 @@ export class GameScene {
     const w = this.world;
     const map = w.map;
     const scene = this.r.scene;
-    setAirZoom(rig.dist);
     // Effects are culled against this frame's view (and skipped when too small to see).
     this.fx.view = { x: rig.tx, y: rig.ty, dist: rig.dist };
     this.fx.setView(this.r.camera, this.r.height / this.r.pixelSize);
