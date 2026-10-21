@@ -152,7 +152,7 @@ export type ServerMsg =
   | { t: 'pong'; n: number }
   | { t: 'chat'; from: string; text: string };
 
-export const PROJ_KINDS: ProjKind[] = ['shell', 'missile', 'sam', 'torpedo', 'bomb', 'bullet', 'mine'];
+export const PROJ_KINDS: ProjKind[] = ['shell', 'missile', 'sam', 'torpedo', 'bomb', 'bullet', 'mine', 'atgm'];
 
 // Unit flags
 export const F_MOVING = 1;

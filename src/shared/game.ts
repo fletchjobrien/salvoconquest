@@ -119,8 +119,8 @@ export type Order =
   | { k: 'unload'; x: number; y: number; ids: number[] }
   | { k: 'escort'; target: number };
 
-const OVERKILL_CHECK = new Set<string>(['missile', 'torpedo', 'bomb']);
-const GUIDED = new Set<string>(['missile', 'torpedo', 'sam']);
+const OVERKILL_CHECK = new Set<string>(['missile', 'torpedo', 'bomb', 'atgm']);
+const GUIDED = new Set<string>(['missile', 'torpedo', 'sam', 'atgm']);
 /** Seconds without being hit, and without firing, before a unit may repair or rearm. */
 const REPAIR_CALM = { hit: 30, fired: 20 };
 /** Target priority by how dangerous a unit is to us. */
@@ -2408,7 +2408,7 @@ export class Game {
       ay += Math.sin(t.heading) * t.speed * tt;
     }
     const p = this.launchProj(sh, w, exact ? t.id : -1, ax, ay);
-    if (exact || w.mod.proj === 'missile' || w.mod.proj === 'sam') p.target = t.id;
+    if (exact || w.mod.proj === 'missile' || w.mod.proj === 'sam' || w.mod.proj === 'atgm') p.target = t.id;
     // Stealthy or supersonic missiles are harder to intercept.
     if (w.mod.evade) p.evade = w.mod.evade;
     p.seeking = !exact;
@@ -2452,6 +2452,10 @@ export class Game {
     if (kind === 'missile') {
       if (!sh.unit || UNITS[sh.unit.type].domain !== 'air') p.alt = Math.max(0.05, heightAt(this.map, sh.x, sh.y) + 0.03);
       p.arc = { a0: p.alt, apex: this.arcApex(p.alt, sh.x, sh.y, tx, ty), flown: 0, f: 0 };
+    } else if (kind === 'atgm') {
+      // A small top-attack hop a few dozen metres up, hugging the ground.
+      p.alt = Math.max(0.01, heightAt(this.map, sh.x, sh.y)) + 0.015;
+      p.arc = { a0: p.alt, apex: 0.04, flown: 0, f: 0 };
     }
     this.projs.push(p);
     this.emit({ k: 'fire', id: sh.unit?.id ?? 0, m: w.mod.id, x: sh.x, y: sh.y, tx, ty, a: sh.alt }, sh.x, sh.y);
@@ -2508,7 +2512,7 @@ export class Game {
       p.x += Math.cos(p.heading) * p.speed * dt;
       p.y += Math.sin(p.heading) * p.speed * dt;
       const dist = Math.hypot(gx - p.x, gy - p.y);
-      if (p.kind === 'missile') {
+      if (p.kind === 'missile' || p.kind === 'atgm') {
         // One smooth arc from launch to target: progress f is the share of the path flown so
         // far (it adapts when the target moves or the seeker re-aims).
         const arc = p.arc ?? (p.arc = { a0: p.alt, apex: 0.3, flown: 0, f: 0 });
@@ -2519,7 +2523,7 @@ export class Game {
         let want = arc.a0 * (1 - f) + galt * f + Math.sin(Math.PI * f) * arc.apex;
         // Soft clearance: if the real path bends over a hill the straight-line apex missed, rise
         // early and gently (look 2 km ahead) instead of popping up at the slope.
-        if (f < 0.9) {
+        if (f < 0.9 && p.kind === 'missile') {
           const c = Math.cos(p.heading);
           const s = Math.sin(p.heading);
           let hi = 0;
@@ -2528,7 +2532,7 @@ export class Game {
         }
         p.alt += (want - p.alt) * Math.min(1, dt * 2.5);
         // Hard floor, last resort only.
-        p.alt = Math.max(p.alt, Math.max(0, heightAt(this.map, p.x, p.y)) + 0.02);
+        p.alt = Math.max(p.alt, Math.max(0, heightAt(this.map, p.x, p.y)) + (p.kind === 'atgm' ? 0.01 : 0.02));
       } else if (p.kind === 'sam') {
         // Boost straight up out of the launcher, then climb to the target.
         if (p.t < 0.6) p.alt += dt * 0.8;
@@ -2590,14 +2594,14 @@ export class Game {
       }
       if (p.t > p.life) {
         p.dead = true;
-        if (p.kind === 'missile' || p.kind === 'torpedo') this.fizzle(p);
+        if (p.kind === 'missile' || p.kind === 'atgm' || p.kind === 'torpedo') this.fizzle(p);
       }
     }
   }
 
   /** A weapon that found nothing: missiles self-destruct in the air over land, others drop in the sea. */
   private fizzle(p: Projectile) {
-    if (p.kind === 'missile' && heightAt(this.map, p.x, p.y) > -0.005) this.emit({ k: 'boom', x: p.x, y: p.y, s: 0.15, w: false, a: Math.max(p.alt, 0.12) }, p.x, p.y);
+    if ((p.kind === 'missile' || p.kind === 'atgm') && heightAt(this.map, p.x, p.y) > -0.005) this.emit({ k: 'boom', x: p.x, y: p.y, s: p.kind === 'atgm' ? 0.1 : 0.15, w: false, a: Math.max(p.alt, p.kind === 'atgm' ? 0.02 : 0.12) }, p.x, p.y);
     else this.emit({ k: 'splash', x: p.x, y: p.y }, p.x, p.y);
   }
 

@@ -284,10 +284,13 @@ export class GameScene {
     // Tracer streaks scale with zoom so they read like Salvo's at any distance.
     const streakLen = Math.max(0.12, rig.dist * 0.012);
     for (const p of w.projs.values()) {
-      const ma = p.kind === 'missile' || p.kind === 'sam' ? weaponY(map, p.kind, p.air, p.rx, p.ry, p.ralt, p.alt0, w.clock - p.born) : p.ralt;
+      const ma = p.kind === 'missile' || p.kind === 'sam' || p.kind === 'atgm' ? weaponY(map, p.kind, p.air, p.rx, p.ry, p.ralt, p.alt0, w.clock - p.born) : p.ralt;
       const prev = this.trails.get(p.id);
       if (p.kind === 'missile' || p.kind === 'sam') {
         const carry = prev ? this.fx.missileTrail(prev.x, prev.a, prev.y, p.rx, ma, p.ry, prev.carry, p.kind === 'sam', !p.mine) : 0;
+        this.trails.set(p.id, { x: p.rx, a: ma, y: p.ry, carry, seen: this.time });
+      } else if (p.kind === 'atgm') {
+        const carry = prev ? this.fx.atgmTrail(prev.x, prev.a, prev.y, p.rx, ma, p.ry, prev.carry) : 0;
         this.trails.set(p.id, { x: p.rx, a: ma, y: p.ry, carry, seen: this.time });
       } else if (p.kind === 'torpedo') {
         if (Math.random() < 0.5) this.fx.torpedoTrail(p.rx, p.ry);
@@ -474,6 +477,9 @@ export class GameScene {
         if (m.proj === 'missile') {
           this.fx.launch(e.x, alt, e.y);
           this.onSound('launch', e.x, e.y);
+        } else if (m.proj === 'atgm') {
+          this.fx.atgmLaunch(e.x, alt, e.y);
+          this.onSound('sam', e.x, e.y, 0.4);
         } else if (m.proj === 'sam') {
           this.fx.launch(e.x, alt, e.y, true);
           this.onSound('sam', e.x, e.y);

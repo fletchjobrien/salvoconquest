@@ -541,6 +541,33 @@ export class Overlay {
         continue;
       }
       if (p.kind === 'shell' && dist > 30) continue;
+      if (p.kind === 'atgm') {
+        // Anti-tank missiles: a small dot with a short tail, amber when hostile, white when ours.
+        // Small on purpose: they must not read as anti-ship missiles. Hidden when zoomed far out.
+        if (dist > 45) continue;
+        const a3 = weaponY(w.map, p.kind, p.air, p.rx, p.ry, p.ralt, p.alt0, w.clock - p.born);
+        if (!this.proj(v, p.rx, a3, p.ry)) continue;
+        const sx = P.x;
+        const sy = P.y;
+        const col = p.mine ? '#f2f8ff' : '#ffb24a';
+        const dx = p.x - p.px;
+        const dy = p.y - p.py;
+        const dl = Math.hypot(dx, dy);
+        if (dl > 1e-4 && this.proj(v, p.rx - (dx / dl) * 0.12, a3, p.ry - (dy / dl) * 0.12)) {
+          ctx.strokeStyle = col;
+          ctx.globalAlpha = 0.45;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(sx, sy);
+          ctx.lineTo(P.x, P.y);
+          ctx.stroke();
+        }
+        ctx.globalAlpha = 0.9;
+        ctx.fillStyle = col;
+        ctx.fillRect(sx - 1.5, sy - 1.5, 3, 3);
+        ctx.globalAlpha = 1;
+        continue;
+      }
       const guided = p.kind === 'missile' || p.kind === 'sam';
       const a3 =
         p.kind === 'torpedo'

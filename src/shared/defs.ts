@@ -55,7 +55,8 @@ export const SLOT_LABEL: Record<SlotKind, string> = {
   kit: 'SUPPORT KIT',
 };
 
-export type ProjKind = 'shell' | 'missile' | 'sam' | 'torpedo' | 'bomb' | 'bullet' | 'mine';
+/** atgm: infantry anti-tank missiles (low, slow, terrain-hugging; not intercepted or decoyed by chaff). */
+export type ProjKind = 'shell' | 'missile' | 'sam' | 'torpedo' | 'bomb' | 'bullet' | 'mine' | 'atgm';
 
 export interface ModuleDef {
   id: string;
@@ -157,8 +158,8 @@ export const MODULES: Record<string, ModuleDef> = {
   sonobuoy: M({ id: 'sonobuoy', name: 'Sonobuoys', short: 'BUOY', slots: ['pod'], desc: 'Drop listening buoys into the sea [M]. Each one hears submarines within 6 km, and ships further, for 150 s. 8 buoys.', proj: 'mine', range: 0, cooldown: 1.5, ammo: 8, ability: 'buoys' }),
   // ---- ground ----
   rifles: M({ id: 'rifles', name: 'Rifles + MG', short: 'MG', slots: ['arms'], desc: 'Infantry small arms. Holds ground.', proj: 'bullet', range: 2.2, dmg: { land: 5 }, cooldown: 1, ammo: -1, accuracy: 0.6 }),
-  atgm: M({ id: 'atgm', faction: 'coalition', name: 'Javelin Teams', short: 'ATGM', slots: ['arms'], desc: 'Top-attack anti-tank missiles. Also hit boats near the beach.', proj: 'missile', range: 3, dmg: { land: 18, sea: 8 }, cooldown: 4, ammo: -1, speed: 0.5, accuracy: 0.85, seeker: 0.8 }),
-  hj12: M({ id: 'hj12', faction: 'union', name: 'HJ-12 Teams', short: 'ATGM', slots: ['arms'], desc: 'Anti-tank missiles with a little more reach. Also hit boats near the beach.', proj: 'missile', range: 3.4, dmg: { land: 16, sea: 9 }, cooldown: 4, ammo: -1, speed: 0.5, accuracy: 0.8, seeker: 0.8 }),
+  atgm: M({ id: 'atgm', faction: 'coalition', name: 'Javelin Teams', short: 'ATGM', slots: ['arms'], desc: 'Top-attack anti-tank missiles. Also hit boats near the beach.', proj: 'atgm', range: 3, dmg: { land: 18, sea: 8 }, cooldown: 6, ammo: -1, speed: 0.3, accuracy: 0.85, seeker: 0.8 }),
+  hj12: M({ id: 'hj12', faction: 'union', name: 'HJ-12 Teams', short: 'ATGM', slots: ['arms'], desc: 'Anti-tank missiles with a little more reach. Also hit boats near the beach.', proj: 'atgm', range: 3.4, dmg: { land: 16, sea: 9 }, cooldown: 6, ammo: -1, speed: 0.32, accuracy: 0.8, seeker: 0.8 }),
   mortar: M({ id: 'mortar', name: 'Mortars', short: 'MORT', slots: ['arms'], desc: 'Indirect fire. Longer range than rifles.', proj: 'shell', range: 4, dmg: { land: 7 }, cooldown: 3, ammo: -1, speed: 0.6, accuracy: 0.45 }),
   manpads: M({ id: 'manpads', name: 'MANPADS', short: 'AA', slots: ['arms', 'kit'], desc: 'Shoulder-fired heat-seekers against low aircraft. Jets dodge them more often than radar missiles.', proj: 'sam', range: 4, dmg: { air: 22 }, cooldown: 4, ammo: 4, regen: 0.05, speed: 1.4, accuracy: 0.6, ir: true }),
   coastal_ashm: M({ id: 'coastal_ashm', building: true, name: 'Coastal Anti-Ship Missiles', short: 'ASM', slots: ['arms'], desc: 'Truck-launched missiles against ships.', proj: 'missile', range: 18, dmg: { sea: 40 }, cooldown: 10, ammo: 4, regen: 0.04, speed: 0.85, accuracy: 0.9, seeker: 5 }),

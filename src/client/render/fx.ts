@@ -472,6 +472,37 @@ export class Fx {
     return acc;
   }
 
+  /**
+   * Anti-tank missile: a thin wisp of grey smoke laid every ~25 m and a small motor spark at the
+   * head. Much lighter than a ship missile's trail. Returns leftover distance.
+   */
+  atgmTrail(x0: number, a0: number, y0: number, x1: number, a1: number, y1: number, carry: number): number {
+    if (!this.seen2(x0, a0, y0, x1, a1, y1)) return 0;
+    const d = Math.hypot(x1 - x0, a1 - a0, y1 - y0);
+    const step = 1.8 * U;
+    let acc = carry + d;
+    const n = Math.min(10, Math.floor(acc / step));
+    acc -= n * step;
+    for (let i = 0; i < n; i++) {
+      const t = (i + 1) / (n + 1);
+      const g = rnd(0.7, 0.8);
+      this.smoke.add({ x: x0 + (x1 - x0) * t, y: a0 + (a1 - a0) * t, z: y0 + (y1 - y0) * t, vy: rnd(0.2, 0.8) * U, max: rnd(0.8, 1.3), s0: 0.8 * U, s1: 2.6 * U, r: g, g, b: g, a0: 0.35, drag: 0.6, sq: true });
+    }
+    if (d > 1e-5) this.glow.add({ x: x1, y: a1, z: y1, max: 0.05, s0: 2.2 * U, s1: 1 * U, r: 1, g: 0.85, b: 0.5, a0: 0.9 });
+    return acc;
+  }
+
+  /** Anti-tank missile launch: a small back-blast puff, no billowing cloud. */
+  atgmLaunch(x: number, alt: number, y: number) {
+    if (!this.seen(x, alt, y)) return;
+    this.glow.add({ x, y: alt + 0.01, z: y, max: 0.1, s0: 4 * U, s1: 6 * U, r: 1, g: 0.9, b: 0.7, a0: 0.9, r2: 1, g2: 0.4, b2: 0.1, cl: 1 });
+    for (let i = 0; i < 5; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const v = rnd(2, 6) * U;
+      this.smoke.add({ x, y: alt + 0.01, z: y, vx: Math.cos(a) * v, vy: rnd(0.5, 2) * U, vz: Math.sin(a) * v, max: rnd(1, 1.8), s0: 2 * U, s1: 6 * U, r: 0.78, g: 0.76, b: 0.72, a0: 0.45, drag: 1.2, sq: true });
+    }
+  }
+
   torpedoTrail(x: number, y: number) {
     if (!this.seen(x, 0, y)) return;
     this.foam.add({ x, y: 0.006, z: y, max: 3, s0: 0.02, s1: 0.07, a0: 0.45 });
