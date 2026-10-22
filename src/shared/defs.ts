@@ -696,7 +696,7 @@ export const CRIT = {
 
 export const MAP_SIZE = 160; // km
 export const TICK = 0.1; // s
-export const HQ_INCOME = 2.25; // $/s
+export const HQ_INCOME = 4.5; // $/s
 export const MERCHANT_SUNK_WAIT = 45; // s before a site sends a new merchant after one is sunk
 /** Merchant cargo: a base sum plus so much per km of trip (longer trips pay more). */
 export const MERCHANT_PAY = { base: 45, perKm: 9 };
