@@ -704,6 +704,8 @@ export const MERCHANT_PAY = { base: 67.5, perKm: 13.5 };
 export const START_CASH = 4800;
 /** Every unit moves this much faster than its listed speed (ships, subs, troops, aircraft; not weapons). */
 export const MOVE_SPEED = 1.2;
+/** Aircraft fly this much faster again (on top of MOVE_SPEED). */
+export const AIR_SPEED = 1.1;
 /** Deployment phase: place your starting force, then launch (or wait for the timer). */
 export const SETUP_TIME = 120;
 /** The deployment zone reaches this far (km) beyond the home island's radius. */
@@ -770,7 +772,7 @@ export function deriveStats(type: UnitType, faction: Faction, loadout: string[],
   fuelMul *= v?.mul?.fuel ?? 1;
   return {
     hp: Math.round(def.hp * fac.hp * hpMul),
-    speed: def.speed * spdMul * MOVE_SPEED,
+    speed: def.speed * spdMul * MOVE_SPEED * (def.domain === 'air' ? AIR_SPEED : 1),
     turn: def.turn,
     signature: def.signature,
     visual: def.visual,
@@ -789,4 +791,9 @@ export function deriveStats(type: UnitType, faction: Faction, loadout: string[],
 /** Air flights a carrier of this faction can base. */
 export function deckCap(faction: Faction, type: UnitType): number {
   return unitDef(type, faction).deck ?? 0;
+}
+
+/** Air flights an airbase can base: twice its faction's carrier deck. */
+export function airbaseSlots(faction: Faction): number {
+  return 2 * deckCap(faction, 'carrier');
 }

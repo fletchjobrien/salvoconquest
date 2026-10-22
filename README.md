@@ -63,6 +63,10 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
 - Other buildings give bonuses: radar stations (24 km air / 18 km surface radar), airbases, barracks and dockyards (forward production, repair, rearm),
   missile batteries (fire for whoever owns them).
 - Only **corvettes** carry troops (2, the Troop Transport 4, the Swarm 1). Carriers carry air flights instead (Coalition 5, Union 4): right-click a carrier with aircraft selected to base them there. Flights that land are stowed on deck (not drawn on the map); select the carrier and press **LAUNCH** (**L**), then click the area: fighters fly CAP there, strike flights hunt there, AEW orbits there. The dashed ring shows the strike radius. Aircraft are built at airbases only.
+- **Airbases** base aircraft the same way, with twice a carrier's slots (Coalition 10, Union 8): right-click your
+  airbase with aircraft selected and they land there and stay. Click the airbase (or a flight parked on it) to see its
+  air wing, then press **LAUNCH** (**L**) and click the area to send every parked flight there in one wave. New
+  aircraft are based where they are built, or at the nearest base with room.
   RMB a ship with troops selected and they walk to the shore and ride landing craft out to it.
 - **Ship damage** (like WARNO tank combat): hits can knock out systems, not just hull points. An **engine** hit
   stops the ship dead for 8 s, then leaves it at 55% speed; **steering** jams (quarter turn rate), **radar** drops
@@ -176,7 +180,8 @@ from, with a faint glint sweeping along it (like a radar-warning receiver), and 
 Both sides pay the same price and build time for each unit. There are no special abilities: the factions differ
 in **hull stats** and in **which weapons they can fit** (each side has its own missiles, SAMs, guns and torpedoes;
 utility kit such as CIWS, ECM, mines, sonar and armour is shared). See `HULLS` and `MODULES` in `src/shared/defs.ts`.
-Speeds in the table are listed speeds; every unit moves 20% faster than listed (`MOVE_SPEED` in `defs.ts`).
+Speeds in the table are listed speeds; every unit moves 20% faster than listed (`MOVE_SPEED` in `defs.ts`), and
+aircraft 10% faster again (`AIR_SPEED`).
 Weapons (missiles, torpedoes, shells) keep their own speeds.
 
 | Unit | Atlantic Coalition (US pattern) | Pacific Union (PLAN / Russian pattern) |

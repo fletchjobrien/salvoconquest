@@ -1,6 +1,6 @@
 // DOM heads-up display: top bar, radio log, build bar, selection panel, tooltips, banners.
-import { BUILDABLE, BUILDINGS, CRIT, MODULES, UNITS, UnitType, unitBuildTime, unitCost, counterOf, unitDef, deriveStats, FACTION_MOD, variantDef, variantIndex } from '../../shared/defs';
-import { ORDER_CODES, F_ABOARD, F_DARK, F_PAINTED, F_HOLD, F_FREE } from '../../shared/protocol';
+import { BUILDABLE, BUILDINGS, CRIT, MODULES, UNITS, UnitType, unitBuildTime, unitCost, counterOf, unitDef, deriveStats, FACTION_MOD, variantDef, variantIndex, airbaseSlots } from '../../shared/defs';
+import { ORDER_CODES, F_ABOARD, F_DARK, F_LANDED, F_PAINTED, F_HOLD, F_FREE } from '../../shared/protocol';
 import type { World, UView } from '../state';
 import { FACTION_STYLE, SIDE, playerColor, unitName } from '../theme';
 import { SymDomain, glyphFor, symbolDataUrl, SITE_GLYPH } from '../render/symbols';
@@ -345,11 +345,20 @@ export class Hud {
     const w = this.world;
     const el = this.selEl;
     if (this.siteSel !== null && !sel.length) {
-      const key = `site:${this.siteSel}:${w.sites[this.siteSel].owner}:${Math.round(w.sites[this.siteSel].cap * 20)}`;
+      const wing = (w.airbases.get(this.siteSel) ?? []).map((id) => `${id}${(w.units.get(id)?.flags ?? 0) & F_LANDED ? 'g' : 'a'}`).join(',');
+      const key = `site:${this.siteSel}:${w.sites[this.siteSel].owner}:${Math.round(w.sites[this.siteSel].cap * 20)}:${wing}`;
       if (key !== this.selKey) {
         this.selKey = key;
         el.classList.remove('empty');
         el.innerHTML = this.siteHtml(this.siteSel);
+        this.bindActs();
+        el.querySelectorAll<HTMLElement>('[data-flight]').forEach((c) =>
+          c.addEventListener('mousedown', (e) => {
+            e.stopPropagation();
+            audio.play('click');
+            this.act.selectOnly([Number(c.dataset.flight)]);
+          }),
+        );
       }
       return;
     }
@@ -407,7 +416,28 @@ export class Hud {
     const isl = w.map.islands[s.island];
     return `<div class="sp-head"><img src="${symbolDataUrl(affil, 'site', SITE_GLYPH[s.type], 13, playerColor(sv.owner))}"><div><div class="nm">${b.name.toUpperCase()}</div><div class="ty">${esc(isl.home >= 0 ? (w.players.some((p) => p.slot === isl.home) ? 'HOME ISLAND' : 'UNCLAIMED ISLAND') : isl.name)} · ${esc(owner)}</div></div></div>
       <div class="tt-r" style="color:var(--dim);font-size:10px;line-height:1.5">${b.desc}</div>
-      ${sv.cap > 0 ? `<div class="status">CAPTURE ${Math.round(sv.cap * 100)}%</div><div class="bar"><i style="width:${sv.cap * 100}%;background:var(--warn)"></i></div>` : ''}`;
+      ${sv.cap > 0 ? `<div class="status">CAPTURE ${Math.round(sv.cap * 100)}%</div><div class="bar"><i style="width:${sv.cap * 100}%;background:var(--warn)"></i></div>` : ''}${this.wingHtml(id)}`;
+  }
+
+  /** Our airbase's air wing: a slot per flight (bright on the ground, dim in the air) and the LAUNCH button. */
+  private wingHtml(id: number): string {
+    const w = this.world;
+    const wing = w.airbases.get(id);
+    if (!wing) return '';
+    const cap = airbaseSlots(w.myFaction);
+    const down = wing.filter((a) => (w.units.get(a)?.flags ?? 0) & F_LANDED).length;
+    let html = `<div class="status" style="margin-top:8px">AIR WING ${wing.length}/${cap} · ${down} ON THE GROUND${down ? ' · L TO LAUNCH' : ''} · RMB AIRBASE WITH AIRCRAFT TO BASE THEM</div><div class="cargo">`;
+    for (let i = 0; i < cap; i++) {
+      const a = wing[i];
+      const t = a !== undefined ? w.units.get(a) : undefined;
+      if (t) {
+        const ground = t.flags & F_LANDED;
+        html += `<div class="cs full" data-flight="${a}" style="cursor:pointer;${ground ? '' : 'opacity:.45'}" title="${ground ? 'On the ground' : 'Airborne'} · click to select"><img src="${symbolDataUrl('own', 'air', glyphFor(t.type), 9)}"></div>`;
+      } else html += `<div class="cs"></div>`;
+    }
+    html += '</div>';
+    if (down) html += `<div class="acts"><button class="btn small" data-act="launch">LAUNCH<span class="kbd">L</span></button></div>`;
+    return html;
   }
 
   private unitHtml(u: UView): string {
@@ -608,7 +638,7 @@ const HELP = `<b>FIELD MANUAL</b> <span style="float:right;color:var(--faint)">[
 <span class="k">CTRL+RMB</span> force move (no fighting)<br>
 <span class="k">WASD · MMB drag</span> pan · <span class="k">Q/E</span> rotate · <span class="k">wheel</span> zoom<br>
 <span class="k">U</span> unload troops, then click land in the ring<br>
-<span class="k">C</span> chaff / smoke · <span class="k">G</span> radar on/off · <span class="k">F</span> fire control · <span class="k">M</span> mines / sonobuoy · <span class="k">R</span> aircraft RTB · <span class="k">L</span> carrier launch · <span class="k">X</span> stop<br>
+<span class="k">C</span> chaff / smoke · <span class="k">G</span> radar on/off · <span class="k">F</span> fire control · <span class="k">M</span> mines / sonobuoy · <span class="k">R</span> aircraft RTB · <span class="k">L</span> carrier / airbase launch · <span class="k">X</span> stop<br>
 <span class="k">CTRL+1-9</span> group · <span class="k">1-9</span> recall · <span class="k">SPACE</span> last alert<br>
 <span class="k">TAB</span> weapon ranges · <span class="k">V</span> sensor coverage<br>
 <span class="k">ENTER</span> chat · <span class="k">ESC</span> menu<br>

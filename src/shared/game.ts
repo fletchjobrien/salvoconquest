@@ -40,6 +40,7 @@ import {
   ProjKind,
   unitDef,
   deckCap,
+  airbaseSlots,
   PASSIVE_SUB,
   COUNTER,
   counterOf,
@@ -755,13 +756,40 @@ export class Game {
         }
         break;
       }
+      case 'base': {
+        // Aircraft: fly to this airbase (if it has room), land and stay there until launched.
+        const site = this.sites[Number(cmd.site)];
+        if (!site || site.type !== 'airbase' || site.owner !== pid) return;
+        const cap = airbaseSlots(p.faction);
+        for (const u of own(cmd.ids)) {
+          if (UNITS[u.type].domain !== 'air') continue;
+          const already = !!u.base && 'site' in u.base && u.base.site === site.id;
+          if (!already && this.wingIds(site.id).length >= cap) continue;
+          if (u.landed && !already) this.launch(u);
+          u.base = { site: site.id };
+          u.resume = { k: 'rtb' };
+          u.mission = null;
+          if (!u.landed) this.setOrder(u, { k: 'rtb' }, true);
+        }
+        break;
+      }
       case 'launch': {
-        // Every flight on this carrier's deck takes off for the point; one still rearming goes when ready.
-        const ship = this.units.get(Number(cmd.ship));
+        // Every flight on the ground at this carrier or airbase takes off for the point; one still
+        // rearming goes when ready.
         const x = num(cmd.x);
         const y = num(cmd.y);
-        if (!ship || ship.dead || ship.owner !== pid || !UNITS[ship.type].deck || Number.isNaN(x) || Number.isNaN(y)) return;
-        for (const id of this.deckIds(ship)) {
+        if (Number.isNaN(x) || Number.isNaN(y)) return;
+        let wing: number[];
+        if (cmd.site !== undefined) {
+          const site = this.sites[Number(cmd.site)];
+          if (!site || site.type !== 'airbase' || site.owner !== pid) return;
+          wing = this.wingIds(site.id).filter((id) => this.units.get(id)!.owner === pid);
+        } else {
+          const ship = this.units.get(Number(cmd.ship));
+          if (!ship || ship.dead || ship.owner !== pid || !UNITS[ship.type].deck) return;
+          wing = this.deckIds(ship);
+        }
+        for (const id of wing) {
           const a = this.units.get(id)!;
           if (!a.landed) continue;
           const o: Order = { k: 'patrol', x, y };
@@ -1057,7 +1085,7 @@ export class Game {
         u.heading = Math.atan2(this.map.size / 2 - y, this.map.size / 2 - x);
         if (UNITS[type].domain === 'air') {
           const ab = this.factorySite(p, 'air');
-          if (ab) u.base = { site: ab.id };
+          if (ab) this.homeBase(u, ab.id);
           u.alt = 0.9;
           u.speed = u.maxSpeed * 0.6;
           u.order = { k: 'patrol', x, y };
@@ -1279,7 +1307,7 @@ export class Game {
           }
           u = this.spawn(p.id, it.type, sx, sy);
           if (cat === 'air') {
-            u.base = { site: site.id };
+            this.homeBase(u, site.id);
             u.order = { k: 'patrol', x: site.x, y: site.y };
           }
           // Head for the spot the player placed it on.
@@ -1846,13 +1874,39 @@ export class Game {
     return n;
   }
 
-  /** Nearest place this aircraft may land: a friendly airbase, or a friendly carrier with deck room. */
+  /** A new flight is based where it was built, or at the nearest airbase or carrier with room. */
+  private homeBase(u: Unit, site: number) {
+    u.base = null;
+    const full = this.wingIds(site).length >= airbaseSlots(this.players[u.owner].faction);
+    const other = full ? this.nearestAirBase(u) : null;
+    u.base = other ? other.base : { site };
+  }
+
+  /** Flights based at this airbase (on the ground or in the air). */
+  wingIds(site: number): number[] {
+    const ids: number[] = [];
+    for (const a of this.units.values()) if (!a.dead && a.base && 'site' in a.base && a.base.site === site) ids.push(a.id);
+    return ids;
+  }
+
+  /**
+   * Nearest place this aircraft may land: a friendly airbase or carrier with room (its own base always
+   * has room). With every one full it takes the nearest friendly airbase anyway, rather than ditch.
+   */
   nearestAirBase(u: Unit): { x: number; y: number; base: { site: number } | { unit: number } } | null {
     let best: { x: number; y: number; base: { site: number } | { unit: number } } | null = null;
     let bd = 1e9;
+    let any: { x: number; y: number; base: { site: number } } | null = null;
+    let ad = 1e9;
     for (const s of this.sites) {
       if (s.type !== 'airbase' || s.owner < 0 || this.team(s.owner) !== u.team) continue;
       const d = Math.hypot(s.x - u.x, s.y - u.y);
+      if (d < ad) {
+        ad = d;
+        any = { x: s.x, y: s.y, base: { site: s.id } };
+      }
+      const mine = !!u.base && 'site' in u.base && u.base.site === s.id;
+      if (!mine && this.wingIds(s.id).length >= airbaseSlots(this.players[s.owner].faction)) continue;
       if (d < bd) {
         bd = d;
         best = { x: s.x, y: s.y, base: { site: s.id } };
@@ -1869,7 +1923,7 @@ export class Game {
         best = { x: c.x, y: c.y, base: { unit: c.id } };
       }
     }
-    return best;
+    return best ?? any;
   }
 
   private airBasePos(u: Unit): { x: number; y: number } | null {
@@ -3401,6 +3455,9 @@ export class Game {
     if (this.phase === 'setup') snap.ph = { left: Math.ceil(this.setupLeft), ready: [...this.readySet] };
     const bu = this.buoys.filter((b) => b.team === team);
     if (bu.length) snap.bu = bu.map((b) => [Math.round(b.x * 100) / 100, Math.round(b.y * 100) / 100, Math.ceil(b.until - this.time)]);
+    const ab: [number, number[]][] = [];
+    for (const s of this.sites) if (s.type === 'airbase' && s.owner === pid) ab.push([s.id, this.wingIds(s.id)]);
+    if (ab.length) snap.ab = ab;
     if (this.smokes.length) snap.sm = this.smokes.map((m) => [Math.round(m.x * 100) / 100, Math.round(m.y * 100) / 100, m.r, Math.ceil(m.until - this.time)]);
     if (full || this.sitesDirty || this.tickN % 10 === 0) {
       const intel = this.siteIntel.get(team);

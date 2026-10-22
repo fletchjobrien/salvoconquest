@@ -122,6 +122,8 @@ export class World {
   smokes: [number, number, number, number][] = [];
   /** Our team's sonobuoys: x, y, seconds left. */
   buoys: [number, number, number][] = [];
+  /** Our airbases: site id -> flights based there. */
+  airbases = new Map<number, number[]>();
   displayCash = 0;
   income = 0;
   queues: Record<'naval' | 'ground' | 'air', QueueItem[]> = { naval: [], ground: [], air: [] };
@@ -188,6 +190,7 @@ export class World {
     this.setup = s.ph ?? null;
     this.smokes = s.sm ?? [];
     this.buoys = s.bu ?? [];
+    this.airbases = new Map(s.ab ?? []);
     if (s.q) this.queues = s.q;
     if (s.s) for (const [id, owner, cap, capBy] of s.s) this.sites[id] = { id, owner, cap: cap / 100, capBy };
     if (s.w) {

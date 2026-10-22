@@ -1,5 +1,5 @@
 // Crisp 2D tactical overlay drawn over the pixelated world: symbols, contacts, rings, orders.
-import { BUILDINGS, MODULES, MOVE_SPEED, UNITS, UNIT_TYPES, UNLOAD_RANGE, UnitType, unitCost } from '../../shared/defs';
+import { AIR_SPEED, BUILDINGS, MODULES, MOVE_SPEED, UNITS, UNIT_TYPES, UNLOAD_RANGE, UnitType, unitCost } from '../../shared/defs';
 import { canDeployAt, deployZone, rallySite } from '../../shared/game';
 import { cellOf } from '../../shared/map';
 import { sensorCoverage, coverageStale, unionOutline, COVER_COLORS, Coverage, Disc, Loop } from '../sensors';
@@ -25,7 +25,7 @@ export interface OverlayView {
   selected: Set<number>;
   hover: Hover | null;
   dragRect: { x0: number; y0: number; x1: number; y1: number } | null;
-  mode: { k: 'unload'; ships: { ship: number; ids: number[] }[] } | { k: 'launch'; ships: number[] } | { k: 'bombard'; ships: number[] } | { k: 'deploy'; type: UnitType } | { k: 'build'; type: UnitType } | null;
+  mode: { k: 'unload'; ships: { ship: number; ids: number[] }[] } | { k: 'launch'; ships: number[]; sites: number[] } | { k: 'bombard'; ships: number[] } | { k: 'deploy'; type: UnitType } | { k: 'build'; type: UnitType } | null;
   mouse: { x: number; y: number; wx: number; wy: number; valid: boolean };
   showRanges: boolean;
   showSensors: boolean;
@@ -1637,24 +1637,30 @@ export class Overlay {
     }
   }
 
-  /** Carrier launch: each carrier's strike radius (out and back on full fuel) and the chosen point. */
+  /** Carrier or airbase launch: each base's strike radius (out and back on full fuel) and the chosen point. */
   private drawLaunchMode(v: OverlayView) {
     const w = v.world;
     const m = v.mode;
     if (m?.k !== 'launch') return;
     const ctx = this.ctx;
     const col = '#a6e6ff';
-    const reach: [UView, number][] = [];
+    const reach: [{ x: number; y: number }, number][] = [];
+    // The shortest-legged flight on the ground sets the radius.
+    const radius = (wing: number[]) => {
+      let r = Infinity;
+      for (const a of wing) {
+        const t = w.units.get(a)?.type;
+        if (t && UNITS[t].fuel) r = Math.min(r, (UNITS[t].fuel! * UNITS[t].speed * MOVE_SPEED * AIR_SPEED) / 2);
+      }
+      return Number.isFinite(r) ? r : 40;
+    };
     for (const id of m.ships) {
       const c = w.units.get(id);
-      if (!c) continue;
-      // The shortest-legged flight on deck sets the radius.
-      let r = Infinity;
-      for (const a of w.details.get(id)?.[12] ?? []) {
-        const t = w.units.get(a)?.type;
-        if (t && UNITS[t].fuel) r = Math.min(r, (UNITS[t].fuel! * UNITS[t].speed * MOVE_SPEED) / 2);
-      }
-      reach.push([c, Number.isFinite(r) ? r : 40]);
+      if (c) reach.push([c, radius(w.details.get(id)?.[12] ?? [])]);
+    }
+    for (const id of m.sites) {
+      const st = w.map.sites[id];
+      if (st) reach.push([st, radius((w.airbases.get(id) ?? []).filter((a) => (w.units.get(a)?.flags ?? 0) & F_LANDED))]);
     }
     ctx.lineWidth = 1.5;
     ctx.globalAlpha = 0.6;

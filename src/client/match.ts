@@ -1,5 +1,5 @@
 // A running match: wires world state, rendering, overlay, HUD, input, audio and the connection.
-import { UNITS, UNIT_TYPES, UnitType, MODULES, UNLOAD_RANGE, unitCost, counterOf, variantDef } from '../shared/defs';
+import { UNITS, UNIT_TYPES, UnitType, MODULES, UNLOAD_RANGE, unitCost, counterOf, variantDef, airbaseSlots } from '../shared/defs';
 import { canDeployAt, rallySite } from '../shared/game';
 import { islandAt } from '../shared/map';
 import { weatherStrength } from '../shared/weather';
@@ -181,7 +181,9 @@ export class Match {
     }
     if (this.view.mode?.k === 'launch' || this.view.mode?.k === 'bombard') {
       this.view.mode.ships = this.view.mode.ships.filter((id) => w.units.has(id));
-      if (!this.view.mode.ships.length) this.view.mode = null;
+      // An airbase launch stays while that airbase is still ours.
+      const sites = this.view.mode.k === 'launch' ? (this.view.mode.sites = this.view.mode.sites.filter((id) => w.airbases.has(id))) : [];
+      if (!this.view.mode.ships.length && !sites.length) this.view.mode = null;
     }
     if (this.view.mode?.k === 'deploy' && !w.setup) this.view.mode = null;
     this.updateMouseWorld();
@@ -345,11 +347,13 @@ export class Match {
       return;
     }
     if (this.view.mode?.k === 'launch') {
-      const ships = this.view.mode.ships;
+      const { ships, sites } = this.view.mode;
       for (const ship of ships) this.send({ c: 'launch', ship, x, y });
+      for (const site of sites) this.send({ c: 'launch', site, x, y });
       this.ping(x, y, 'move');
       audio.play('order');
-      this.hud.log('AIR OPS', `Launching the air wing${ships.length > 1 ? `s of ${ships.length} carriers` : ''}. Fighters fly CAP, strike flights hunt, AEW orbits.`, 'good');
+      const n = ships.length + sites.length;
+      this.hud.log('AIR OPS', `Launching the air wing${n > 1 ? `s of ${n} bases` : ''}. Fighters fly CAP, strike flights hunt, AEW orbits.`, 'good');
       this.view.mode = null;
       return;
     }
@@ -385,6 +389,30 @@ export class Match {
     const cat = this.voiceCat(first.type);
     const who = unitName(w.myFaction, first.type, first.id);
     if (hover && !forceMove) {
+      // Aircraft on our own airbase (or on a flight parked there): base them there, to land and stay
+      // until launched.
+      let base = hover.kind === 'site' ? hover.id : -1;
+      if (hover.kind === 'unit' && (w.units.get(hover.id)?.flags ?? 0) & F_LANDED) for (const [sid, wing] of w.airbases) if (wing.includes(hover.id)) base = sid;
+      if (base >= 0) {
+        const s = w.map.sites[base];
+        const air = ids.filter((id) => UNITS[w.units.get(id)!.type].domain === 'air');
+        if (s.type === 'airbase' && w.sites[base].owner === w.me && air.length) {
+          const wing = w.airbases.get(base)?.length ?? 0;
+          const room = airbaseSlots(w.myFaction) - wing;
+          if (room <= 0 && !air.every((id) => w.airbases.get(base)?.includes(id))) {
+            audio.play('deny');
+            this.hud.log('AIR OPS', `Airbase full: ${wing}/${airbaseSlots(w.myFaction)} flights.`, 'warn');
+            return;
+          }
+          this.send({ c: 'base', ids: air, site: base });
+          this.ping(s.x, s.y, 'unload');
+          audio.play('order');
+          void voices.say(w.myFaction, 'air', 'rtb', unitName(w.myFaction, w.units.get(air[0])!.type, air[0]));
+          const rest = ids.filter((id) => !air.includes(id));
+          if (rest.length) this.send({ c: 'move', ids: rest, x, y });
+          return;
+        }
+      }
       if (hover.kind === 'unit') {
         const t = w.units.get(hover.id);
         if (t && w.teamOf(t.owner) !== w.myTeam) {
@@ -477,16 +505,19 @@ export class Match {
     this.hud.log('ORDERS', `Pick a landing point${ships.length > 1 ? ` for ${ships.length} ships` : ''} within ${UNLOAD_RANGE} km — ships close in if needed.`, 'good');
   }
 
-  /** Carrier launch: the next click picks where the flights on deck go. */
+  /** Carrier or airbase launch: the next click picks where the flights on the ground there go. */
   private enterLaunch() {
     const w = this.world;
     const ships = [...this.selected].filter((id) => (w.details.get(id)?.[12] ?? []).some((a) => (w.units.get(a)?.flags ?? 0) & F_ABOARD));
-    if (!ships.length) {
+    const site = this.hud.siteSel;
+    const sites = site !== null && !this.selected.size && (w.airbases.get(site) ?? []).some((a) => (w.units.get(a)?.flags ?? 0) & F_LANDED) ? [site] : [];
+    if (!ships.length && !sites.length) {
       audio.play('deny');
       if ([...this.selected].some((id) => UNITS[w.units.get(id)?.type ?? 'merchant'].deck)) this.hud.log('AIR OPS', 'No flights on deck.', 'warn');
+      else if (site !== null && w.airbases.has(site)) this.hud.log('AIR OPS', 'No flights on the ground at this airbase.', 'warn');
       return;
     }
-    this.view.mode = { k: 'launch', ships };
+    this.view.mode = { k: 'launch', ships, sites };
     audio.play('click');
     this.hud.log('AIR OPS', 'Pick the area to launch to. The dashed ring is the strike radius.', 'good');
   }
@@ -914,6 +945,8 @@ export class Match {
           }
         }
       }
+      // L with our airbase selected (no units): launch its parked flights.
+      if (!ids.length && e.code === 'KeyL' && this.hud.siteSel !== null) this.enterLaunch();
       if (!ids.length) return;
       if ((e.code === 'Delete' || e.code === 'Backspace') && this.world.setup) this.ability('refund');
       if (e.code === 'KeyX') this.ability('stop');
@@ -988,6 +1021,16 @@ export class Match {
         this.hud.siteSel = null;
         this.hud.log('INTEL', `${w.players[u.owner]?.name ?? 'Enemy'} ${UNITS[u.type].names[w.faction(u.owner)]} · hull ${u.hp}%`, 'warn');
         return;
+      }
+      // A flight parked at our airbase: a plain click opens the airbase (its wing, LAUNCH). Shift adds the flight.
+      if (!add && u.flags & F_LANDED) {
+        for (const [sid, wing] of w.airbases) {
+          if (!wing.includes(u.id)) continue;
+          this.selected.clear();
+          this.hud.siteSel = sid;
+          audio.play('click');
+          return;
+        }
       }
       const now = performance.now();
       if (this.lastClick.id === u.id && now - this.lastClick.t < 350) {

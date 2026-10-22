@@ -24,8 +24,11 @@ export type Command =
   | { c: 'radar'; ids: number[]; on: boolean }
   // Fire control: 0 hold fire, 1 weapons tight (2 missiles per target), 2 weapons free. Hotkey F:
   | { c: 'firemode'; ids: number[]; mode: number }
-  // Carrier: launch every flight stowed aboard toward a point (fighters patrol, strike flights attack, AEW orbits). Hotkey L:
-  | { c: 'launch'; ship: number; x: number; y: number }
+  // Carrier (ship) or airbase (site): launch every flight on the ground there toward a point (fighters patrol,
+  // strike flights attack, AEW orbits). Hotkey L:
+  | { c: 'launch'; ship?: number; site?: number; x: number; y: number }
+  // Aircraft: move to this airbase (if it has room), land and stay there until launched (RMB on an own airbase):
+  | { c: 'base'; ids: number[]; site: number }
   // Ships and aircraft follow and protect a friendly ship or aircraft (RMB on it):
   | { c: 'escort'; ids: number[]; target: number }
   // Missile cruiser: fire every anti-ship missile and SAM in quick succession. Hotkey B:
@@ -120,6 +123,8 @@ export interface Snapshot {
   sm?: [number, number, number, number][];
   /** Our team's sonobuoys: x, y, seconds left. */
   bu?: [number, number, number][];
+  /** Our airbases: site id and the flights based there (on the ground or in the air). */
+  ab?: [number, number[]][];
 }
 
 export type GameEvent =
