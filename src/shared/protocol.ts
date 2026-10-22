@@ -40,7 +40,10 @@ export interface LobbySlot {
   slot: number;
   name: string;
   faction: Faction;
+  /** Team 0-3 (shown as 1-4); players on the same team are allies and start on neighbouring islands. */
   team: number;
+  /** Income handicap: percent of normal income this commander gets (100 = none). */
+  handicap: number;
   bot: boolean;
   ready: boolean;
   you?: boolean;
@@ -52,13 +55,31 @@ export interface LobbyState {
   theme: Theme;
   slots: LobbySlot[];
   started: boolean;
-  teams: 'ffa' | '2v2';
 }
+
+/** Income handicaps a commander can pick (percent of normal income). */
+export const HANDICAPS = [100, 90, 80, 70, 60, 50, 40, 30];
 
 export type ClientMsg =
   /** token: random per browser tab, kept across reloads, so a refresh or a dropped connection takes back the same seat. */
   | { t: 'hello'; name: string; faction: Faction; fleet: Fleet; token?: string }
-  | { t: 'lobby'; theme?: Theme; addBot?: boolean; removeSlot?: number; teams?: 'ffa' | '2v2'; faction?: Faction; ready?: boolean; botFaction?: { slot: number; faction: Faction } }
+  | {
+      t: 'lobby';
+      theme?: Theme;
+      addBot?: boolean;
+      removeSlot?: number;
+      /** Host: team preset for every seat (everyone alone, or two pairs in seat order). */
+      teams?: 'ffa' | '2v2';
+      faction?: Faction;
+      ready?: boolean;
+      /** Your own team and income handicap. */
+      team?: number;
+      handicap?: number;
+      /** Host: an AI seat's faction, team or handicap. */
+      botFaction?: { slot: number; faction: Faction };
+      botTeam?: { slot: number; team: number };
+      botHandicap?: { slot: number; handicap: number };
+    }
   | { t: 'start' }
   | { t: 'cmd'; cmd: Command }
   | { t: 'ping'; n: number }

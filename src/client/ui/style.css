@@ -297,12 +297,22 @@ input[type='range'] {
 }
 .slots .slot {
   display: grid;
-  grid-template-columns: 26px 1fr 140px 90px 60px;
+  grid-template-columns: 18px 1fr 132px 92px 112px 40px;
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
   border-bottom: 1px solid var(--line);
   animation: slidein 0.3s var(--ease);
+}
+.slot .fac {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.slot .lobby-pick {
+  padding: 3px 4px;
+  font-size: 10px;
+  width: 100%;
 }
 .slot .dot {
   width: 10px;

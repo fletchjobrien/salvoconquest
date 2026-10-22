@@ -8,6 +8,10 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
 
 - **Runs on one Cloudflare Worker.** Static client from Workers Static Assets, one Durable Object per room runs the authoritative simulation.
 - **Play offline vs AI** in the browser (the same simulation runs locally), or **create a room** and send the link to friends.
+- **Online lobby:** every commander picks their own **team** (1–4; same team = allies, who start on neighbouring
+  home islands) and an **income handicap** (100% down to 30% of normal HQ and merchant income). The host can add AI
+  commanders and set each one's faction (⇄), team and handicap, or reset all teams with *All vs all* / *2 v 2*. The
+  game needs at least two teams to start.
 - **Reconnects by itself.** A refresh, a dropped or silent connection, or a tab that comes back from the background
   puts you back in your seat in the running game (each browser tab has its own reconnect token). The client retries
   for up to 2 minutes. A redeploy of the Worker restarts every room, and a game in progress is lost.

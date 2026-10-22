@@ -109,6 +109,8 @@ export interface PlayerInit {
   bot: boolean;
   /** Fleet comp: variant per class (computer players pick their own). */
   fleet?: Fleet;
+  /** Income handicap: percent of normal income (default 100). */
+  handicap?: number;
 }
 
 export interface Weapon {
@@ -382,6 +384,8 @@ export interface Player {
   cash: number;
   earned: number;
   income: number;
+  /** Share of normal income this player gets (handicap; 1 = none). */
+  incomeMul: number;
   queues: Record<Cat, { type: UnitType; t: number; total: number; rally?: { x: number; y: number }; site?: number }[]>;
   fleet: Record<ClassId, number>;
   defeated: boolean;
@@ -466,6 +470,7 @@ export class Game {
         cash: START_CASH,
         earned: 0,
         income: 0,
+        incomeMul: Math.max(0.1, Math.min(1, (p.handicap ?? 100) / 100)),
         queues: { naval: [], ground: [], air: [] },
         fleet,
         defeated: false,
@@ -1219,8 +1224,8 @@ export class Game {
       if (p.defeated) continue;
       const hq = this.sites.find((s) => s.type === 'hq' && s.owner === p.id);
       if (hq) {
-        p.cash += HQ_INCOME * dt;
-        p.earned += HQ_INCOME * dt;
+        p.cash += HQ_INCOME * p.incomeMul * dt;
+        p.earned += HQ_INCOME * p.incomeMul * dt;
       }
     }
     // Merchants: one per owned resource site.
@@ -1833,7 +1838,7 @@ export class Game {
       const port = this.homePort(p, m.x, m.y) ?? m.port;
       if (!port) return;
       if (Math.hypot(port.x - m.x, port.y - m.y) < 0.6) {
-        const v = Math.round(m.mtimer ?? 0);
+        const v = Math.round((m.mtimer ?? 0) * p.incomeMul);
         if (v > 0) {
           p.cash += v;
           p.earned += v;

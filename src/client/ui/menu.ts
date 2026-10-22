@@ -1,6 +1,7 @@
 // Menu screens: title, skirmish setup, online rooms + lobby, settings, end of match, pause.
 import { FACTIONS, FACTION_MOD, Faction } from '../../shared/defs';
 import { THEMES, THEME_INFO, Theme } from '../../shared/map';
+import { HANDICAPS } from '../../shared/protocol';
 import type { LobbyState, ServerMsg } from '../../shared/protocol';
 import { FACTION_STYLE, PALETTES, hex } from '../theme';
 import { settings, saveSettings } from '../settings';
@@ -160,7 +161,8 @@ export class LobbyScreen {
         <button class="btn" id="copy">Copy invite link</button>
       </section>
       <section><div class="label">Commanders</div><div class="slots" id="slots"></div>
-        <div class="menu-row" style="margin-top:8px" id="hostrow"><button class="btn small" id="addbot">+ Add AI</button><button class="btn small" id="teams">Teams: FFA</button></div></section>
+        <div class="menu-row" style="margin-top:8px" id="hostrow"><button class="btn small" id="addbot">+ Add AI</button><button class="btn small" id="ffa" title="Everyone on their own team">All vs all</button><button class="btn small" id="pairs" title="Two teams: the first two seats against the last two">2 v 2</button></div>
+        <div class="tt-r" style="color:var(--dim);font-size:10px;margin-top:6px">Pick your team and income handicap in your row. Same team = allies, starting on neighbouring islands.</div></section>
       <section><div class="label">Your side</div><div id="fac"></div></section>
       <section><div class="label">Theatre</div><div id="thm"></div></section>
       <div class="err" id="err"></div>
@@ -169,7 +171,8 @@ export class LobbyScreen {
     this.el.querySelector('#leave')!.addEventListener('click', a.leave);
     this.el.querySelector('#start')!.addEventListener('click', () => a.send({ t: 'start' }));
     this.el.querySelector('#addbot')!.addEventListener('click', () => a.send({ t: 'lobby', addBot: true }));
-    this.el.querySelector('#teams')!.addEventListener('click', () => a.send({ t: 'lobby', teams: this.state?.teams === 'ffa' ? '2v2' : 'ffa' }));
+    this.el.querySelector('#ffa')!.addEventListener('click', () => a.send({ t: 'lobby', teams: 'ffa' }));
+    this.el.querySelector('#pairs')!.addEventListener('click', () => a.send({ t: 'lobby', teams: '2v2' }));
     this.el.querySelector('#copy')!.addEventListener('click', () => {
       const url = `${location.origin}/?room=${this.state?.code ?? ''}`;
       void navigator.clipboard?.writeText(url);
@@ -187,6 +190,8 @@ export class LobbyScreen {
   }
 
   update(s: LobbyState) {
+    // Only seats that are new slide in; the others are redrawn in place (every change redraws the list).
+    const seen = new Set(this.state?.slots.map((x) => `${x.slot}:${x.name}`) ?? []);
     this.state = s;
     const me = s.slots.find((x) => x.you);
     const host = !!me?.host;
@@ -194,29 +199,45 @@ export class LobbyScreen {
     const slots = this.el.querySelector('#slots')!;
     slots.innerHTML = '';
     for (const sl of s.slots) {
+      // Your own row, and (for the host) the AI rows, can be changed.
+      const mine = !!sl.you;
+      const edit = mine || (sl.bot && host);
       const row = h(`<div class="slot"><span class="dot" style="background:${FACTION_STYLE[sl.faction].accent};color:${FACTION_STYLE[sl.faction].accent}"></span>
         <span>${sl.name}${sl.you ? ' <span style="color:var(--dim)">(you)</span>' : ''}${sl.host ? ' <span style="color:var(--warn)">HOST</span>' : ''}</span>
-        <span style="color:var(--dim)">${FACTION_MOD[sl.faction].tag}</span>
-        <span style="color:var(--dim)">${s.teams === '2v2' ? 'TEAM ' + (sl.team + 1) : 'SLOT ' + (sl.slot + 1)}</span>
-        <span></span></div>`);
+        <span class="fac" style="color:var(--dim)">${FACTION_MOD[sl.faction].tag}</span>
+        <span class="team"></span><span class="hc"></span><span class="rm"></span></div>`);
+      const pick = (cls: string, opts: [number, string][], value: number, send: (v: number) => void, title: string) => {
+        const cell = row.querySelector(`.${cls}`)!;
+        if (!edit) {
+          cell.textContent = opts.find(([v]) => v === value)?.[1] ?? '';
+          (cell as HTMLElement).style.color = 'var(--dim)';
+          return;
+        }
+        const sel = h(`<select class="field lobby-pick" title="${title}">${opts.map(([v, l]) => `<option value="${v}"${v === value ? ' selected' : ''}>${l}</option>`).join('')}</select>`) as HTMLSelectElement;
+        sel.addEventListener('change', () => send(Number(sel.value)));
+        cell.appendChild(sel);
+      };
+      pick('team', [0, 1, 2, 3].map((t) => [t, `TEAM ${t + 1}`]), sl.team, (team) => this.a.send(mine ? { t: 'lobby', team } : { t: 'lobby', botTeam: { slot: sl.slot, team } }), 'Team: same team = allies');
+      pick('hc', HANDICAPS.map((p) => [p, p === 100 ? 'INCOME 100%' : `INCOME ${p}%`]), sl.handicap, (handicap) => this.a.send(mine ? { t: 'lobby', handicap } : { t: 'lobby', botHandicap: { slot: sl.slot, handicap } }), 'Handicap: share of normal income (HQ and merchants)');
       if (sl.bot && host) {
-        const last = row.lastElementChild!;
-        const sw = h(`<button class="btn small">⇄</button>`);
+        const sw = h(`<button class="btn small" title="Switch this AI's faction">⇄</button>`);
         sw.addEventListener('click', () => this.a.send({ t: 'lobby', botFaction: { slot: sl.slot, faction: sl.faction === 'coalition' ? 'union' : 'coalition' } }));
-        const rm = h(`<button class="btn small">✕</button>`);
+        row.querySelector('.fac')!.append(' ', sw);
+        const rm = h(`<button class="btn small" title="Remove this AI">✕</button>`);
         rm.addEventListener('click', () => this.a.send({ t: 'lobby', removeSlot: sl.slot }));
-        last.append(sw, rm);
+        row.querySelector('.rm')!.appendChild(rm);
       }
+      if (seen.has(`${sl.slot}:${sl.name}`)) row.style.animation = 'none';
       slots.appendChild(row);
     }
     (this.el.querySelector('#hostrow') as HTMLElement).classList.toggle('hidden', !host);
-    (this.el.querySelector('#teams') as HTMLElement).textContent = `Teams: ${s.teams === 'ffa' ? 'FFA' : '2 v 2'}`;
     const thm = this.el.querySelector('#thm')!;
     thm.innerHTML = '';
     thm.appendChild(themeCards(s.theme, (t) => this.a.send({ t: 'lobby', theme: t }), !host));
     const start = this.el.querySelector('#start') as HTMLButtonElement;
-    start.disabled = !host || s.slots.length < 2;
-    start.textContent = host ? (s.slots.length < 2 ? 'Need 2+ players' : 'Start ▸') : 'Waiting for host…';
+    const oneTeam = new Set(s.slots.map((x) => x.team)).size < 2;
+    start.disabled = !host || s.slots.length < 2 || oneTeam;
+    start.textContent = host ? (s.slots.length < 2 ? 'Need 2+ players' : oneTeam ? 'Need 2+ teams' : 'Start ▸') : 'Waiting for host…';
     sfxBind(this.el);
   }
 

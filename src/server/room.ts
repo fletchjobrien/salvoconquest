@@ -4,6 +4,7 @@ import { FACTIONS, Faction, Fleet, TICK, sanitizeFleet } from '../shared/defs';
 import { Game } from '../shared/game';
 import { Bot } from '../shared/ai';
 import { THEMES, Theme } from '../shared/map';
+import { HANDICAPS } from '../shared/protocol';
 import type { ClientMsg, LobbySlot, LobbyState, ServerMsg } from '../shared/protocol';
 
 interface Slot extends LobbySlot {
@@ -29,7 +30,6 @@ export class GameRoom extends DurableObject {
   private code = '';
   private slots: Slot[] = [];
   private theme: Theme = 'jungle';
-  private teams: 'ffa' | '2v2' = 'ffa';
   private game: Game | null = null;
   private bots: Bot[] = [];
   private loop: ReturnType<typeof setInterval> | null = null;
@@ -136,7 +136,7 @@ export class GameRoom extends DurableObject {
     let uniqueName = name;
     let k = 2;
     while (this.slots.some((s) => s.name === uniqueName)) uniqueName = `${name}${k++}`;
-    const s: Slot = { slot: slotNo, name: uniqueName, faction, team: slotNo, bot: false, ready: false, ws, fleet, pid: -1, token, needFull: true, tokens: BUCKET, refill: Date.now() };
+    const s: Slot = { slot: slotNo, name: uniqueName, faction, team: this.freeTeam(), handicap: 100, bot: false, ready: false, ws, fleet, pid: -1, token, needFull: true, tokens: BUCKET, refill: Date.now() };
     this.slots.push(s);
     this.ensureHost();
     this.send(ws, { t: 'welcome', slot: slotNo, code: this.code });
@@ -196,19 +196,33 @@ export class GameRoom extends DurableObject {
       if (typeof msg.ready === 'boolean') slot.ready = msg.ready;
       if (slot.host) {
         if (msg.theme && THEMES.includes(msg.theme)) this.theme = msg.theme;
-        if (msg.teams === 'ffa' || msg.teams === '2v2') this.teams = msg.teams;
+        // Team presets: everyone on their own, or two pairs in seat order.
+        if (msg.teams === 'ffa' || msg.teams === '2v2') this.seats().forEach((s, i) => (s.team = msg.teams === 'ffa' ? i : i < 2 ? 0 : 1));
         if (msg.addBot && this.slots.length < MAX_SLOTS) {
           const used = new Set(this.slots.map((s) => s.slot));
           const slotNo = [0, 2, 1, 3].find((n) => !used.has(n))!;
           const bf: Faction = slot.faction === 'coalition' ? 'union' : 'coalition';
-          this.slots.push({ slot: slotNo, name: BOT_NAMES[slotNo % BOT_NAMES.length], faction: bf, team: slotNo, bot: true, ready: true, ws: null, fleet: undefined, pid: -1, token: '', needFull: false, tokens: 0, refill: 0 });
+          this.slots.push({ slot: slotNo, name: BOT_NAMES[slotNo % BOT_NAMES.length], faction: bf, team: this.freeTeam(), handicap: 100, bot: true, ready: true, ws: null, fleet: undefined, pid: -1, token: '', needFull: false, tokens: 0, refill: 0 });
         }
         if (typeof msg.removeSlot === 'number') this.slots = this.slots.filter((s) => !(s.bot && s.slot === msg.removeSlot));
         if (msg.botFaction) {
           const b = this.slots.find((s) => s.bot && s.slot === msg.botFaction!.slot);
           if (b && FACTIONS.includes(msg.botFaction.faction)) b.faction = msg.botFaction.faction;
         }
+        if (msg.botTeam) {
+          const b = this.slots.find((s) => s.bot && s.slot === msg.botTeam!.slot);
+          const t = teamNo(msg.botTeam.team);
+          if (b && t !== null) b.team = t;
+        }
+        if (msg.botHandicap) {
+          const b = this.slots.find((s) => s.bot && s.slot === msg.botHandicap!.slot);
+          if (b && HANDICAPS.includes(msg.botHandicap.handicap)) b.handicap = msg.botHandicap.handicap;
+        }
       }
+      // Every commander picks their own team and income handicap.
+      const t = teamNo(msg.team);
+      if (t !== null) slot.team = t;
+      if (typeof msg.handicap === 'number' && HANDICAPS.includes(msg.handicap)) slot.handicap = msg.handicap;
       this.broadcastLobby();
       return;
     }
@@ -219,18 +233,20 @@ export class GameRoom extends DurableObject {
     return {
       code: this.code,
       theme: this.theme,
-      teams: this.teams,
       started: !!this.game,
-      slots: this.slots
-        .slice()
-        .sort((a, b) => a.slot - b.slot)
-        .map((s) => ({ slot: s.slot, name: s.name, faction: s.faction, team: this.teamOf(s), bot: s.bot, ready: s.ready, you: s === forSlot, host: s.host })),
+      slots: this.seats().map((s) => ({ slot: s.slot, name: s.name, faction: s.faction, team: s.team, handicap: s.handicap, bot: s.bot, ready: s.ready, you: s === forSlot, host: s.host })),
     };
   }
 
-  private teamOf(s: Slot): number {
-    if (this.teams === '2v2') return s.slot === 0 || s.slot === 1 ? 0 : 1;
-    return s.slot;
+  /** Seats in display order. */
+  private seats(): Slot[] {
+    return this.slots.slice().sort((a, b) => a.slot - b.slot);
+  }
+
+  /** The lowest team nobody is on yet (a new seat starts on its own). */
+  private freeTeam(): number {
+    const used = new Set(this.slots.map((s) => s.team));
+    return [0, 1, 2, 3].find((t) => !used.has(t)) ?? 0;
   }
 
   private broadcastLobby() {
@@ -253,18 +269,19 @@ export class GameRoom extends DurableObject {
       this.send(host?.ws ?? null, { t: 'error', msg: 'Need at least 2 players. Add a bot.' });
       return;
     }
-    const ordered = this.slots.slice().sort((a, b) => a.slot - b.slot);
-    // 2-player games use opposite corners.
-    if (ordered.length === 2) {
-      ordered[0].slot = 0;
-      ordered[1].slot = 2;
+    const ordered = this.seats();
+    if (new Set(ordered.map((s) => s.team)).size < 2) {
+      const host = this.slots.find((s) => s.host);
+      this.send(host?.ws ?? null, { t: 'error', msg: 'Everyone is on the same team. Put someone on another team.' });
+      return;
     }
     ordered.forEach((s, i) => (s.pid = i));
+    const spawn = spawnCorners(ordered.map((s) => s.team));
     const seed = (Math.random() * 2 ** 31) | 0;
     this.game = new Game(
       seed,
       this.theme,
-      ordered.map((s) => ({ name: s.name, faction: s.faction, team: this.teamOf(s), slot: s.slot, bot: s.bot, fleet: s.fleet })),
+      ordered.map((s, i) => ({ name: s.name, faction: s.faction, team: s.team, slot: spawn[i], bot: s.bot, fleet: s.fleet, handicap: s.handicap })),
     );
     this.bots = ordered.filter((s) => s.bot).map((s) => new Bot(this.game!, s.pid));
     for (const s of ordered) {
@@ -330,4 +347,28 @@ export class GameRoom extends DurableObject {
     this.ensureHost();
     this.broadcastLobby();
   }
+}
+
+/** A team number 0-3 from a client message, or null. */
+function teamNo(v: unknown): number | null {
+  return typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 3 ? v : null;
+}
+
+/**
+ * Home corner for each seat (index into teams). The four corners go round the map, so corners k and
+ * k+1 are neighbours and k and k+2 face each other. Without allies, players spread out (2 players get
+ * opposite corners); with allies, each team gets neighbouring corners, the biggest team first.
+ */
+export function spawnCorners(teams: number[]): number[] {
+  const out: number[] = new Array(teams.length);
+  const groups = new Map<number, number[]>();
+  teams.forEach((t, i) => groups.set(t, [...(groups.get(t) ?? []), i]));
+  if (groups.size === teams.length) {
+    const order = [0, 2, 1, 3];
+    teams.forEach((_, i) => (out[i] = order[i]));
+    return out;
+  }
+  let corner = 0;
+  for (const seats of [...groups.values()].sort((a, b) => b.length - a.length)) for (const i of seats) out[i] = corner++;
+  return out;
 }
