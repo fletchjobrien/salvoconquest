@@ -46,8 +46,8 @@ drawn as pixelated low-poly 3D under a crisp NATO-symbol overlay.
   | Destroyer | 8 | $1,260 | | | | | | |
   | Cruiser / carrier / battleship | 18 | $2,820 / $2,875 / $2,870 | | | | | | |
 
-- **Income** is slow, so every merchant counts: the HQ earns $4.50/s, and a merchant earns $45 plus $9 per km
-  of its trip (about $315 for a 30 km run).
+- **Income** is slow, so every merchant counts: the HQ earns $4.50/s, and a merchant earns $67.50 plus $13.50 per km
+  of its trip (about $470 for a 30 km run).
 
 - **Building:** pick a unit in the build bar, then click the map where it should go (Shift: place several). A ghost
   shows which building will make it (the nearest one that can reach the spot) and stays there until the unit is
