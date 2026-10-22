@@ -82,7 +82,13 @@ export class Audio {
     this.noise = this.makeNoise(2, false);
     this.brown = this.makeNoise(4, true);
     this.applyVolumes();
+    // A match that started before the first click or key press (e.g. rejoined after a page reload)
+    // asked for the ambience and music while audio was still locked: start them now.
+    if (this.ambientWanted) this.startAmbient();
   }
+
+  /** startAmbient() was called; it runs once audio is unlocked. */
+  private ambientWanted = false;
 
   applyVolumes() {
     if (!this.ctx) return;
@@ -456,6 +462,7 @@ export class Audio {
 
   /** Looping ambient beds: ocean, wind and rain, plus a sparse generative pad. */
   startAmbient() {
+    this.ambientWanted = true;
     const ctx = this.ctx;
     if (!ctx || this.ocean) return;
     const bed = (filter: BiquadFilterType, freq: number, q: number, brown: boolean) => {
