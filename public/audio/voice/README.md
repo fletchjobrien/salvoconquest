@@ -1,7 +1,7 @@
 # Voice recordings
 
 Drop audio files here and run `npm run build` (it regenerates `manifest.json`).
-Supported: `.mp3 .ogg .wav .m4a .webm`. Keep each line short (0.5–2 s) and record with a little energy.
+Supported: `.mp3 .ogg .wav .m4a .webm`; prefer `.mp3` (every browser decodes it; `.m4a`/AAC fails in some Chromium builds). Air pilots have their own folders: see the main README, "Pilots". Keep each line short (0.5–2 s) and record with a little energy.
 The game adds the radio band-pass, light distortion and squelch clicks, so record clean audio.
 
 Naming: `<category>/<event>_<n>.<ext>`. Add as many variants as you like (`_1`, `_2`, …); one is picked at random. The number picks the subtitle: `select_2` shows the second `select` line below.

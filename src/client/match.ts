@@ -152,6 +152,7 @@ export class Match {
   frame(dt: number) {
     const w = this.world;
     w.update(dt);
+    this.pilotCallouts();
     // Keyboard panning.
     let px = 0;
     let py = 0;
@@ -256,6 +257,54 @@ export class Match {
     return storm;
   }
 
+  /** Hull of our flights at the last check, when each last called out damage, and every enemy seen so far. */
+  private airHp = new Map<number, number>();
+  private airHurtAt = new Map<number, number>();
+  private seenFoes = new Set<number>();
+  private lastSpotted = -1e9;
+  private calloutAt = 0;
+
+  /**
+   * Pilot callouts, twice a second: a flight that loses hull says so (once per 15 s each), and the
+   * flight nearest a newly seen enemy (within 25 km) reports it (once per 25 s overall).
+   */
+  private pilotCallouts() {
+    const w = this.world;
+    if (w.clock < this.calloutAt) return;
+    this.calloutAt = w.clock + 0.5;
+    const fac = w.myFaction;
+    const flights: UView[] = [];
+    for (const u of w.units.values()) if (u.owner === w.me && UNITS[u.type].domain === 'air' && !(u.flags & (F_ABOARD | F_LANDED))) flights.push(u);
+    const hp = new Map<number, number>();
+    for (const u of flights) {
+      hp.set(u.id, u.hp);
+      const prev = this.airHp.get(u.id);
+      if (prev === undefined || u.hp >= prev - 2 || w.clock - (this.airHurtAt.get(u.id) ?? -1e9) < 15) continue;
+      this.airHurtAt.set(u.id, w.clock);
+      void voices.say(fac, 'air', 'underfire', unitName(fac, u.type, u.id), true, u.id);
+    }
+    this.airHp = hp;
+    const spot = (id: number, x: number, y: number) => {
+      if (this.seenFoes.has(id)) return;
+      this.seenFoes.add(id);
+      if (w.clock - this.lastSpotted < 25) return;
+      let best: UView | null = null;
+      let bd = 25;
+      for (const f of flights) {
+        const d = Math.hypot(f.x - x, f.y - y);
+        if (d < bd) {
+          bd = d;
+          best = f;
+        }
+      }
+      if (!best) return;
+      this.lastSpotted = w.clock;
+      void voices.say(fac, 'air', 'spotted', unitName(fac, best.type, best.id), false, best.id);
+    };
+    for (const u of w.units.values()) if (w.teamOf(u.owner) !== w.myTeam && !(u.flags & F_ABOARD)) spot(u.id, u.x, u.y);
+    for (const [id, c] of w.contacts) spot(id, c.x, c.y);
+  }
+
   private selectedUnits(): UView[] {
     const out: UView[] = [];
     for (const id of this.selected) {
@@ -316,7 +365,7 @@ export class Match {
     const first = this.world.units.get(ids[0]);
     if (first) {
       audio.play('select');
-      void voices.say(this.world.myFaction, this.voiceCat(first.type), 'select', unitName(this.world.myFaction, first.type, first.id));
+      void voices.say(this.world.myFaction, this.voiceCat(first.type), 'select', unitName(this.world.myFaction, first.type, first.id), false, first.id);
     }
   }
 
@@ -407,7 +456,7 @@ export class Match {
           this.send({ c: 'base', ids: air, site: base });
           this.ping(s.x, s.y, 'unload');
           audio.play('order');
-          void voices.say(w.myFaction, 'air', 'rtb', unitName(w.myFaction, w.units.get(air[0])!.type, air[0]));
+          void voices.say(w.myFaction, 'air', 'rtb', unitName(w.myFaction, w.units.get(air[0])!.type, air[0]), false, air[0]);
           const rest = ids.filter((id) => !air.includes(id));
           if (rest.length) this.send({ c: 'move', ids: rest, x, y });
           return;
@@ -419,7 +468,7 @@ export class Match {
           this.send({ c: 'attack', ids, target: t.id });
           this.ping(t.x, t.y, 'attack');
           audio.play('order');
-          void voices.say(w.myFaction, cat, 'attack', who);
+          void voices.say(w.myFaction, cat, 'attack', who, false, first.id);
           return;
         }
         if (t && t.owner === w.me && UNITS[t.type].deck) {
@@ -428,7 +477,7 @@ export class Match {
             this.send({ c: 'board', ids: air, ship: t.id });
             this.ping(t.x, t.y, 'unload');
             audio.play('order');
-            void voices.say(w.myFaction, 'air', 'rtb', unitName(w.myFaction, w.units.get(air[0])!.type, air[0]));
+            void voices.say(w.myFaction, 'air', 'rtb', unitName(w.myFaction, w.units.get(air[0])!.type, air[0]), false, air[0]);
             const rest = ids.filter((id) => !air.includes(id) && id !== t.id);
             if (rest.length) this.send({ c: 'move', ids: rest, x, y });
             return;
@@ -468,7 +517,7 @@ export class Match {
           this.send({ c: 'attack', ids, target: hover.id });
           this.ping(c.x, c.y, 'attack');
           audio.play('order');
-          void voices.say(w.myFaction, cat, 'attack', who);
+          void voices.say(w.myFaction, cat, 'attack', who, false, first.id);
           return;
         }
         if (c) this.hud.log('CIC', 'Unidentified contact: cannot target it yet. Close in or bring an AEW to identify it.', 'warn');
@@ -477,7 +526,7 @@ export class Match {
     this.send({ c: 'move', ids, x, y, mode: forceMove ? 'move' : 'attack' });
     this.ping(x, y, 'move');
     audio.play('order');
-    void voices.say(w.myFaction, cat, 'move', who);
+    void voices.say(w.myFaction, cat, 'move', who, false, first.id);
   }
 
   /** Unload mode for every selected ship that carries troops (picked troops only, if any are picked). */
@@ -610,7 +659,7 @@ export class Match {
         break;
       case 'rtb':
         this.send({ c: 'rtb', ids });
-        void voices.say(w.myFaction, 'air', 'rtb', 'FLIGHT');
+        void voices.say(w.myFaction, 'air', 'rtb', 'FLIGHT', false, ids.find((id) => UNITS[w.units.get(id)?.type ?? 'merchant'].domain === 'air'));
         break;
       case 'retreat': {
         const on = !ids.every((id) => ((w.details.get(id)?.[7] ?? 1) & 1) === 1);
@@ -638,7 +687,7 @@ export class Match {
         audio.play('built');
         const nu = w.units.get(e.id);
         if (nu) this.overlay.shock(nu.x, nu.y, 0, UNITS[type].domain === 'air' ? 0.6 : 0.9, '#6fd0ff', 0.9);
-        void voices.say(fac, this.voiceCat(type), 'ready', unitName(fac, type, e.id), true);
+        void voices.say(fac, this.voiceCat(type), 'ready', unitName(fac, type, e.id), true, e.id);
         break;
       }
       case 'kill': {
@@ -651,7 +700,7 @@ export class Match {
         if (e.o === w.me) {
           if (type !== 'lander') {
             this.hud.log(unitName(fac, type, e.id), type === 'merchant' ? 'Merchant sunk!' : 'Unit lost.', 'bad');
-            if (type !== 'merchant') void voices.say(fac, this.voiceCat(type), 'lost', unitName(fac, type, e.id), true);
+            if (type !== 'merchant') void voices.say(fac, this.voiceCat(type), 'lost', unitName(fac, type, e.id), true, e.id);
             this.lastAlert = { x: e.x, y: e.y };
           }
         } else if (w.teamOf(e.o) !== w.myTeam && type !== 'lander') {

@@ -291,6 +291,20 @@ Categories: `naval`, `ground`, `air`. Events and suggested lines are listed in
 [`public/audio/voice/README.md`](public/audio/voice/README.md). `npm run build` generates `manifest.json`.
 Lines without recordings appear as subtitles in the radio log.
 
+**Pilots.** Each air flight gets one of four pilots, picked from its unit id (random per flight, never changes, the
+same for every player): Dallas, Eagle 1, Leftwing or Spitball. The pilot's callsign shows in the flight's panel and
+signs its radio lines. Each pilot has five recordings in `public/audio/voice/air/pilots/<pilot>/`:
+
+| file | plays when |
+| --- | --- |
+| `reporting` | the flight is built or selected |
+| `affirmative` | the flight gets an order (move, attack, RTB, base) |
+| `spotted` | a new enemy appears within 25 km of the flight (at most every 25 s) |
+| `damage` | the flight loses hull (at most every 15 s per flight) |
+| `death` | the flight is shot down |
+
+Use MP3 for new recordings: every browser decodes it. AAC (`.m4a`) fails in some Chromium builds.
+
 ## Development
 
 ```bash

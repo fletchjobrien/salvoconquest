@@ -6,6 +6,7 @@ import { FACTION_STYLE, SIDE, playerColor, unitName } from '../theme';
 import { SymDomain, glyphFor, symbolDataUrl, SITE_GLYPH } from '../render/symbols';
 import { fleetLoadout, getMatchFleet, unitLoadout } from '../loadouts';
 import { audio } from '../audio/sfx';
+import { pilotOf } from '../audio/voice';
 
 type Cat = 'naval' | 'ground' | 'air';
 
@@ -464,7 +465,7 @@ export class Hud {
       bombard: 'BOMBARDING',
     };
     const kills = d?.[15] ?? 0;
-    let html = `<div class="sp-head"><img src="${symbolDataUrl('own', def.domain as SymDomain, glyphFor(u.type), 13)}"><div><div class="nm">${esc(unitName(fac, u.type, u.id))}</div><div class="ty">${def.names[fac]}${variant && !def.names[fac].includes(variant.name) ? ` · ${variant.name}` : ''}</div></div><div class="kc${kills ? '' : ' z'}" title="Enemy units destroyed">${kills}<span>KILLS</span></div></div>`;
+    let html = `<div class="sp-head"><img src="${symbolDataUrl('own', def.domain as SymDomain, glyphFor(u.type), 13)}"><div><div class="nm">${esc(unitName(fac, u.type, u.id))}</div><div class="ty">${def.names[fac]}${variant && !def.names[fac].includes(variant.name) ? ` · ${variant.name}` : ''}${def.domain === 'air' ? ` · PILOT ${pilotOf(u.id).name}` : ''}</div></div><div class="kc${kills ? '' : ' z'}" title="Enemy units destroyed">${kills}<span>KILLS</span></div></div>`;
     const portFlags = d ? d[7] : 0;
     const where = def.domain === 'land' ? 'AT BASE' : 'IN PORT';
     const port = portFlags & 8 ? ` · <span style="color:var(--bad)">${where} · IN COMBAT, REPAIRS HELD</span>` : portFlags & 4 ? ` · <span style="color:var(--good)">${where} · REPAIRING &amp; REARMING</span>` : '';

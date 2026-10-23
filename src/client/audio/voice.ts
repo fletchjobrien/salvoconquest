@@ -1,11 +1,43 @@
 // Unit voice lines. Drop recordings into public/audio/voice/<category>/<event>_<n>.mp3 and rebuild.
 // Faction-specific overrides: public/audio/voice/<faction>/<category>/<event>_<n>.mp3
+// Aircraft have pilots: every flight gets one of the recorded characters (public/audio/voice/air/pilots/<pilot>/
+// <action>.m4a), chosen from its unit id, so a flight always speaks with the same voice.
 // Every line is passed through a radio filter (band-pass + light drive) with squelch clicks.
 import { audio } from './sfx';
 import type { Faction } from '../../shared/defs';
 
 export type VoiceCat = 'naval' | 'ground' | 'air';
-export type VoiceEvent = 'select' | 'move' | 'attack' | 'ready' | 'lost' | 'retreat' | 'board' | 'unload' | 'capture' | 'vampire' | 'rtb' | 'underfire';
+export type VoiceEvent = 'select' | 'move' | 'attack' | 'ready' | 'lost' | 'retreat' | 'board' | 'unload' | 'capture' | 'vampire' | 'rtb' | 'underfire' | 'spotted';
+
+/** Recorded pilot characters (folder name and callsign). */
+export const PILOTS = [
+  { id: 'dallas', name: 'DALLAS' },
+  { id: 'eagle1', name: 'EAGLE 1' },
+  { id: 'leftwing', name: 'LEFTWING' },
+  { id: 'spitball', name: 'SPITBALL' },
+] as const;
+
+/** The pilot of a flight: picked from its unit id (well mixed), so it is random per flight but never changes. */
+export function pilotOf(unitId: number): (typeof PILOTS)[number] {
+  let h = Math.imul(unitId ^ 0x9e3779b9, 0x85ebca6b);
+  h ^= h >>> 13;
+  h = Math.imul(h, 0xc2b2ae35);
+  h ^= h >>> 16;
+  return PILOTS[(h >>> 0) % PILOTS.length];
+}
+
+/** Which pilot recording answers which event, and its subtitle. */
+const PILOT_ACTION: Partial<Record<VoiceEvent, 'reporting' | 'affirmative' | 'spotted' | 'damage' | 'death'>> = {
+  select: 'reporting',
+  ready: 'reporting',
+  move: 'affirmative',
+  attack: 'affirmative',
+  rtb: 'affirmative',
+  spotted: 'spotted',
+  underfire: 'damage',
+  lost: 'death',
+};
+const PILOT_TEXT = { reporting: 'Reporting in.', affirmative: 'Affirmative.', spotted: 'Enemy spotted!', damage: 'Taking damage!', death: "I'm going down!" };
 
 /** Subtitles, and the script for whoever records the voices. */
 export const LINES: Record<VoiceCat, Partial<Record<VoiceEvent, string[]>>> = {
@@ -37,6 +69,8 @@ export const LINES: Record<VoiceCat, Partial<Record<VoiceEvent, string[]>>> = {
     ready: ['Wheels up.', 'Flight airborne.'],
     lost: ["I'm hit — ejecting!", 'Flight lost.'],
     rtb: ['Winchester, RTB.', 'Bingo fuel, heading home.'],
+    spotted: ['Enemy spotted!'],
+    underfire: ['Taking damage!'],
   },
 };
 
@@ -73,17 +107,30 @@ class VoiceBank {
     return p;
   }
 
-  /** Play a line. `priority` lines interrupt the cooldown. */
-  async say(faction: Faction, cat: VoiceCat, ev: VoiceEvent, who: string, priority = false) {
+  /**
+   * Play a line. `priority` lines interrupt the cooldown. For aircraft, pass the flight's unit id:
+   * its pilot speaks (and signs the subtitle) when that pilot has a recording for the event.
+   */
+  async say(faction: Faction, cat: VoiceCat, ev: VoiceEvent, who: string, priority = false, unitId?: number) {
     const ctx = audio.ctx;
     const now = performance.now();
     if (!priority && now < this.busyUntil) return;
     const lines = LINES[cat][ev];
-    const files = this.files(faction, cat, ev);
+    let files = this.files(faction, cat, ev);
     const idx = Math.floor(Math.random() * Math.max(files.length, lines?.length ?? 1));
     // A recording's number names its line (select_2 is the second select line), so the subtitle matches.
     const num = files.length ? Number(/_(\d+)\.\w+$/.exec(files[idx % files.length])?.[1]) : NaN;
-    const text = lines?.[num >= 1 && num <= lines.length ? num - 1 : idx % (lines?.length || 1)] ?? '';
+    let text = lines?.[num >= 1 && num <= lines.length ? num - 1 : idx % (lines?.length || 1)] ?? '';
+    const action = cat === 'air' && unitId !== undefined ? PILOT_ACTION[ev] : undefined;
+    if (action) {
+      const pilot = pilotOf(unitId!);
+      const own = this.manifest[`air/pilots/${pilot.id}/${action}`] ?? [];
+      if (own.length) {
+        files = own;
+        text = PILOT_TEXT[action];
+        who = pilot.name;
+      }
+    }
     if (text) this.onSubtitle(cat, text, who);
     this.busyUntil = now + 1400;
     if (!ctx) return;
